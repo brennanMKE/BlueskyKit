@@ -30,7 +30,7 @@ let package = Package(
         // (KeychainAccountStore, SwiftDataCacheStore) and @Model classes that must be usable
         // from non-MainActor contexts.
         .target(name: "BlueskyDataStore", dependencies: ["BlueskyKit", "BlueskyCore"]),
-        .target(name: "BlueskyUI", swiftSettings: swiftSettings),
+        .target(name: "BlueskyUI", dependencies: ["BlueskyCore"], swiftSettings: swiftSettings),
         // BlueskyNetworking is a pure I/O module. No actor isolation — ATProtoClient is a custom actor,
         // and its private Decodable helpers must be nonisolated.
         .target(name: "BlueskyNetworking", dependencies: ["BlueskyKit", "BlueskyCore"]),
