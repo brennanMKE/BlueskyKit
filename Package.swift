@@ -26,14 +26,17 @@ let package = Package(
         // decodable from any context (e.g. background networking tasks).
         .target(name: "BlueskyCore"),
         .target(name: "BlueskyAuth", dependencies: ["BlueskyKit", "BlueskyCore"], swiftSettings: swiftSettings),
-        .target(name: "BlueskyDataStore", dependencies: ["BlueskyKit", "BlueskyCore"], swiftSettings: swiftSettings),
+        // BlueskyDataStore is an I/O module. No defaultIsolation — it contains custom actors
+        // (KeychainAccountStore, SwiftDataCacheStore) and @Model classes that must be usable
+        // from non-MainActor contexts.
+        .target(name: "BlueskyDataStore", dependencies: ["BlueskyKit", "BlueskyCore"]),
         .target(name: "BlueskyUI", swiftSettings: swiftSettings),
         // BlueskyNetworking is a pure I/O module. No actor isolation — ATProtoClient is a custom actor,
         // and its private Decodable helpers must be nonisolated.
         .target(name: "BlueskyNetworking", dependencies: ["BlueskyKit", "BlueskyCore"]),
         .testTarget(
             name: "BlueskyKitTests",
-            dependencies: ["BlueskyKit", "BlueskyCore"]
+            dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyDataStore"]
         ),
     ],
     swiftLanguageModes: [.v6]

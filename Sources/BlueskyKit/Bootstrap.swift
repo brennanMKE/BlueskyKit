@@ -11,7 +11,8 @@ import BlueskyCore
 ///         session: LiveSessionManager(...),
 ///         accounts: KeychainAccountStore(),
 ///         preferences: UserDefaultsPreferencesStore(),
-///         network: XRPCNetworkClient(pds: URL(string: "https://bsky.social")!)
+///         network: ATProtoClient(...),
+///         cache: SwiftDataCacheStore(appGroupIdentifier: "group.app.bsky")
 ///     )
 ///
 ///     var body: some Scene {
@@ -25,16 +26,19 @@ public final class BlueskyEnvironment {
     public let accounts: any AccountStore
     public let preferences: any PreferencesStore
     public let network: any NetworkClient
+    public let cache: any CacheStore
 
     public init(
         session: any SessionManaging,
         accounts: any AccountStore,
         preferences: any PreferencesStore,
-        network: any NetworkClient
+        network: any NetworkClient,
+        cache: any CacheStore
     ) {
         self.session = session
         self.accounts = accounts
         self.preferences = preferences
         self.network = network
+        self.cache = cache
     }
 }

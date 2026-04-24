@@ -60,6 +60,23 @@ private final class MockNetworkClient: NetworkClient, @unchecked Sendable {
     }
 }
 
+private final class MockCacheStore: CacheStore, @unchecked Sendable {
+    private var store: [String: (data: Data, expiresAt: Date?)] = [:]
+
+    func store<T: Codable & Sendable>(_ value: T, for key: String, ttl: TimeInterval?) async throws {
+        let data = try JSONEncoder().encode(value)
+        store[key] = (data, ttl.map { Date(timeIntervalSinceNow: $0) })
+    }
+    func fetch<T: Codable & Sendable>(_ type: T.Type, for key: String) async throws -> CacheResult<T>? {
+        guard let entry = store[key] else { return nil }
+        let value = try JSONDecoder().decode(T.self, from: entry.data)
+        let isExpired = entry.expiresAt.map { $0 < .now } ?? false
+        return CacheResult(value: value, isExpired: isExpired)
+    }
+    func evict(for key: String) async throws { store[key] = nil }
+    func evictAll() async throws { store.removeAll() }
+}
+
 // MARK: - BlueskyEnvironment tests
 
 @MainActor
@@ -71,7 +88,8 @@ struct BlueskyEnvironmentTests {
             session: MockSessionManager(),
             accounts: MockAccountStore(),
             preferences: MockPreferencesStore(),
-            network: MockNetworkClient()
+            network: MockNetworkClient(),
+            cache: MockCacheStore()
         )
         #expect(env.session.currentAccount == nil)
         #expect(env.session.accounts.isEmpty)
