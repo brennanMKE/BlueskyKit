@@ -82,6 +82,39 @@ public struct EmptyResponse: Decodable, Sendable {
     public init(from decoder: any Decoder) throws {}
 }
 
+// MARK: - Put record (com.atproto.repo.putRecord)
+
+public struct PutRecordRequest<T: Encodable & Sendable>: Encodable, Sendable {
+    public let repo: String
+    public let collection: String
+    public let rkey: String
+    public let record: T
+
+    public init(repo: String, collection: String, rkey: String, record: T) {
+        self.repo = repo
+        self.collection = collection
+        self.rkey = rkey
+        self.record = record
+    }
+}
+
+// MARK: - Profile record (app.bsky.actor.profile)
+
+public struct ProfileRecord: Encodable, Sendable {
+    private let type: String = "app.bsky.actor.profile"
+    public let displayName: String?
+    public let description: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "$type", displayName, description
+    }
+
+    public init(displayName: String?, description: String?) {
+        self.displayName = displayName
+        self.description = description
+    }
+}
+
 // MARK: - Like record (app.bsky.feed.like)
 
 public struct LikeRecord: Encodable, Sendable {

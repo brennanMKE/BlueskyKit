@@ -1,5 +1,47 @@
 import Foundation
 
+// MARK: - Follow record (app.bsky.graph.follow)
+
+public struct FollowRecord: Encodable, Sendable {
+    private let type: String = "app.bsky.graph.follow"
+    public let subject: String
+    public let createdAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "$type", subject, createdAt
+    }
+
+    public init(subject: DID, createdAt: Date = .now) {
+        self.subject = subject.rawValue
+        self.createdAt = createdAt
+    }
+}
+
+// MARK: - Block record (app.bsky.graph.block)
+
+public struct BlockRecord: Encodable, Sendable {
+    private let type: String = "app.bsky.graph.block"
+    public let subject: String
+    public let createdAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "$type", subject, createdAt
+    }
+
+    public init(subject: DID, createdAt: Date = .now) {
+        self.subject = subject.rawValue
+        self.createdAt = createdAt
+    }
+}
+
+// MARK: - Mute / unmute (app.bsky.graph.muteActor / unmuteActor)
+
+public struct MuteActorRequest: Encodable, Sendable {
+    public let actor: String
+
+    public init(actor: DID) { self.actor = actor.rawValue }
+}
+
 // MARK: - app.bsky.graph.getFollowers / getFollows
 
 public struct GetFollowersResponse: Codable, Sendable {

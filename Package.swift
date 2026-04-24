@@ -18,6 +18,7 @@ let package = Package(
         .library(name: "BlueskyUI", targets: ["BlueskyUI"]),
         .library(name: "BlueskyNetworking", targets: ["BlueskyNetworking"]),
         .library(name: "BlueskyFeed", targets: ["BlueskyFeed"]),
+        .library(name: "BlueskyProfile", targets: ["BlueskyProfile"]),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -36,6 +37,7 @@ let package = Package(
         // and its private Decodable helpers must be nonisolated.
         .target(name: "BlueskyNetworking", dependencies: ["BlueskyKit", "BlueskyCore"]),
         .target(name: "BlueskyFeed", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
+        .target(name: "BlueskyProfile", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
         .testTarget(
             name: "BlueskyKitTests",
             dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyDataStore"]
