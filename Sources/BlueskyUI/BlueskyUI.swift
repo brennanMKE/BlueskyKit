@@ -1,1 +1,3 @@
 // BlueskyUI
+
+public struct BlueskyUI {}

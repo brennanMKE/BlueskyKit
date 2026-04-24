@@ -5,8 +5,9 @@ setup_library() {
     local SOURCE_FILE=Sources/"$LIB_NAME/$LIB_NAME.swift"
 
     mkdir -p Sources/"$LIB_NAME"
+    # rm "$SOURCE_FILE"
     if [ ! -e "$SOURCE_FILE" ]; then
-        echo "// $LIB_NAME" > $SOURCE_FILE
+        echo "// $LIB_NAME\n\npublic struct $LIB_NAME {}" > "$SOURCE_FILE"
     fi
 }
 

@@ -1,1 +1,3 @@
 // BlueskyKit
+
+public struct BlueskyKit {}

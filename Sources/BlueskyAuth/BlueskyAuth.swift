@@ -1,1 +1,3 @@
 // BlueskyAuth
+
+public struct BlueskyAuth {}

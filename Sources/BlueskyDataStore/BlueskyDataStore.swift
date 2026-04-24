@@ -1,1 +1,3 @@
 // BlueskyDataStore
+
+public struct BlueskyDataStore {}
