@@ -66,6 +66,12 @@ public struct UpdateSeenRequest: Encodable, Sendable {
     }
 }
 
+// MARK: - app.bsky.notification.getUnreadCount
+
+public struct GetUnreadCountResponse: Decodable, Sendable {
+    public let count: Int
+}
+
 // MARK: - app.bsky.notification.registerPush
 
 public struct RegisterPushRequest: Encodable, Sendable {
