@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "BlueskyAuth", targets: ["BlueskyAuth"]),
         .library(name: "BlueskyDataStore", targets: ["BlueskyDataStore"]),
         .library(name: "BlueskyUI", targets: ["BlueskyUI"]),
+        .library(name: "BlueskyNetworking", targets: ["BlueskyNetworking"]),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -27,6 +28,9 @@ let package = Package(
         .target(name: "BlueskyAuth", dependencies: ["BlueskyKit", "BlueskyCore"], swiftSettings: swiftSettings),
         .target(name: "BlueskyDataStore", dependencies: ["BlueskyKit", "BlueskyCore"], swiftSettings: swiftSettings),
         .target(name: "BlueskyUI", swiftSettings: swiftSettings),
+        // BlueskyNetworking is a pure I/O module. No actor isolation — ATProtoClient is a custom actor,
+        // and its private Decodable helpers must be nonisolated.
+        .target(name: "BlueskyNetworking", dependencies: ["BlueskyKit", "BlueskyCore"]),
         .testTarget(
             name: "BlueskyKitTests",
             dependencies: ["BlueskyKit", "BlueskyCore"]
