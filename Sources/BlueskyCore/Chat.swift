@@ -108,3 +108,23 @@ public struct SendMessageRequest: Encodable, Sendable {
         self.message = message
     }
 }
+
+// MARK: - chat.bsky.convo.leaveConvo / muteConvo / unmuteConvo / updateRead
+
+public struct ConvoIDRequest: Encodable, Sendable {
+    public let convoId: String
+    public init(convoId: String) { self.convoId = convoId }
+}
+
+public struct ConvoResponse: Decodable, Sendable {
+    public let convo: ConvoView
+}
+
+public struct UpdateReadRequest: Encodable, Sendable {
+    public let convoId: String
+    public let messageId: String?
+    public init(convoId: String, messageId: String? = nil) {
+        self.convoId = convoId
+        self.messageId = messageId
+    }
+}
