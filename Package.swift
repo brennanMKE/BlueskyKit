@@ -19,6 +19,7 @@ let package = Package(
         .library(name: "BlueskyNetworking", targets: ["BlueskyNetworking"]),
         .library(name: "BlueskyFeed", targets: ["BlueskyFeed"]),
         .library(name: "BlueskyProfile", targets: ["BlueskyProfile"]),
+        .library(name: "BlueskySearch", targets: ["BlueskySearch"]),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -38,6 +39,7 @@ let package = Package(
         .target(name: "BlueskyNetworking", dependencies: ["BlueskyKit", "BlueskyCore"]),
         .target(name: "BlueskyFeed", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
         .target(name: "BlueskyProfile", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
+        .target(name: "BlueskySearch", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
         .testTarget(
             name: "BlueskyKitTests",
             dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyDataStore"]
