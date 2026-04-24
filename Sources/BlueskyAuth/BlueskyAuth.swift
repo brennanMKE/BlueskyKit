@@ -1,3 +1,0 @@
-// BlueskyAuth
-
-public struct BlueskyAuth {}

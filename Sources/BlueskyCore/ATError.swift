@@ -10,6 +10,8 @@ public enum ATError: Error, Sendable {
     case unauthenticated
     /// The access token has expired and could not be refreshed.
     case sessionExpired
+    /// The server requires a TOTP factor token before completing login.
+    case authFactorTokenRequired
     /// The server returned an XRPC error envelope (`error` + `message`).
     case xrpc(code: String, message: String)
     /// Response payload could not be decoded.

@@ -24,8 +24,8 @@ let package = Package(
         // BlueskyCore is a pure data-model module. No actor isolation — types must be
         // decodable from any context (e.g. background networking tasks).
         .target(name: "BlueskyCore"),
-        .target(name: "BlueskyAuth", swiftSettings: swiftSettings),
-        .target(name: "BlueskyDataStore", swiftSettings: swiftSettings),
+        .target(name: "BlueskyAuth", dependencies: ["BlueskyKit", "BlueskyCore"], swiftSettings: swiftSettings),
+        .target(name: "BlueskyDataStore", dependencies: ["BlueskyKit", "BlueskyCore"], swiftSettings: swiftSettings),
         .target(name: "BlueskyUI", swiftSettings: swiftSettings),
         .testTarget(
             name: "BlueskyKitTests",

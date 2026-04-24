@@ -10,7 +10,7 @@ public protocol NetworkClient: AnyObject, Sendable {
     /// - Parameters:
     ///   - lexicon: The lexicon NSID, e.g. `"app.bsky.feed.getTimeline"`.
     ///   - params: URL query parameters (strings only; the client encodes them).
-    func get<Response: Decodable & Sendable>(
+    nonisolated func get<Response: Decodable & Sendable>(
         lexicon: String,
         params: [String: String]
     ) async throws -> Response
@@ -20,7 +20,7 @@ public protocol NetworkClient: AnyObject, Sendable {
     /// - Parameters:
     ///   - lexicon: The lexicon NSID, e.g. `"com.atproto.server.createSession"`.
     ///   - body: JSON-encodable request body.
-    func post<Body: Encodable & Sendable, Response: Decodable & Sendable>(
+    nonisolated func post<Body: Encodable & Sendable, Response: Decodable & Sendable>(
         lexicon: String,
         body: Body
     ) async throws -> Response

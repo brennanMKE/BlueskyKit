@@ -4,8 +4,8 @@ import Foundation
 import BlueskyCore
 
 // MARK: - Mock implementations
-// These conform to @MainActor-isolated protocols, so they must also be @MainActor.
 
+// SessionManaging is @MainActor (manages UI-visible session state).
 @MainActor
 private final class MockSessionManager: SessionManaging {
     var currentAccount: Account? = nil
@@ -20,8 +20,11 @@ private final class MockSessionManager: SessionManaging {
     func removeAccount(did: DID) async throws {}
 }
 
-@MainActor
-private final class MockAccountStore: AccountStore {
+// AccountStore, PreferencesStore, NetworkClient have nonisolated requirements.
+// In the test target (no defaultIsolation), class methods are nonisolated by default.
+// @unchecked Sendable is appropriate for single-threaded test use.
+
+private final class MockAccountStore: AccountStore, @unchecked Sendable {
     private var store: [String: StoredAccount] = [:]
     private var currentDID: DID?
 
@@ -33,8 +36,7 @@ private final class MockAccountStore: AccountStore {
     func loadCurrentDID() async throws -> DID? { currentDID }
 }
 
-@MainActor
-private final class MockPreferencesStore: PreferencesStore {
+private final class MockPreferencesStore: PreferencesStore, @unchecked Sendable {
     private var store: [String: Data] = [:]
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -49,8 +51,7 @@ private final class MockPreferencesStore: PreferencesStore {
     func remove(for key: String) { store[key] = nil }
 }
 
-@MainActor
-private final class MockNetworkClient: NetworkClient {
+private final class MockNetworkClient: NetworkClient, @unchecked Sendable {
     func get<Response: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> Response {
         throw ATError.unknown("MockNetworkClient: no fixture for \(lexicon)")
     }
@@ -78,7 +79,6 @@ struct BlueskyEnvironmentTests {
 }
 
 // MARK: - BlueskyCore Codable tests
-// BlueskyCore has no actor isolation, so these run in a non-isolated context.
 
 @Suite("BlueskyCore Codable")
 struct CoreCodableTests {
@@ -128,7 +128,6 @@ struct CoreCodableTests {
 
 // MARK: - MockPreferencesStore unit tests
 
-@MainActor
 @Suite("MockPreferencesStore")
 struct PreferencesStoreTests {
     @Test("stores and retrieves a value")
@@ -141,8 +140,7 @@ struct PreferencesStoreTests {
 
     @Test("returns nil for missing key")
     func missingKey() throws {
-        let store = MockPreferencesStore()
-        #expect(try store.get(String.self, for: "missing") == nil)
+        #expect(try MockPreferencesStore().get(String.self, for: "missing") == nil)
     }
 
     @Test("remove clears a key")

@@ -2,8 +2,10 @@ import BlueskyCore
 
 /// Contract for managing authenticated Bluesky sessions.
 ///
-/// `BlueskyAuth` provides the production implementation. Tests inject a mock.
-/// All requirements run on the `@MainActor` (inherited from the module default).
+/// `BlueskyAuth` provides the production implementation as a `@MainActor @Observable` class.
+/// Session state (`currentAccount`, `accounts`) is UI state and lives on the main actor.
+/// Async methods like `login` are also `@MainActor`; they dispatch network work internally
+/// via `Task` or by `await`-ing a `nonisolated` `NetworkClient`.
 public protocol SessionManaging: AnyObject, Sendable {
     /// The currently active account, or `nil` if no session is open.
     var currentAccount: Account? { get }

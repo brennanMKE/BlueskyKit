@@ -1,3 +1,0 @@
-// BlueskyDataStore
-
-public struct BlueskyDataStore {}
