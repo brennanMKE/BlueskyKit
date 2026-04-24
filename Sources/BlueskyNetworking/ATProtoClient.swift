@@ -12,7 +12,11 @@ public actor ATProtoClient: NetworkClient {
     private let accountStore: any AccountStore
     private let session: URLSession
 
-    private let encoder = JSONEncoder()
+    private let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        return e
+    }()
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601

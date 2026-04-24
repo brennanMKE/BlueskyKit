@@ -1,4 +1,5 @@
 import BlueskyCore
+import Observation
 
 /// The application's dependency container.
 ///
@@ -21,6 +22,7 @@ import BlueskyCore
 /// }
 /// ```
 @MainActor
+@Observable
 public final class BlueskyEnvironment {
     public let session: any SessionManaging
     public let accounts: any AccountStore
