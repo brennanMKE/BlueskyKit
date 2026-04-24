@@ -1,6 +1,16 @@
 # BlueskyKit
 
-A modular Swift package for building a native Bluesky client with SwiftUI.
+A modular Swift package for building a native Bluesky client with SwiftUI. BlueskyKit contains the bulk of the application logic and is consumed by the Mac app Xcode project, which will later be extended to also run on iOS and iPadOS.
+
+## Migration Docs
+
+This package is part of a React Native → SwiftUI migration. Planning documents live in [`../Bluesky-Migration/`](../Bluesky-Migration/):
+
+| Document | Description |
+|---|---|
+| [`Migrate-ReactNative-to-SwiftUI.md`](../Bluesky-Migration/Migrate-ReactNative-to-SwiftUI.md) | Migration goals, approach, and module-by-module checklist |
+| [`ModularArchitecture.md`](../Bluesky-Migration/ModularArchitecture.md) | Architecture principles and module API design guidelines |
+| [`ProjectStructure.md`](../Bluesky-Migration/ProjectStructure.md) | Overview of the sibling repositories and how they fit together |
 
 ## Architecture
 

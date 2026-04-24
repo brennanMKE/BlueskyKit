@@ -1,3 +1,0 @@
-// BlueskyKit
-
-public struct BlueskyKit {}

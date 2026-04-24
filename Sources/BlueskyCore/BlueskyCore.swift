@@ -1,3 +1,0 @@
-// BlueskyCore
-
-public struct BlueskyCore {}

@@ -20,14 +20,16 @@ let package = Package(
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
-        .target(name: "BlueskyKit", swiftSettings: swiftSettings),
-        .target(name: "BlueskyCore", swiftSettings: swiftSettings),
+        .target(name: "BlueskyKit", dependencies: ["BlueskyCore"], swiftSettings: swiftSettings),
+        // BlueskyCore is a pure data-model module. No actor isolation — types must be
+        // decodable from any context (e.g. background networking tasks).
+        .target(name: "BlueskyCore"),
         .target(name: "BlueskyAuth", swiftSettings: swiftSettings),
         .target(name: "BlueskyDataStore", swiftSettings: swiftSettings),
         .target(name: "BlueskyUI", swiftSettings: swiftSettings),
         .testTarget(
             name: "BlueskyKitTests",
-            dependencies: ["BlueskyKit"]
+            dependencies: ["BlueskyKit", "BlueskyCore"]
         ),
     ],
     swiftLanguageModes: [.v6]
