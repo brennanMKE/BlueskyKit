@@ -44,6 +44,14 @@ public actor ATProtoClient: NetworkClient {
         try await performPost(lexicon: lexicon, body: body)
     }
 
+    nonisolated public func upload<Response: Decodable & Sendable>(
+        lexicon: String,
+        data: Data,
+        mimeType: String
+    ) async throws -> Response {
+        try await performUpload(lexicon: lexicon, data: data, mimeType: mimeType)
+    }
+
     // MARK: - Actor-isolated implementations
 
     private func performGet<Response: Decodable & Sendable>(
@@ -62,6 +70,25 @@ public actor ATProtoClient: NetworkClient {
         }
 
         return try decode(Response.self, from: data, response: response)
+    }
+
+    private func performUpload<Response: Decodable & Sendable>(
+        lexicon: String,
+        data: Data,
+        mimeType: String
+    ) async throws -> Response {
+        let stored = try await currentStoredAccount()
+        let request = buildUploadRequest(stored: stored, lexicon: lexicon, data: data, mimeType: mimeType)
+        let (responseData, response) = try await rawSend(request)
+
+        if (response as? HTTPURLResponse)?.statusCode == 401 {
+            let refreshed = try await refreshTokens(stored: stored)
+            let retryRequest = buildUploadRequest(stored: refreshed, lexicon: lexicon, data: data, mimeType: mimeType)
+            let (retryData, retryResponse) = try await rawSend(retryRequest)
+            return try decode(Response.self, from: retryData, response: retryResponse)
+        }
+
+        return try decode(Response.self, from: responseData, response: response)
     }
 
     private func performPost<Body: Encodable & Sendable, Response: Decodable & Sendable>(
@@ -113,6 +140,21 @@ public actor ATProtoClient: NetworkClient {
         req.setValue("Bearer \(stored.accessJwt)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try encoder.encode(body)
+        return req
+    }
+
+    private func buildUploadRequest(
+        stored: StoredAccount,
+        lexicon: String,
+        data: Data,
+        mimeType: String
+    ) -> URLRequest {
+        let url = stored.account.serviceEndpoint.appending(path: "xrpc/\(lexicon)")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(stored.accessJwt)", forHTTPHeaderField: "Authorization")
+        req.setValue(mimeType, forHTTPHeaderField: "Content-Type")
+        req.httpBody = data
         return req
     }
 

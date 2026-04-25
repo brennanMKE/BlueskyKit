@@ -1,3 +1,4 @@
+import Foundation
 import BlueskyCore
 
 /// Contract for making XRPC requests to the AT Protocol PDS.
@@ -23,5 +24,17 @@ public protocol NetworkClient: AnyObject, Sendable {
     nonisolated func post<Body: Encodable & Sendable, Response: Decodable & Sendable>(
         lexicon: String,
         body: Body
+    ) async throws -> Response
+
+    /// Uploads raw bytes (e.g. an image) to an XRPC blob endpoint.
+    ///
+    /// - Parameters:
+    ///   - lexicon: Typically `"com.atproto.repo.uploadBlob"`.
+    ///   - data: Raw binary data to upload.
+    ///   - mimeType: MIME type such as `"image/jpeg"` or `"image/png"`.
+    nonisolated func upload<Response: Decodable & Sendable>(
+        lexicon: String,
+        data: Data,
+        mimeType: String
     ) async throws -> Response
 }

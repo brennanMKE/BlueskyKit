@@ -58,6 +58,9 @@ private final class MockNetworkClient: NetworkClient, @unchecked Sendable {
     func post<Body: Encodable & Sendable, Response: Decodable & Sendable>(lexicon: String, body: Body) async throws -> Response {
         throw ATError.unknown("MockNetworkClient: no fixture for \(lexicon)")
     }
+    func upload<Response: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> Response {
+        throw ATError.unknown("MockNetworkClient: no fixture for \(lexicon)")
+    }
 }
 
 private final class MockCacheStore: CacheStore, @unchecked Sendable {

@@ -235,6 +235,9 @@ private final class PreviewNetworkClient: NetworkClient, @unchecked Sendable {
     nonisolated func post<Body: Encodable & Sendable, Response: Decodable & Sendable>(lexicon: String, body: Body) async throws -> Response {
         throw ATError.unknown("preview")
     }
+    nonisolated func upload<Response: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> Response {
+        throw ATError.unknown("preview")
+    }
 }
 
 #Preview("Login") {
