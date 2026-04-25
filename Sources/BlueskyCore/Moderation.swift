@@ -72,6 +72,118 @@ public struct CreateReportResponse: Codable, Sendable {
     }
 }
 
+// MARK: - app.bsky.graph.getList
+
+public struct GetListResponse: Codable, Sendable {
+    public let list: ListView
+    public let items: [ListItemView]
+    public let cursor: Cursor?
+
+    public init(list: ListView, items: [ListItemView], cursor: Cursor?) {
+        self.list = list
+        self.items = items
+        self.cursor = cursor
+    }
+}
+
+public struct ListItemView: Codable, Sendable {
+    public let uri: ATURI
+    public let subject: ProfileView
+
+    public init(uri: ATURI, subject: ProfileView) {
+        self.uri = uri
+        self.subject = subject
+    }
+}
+
+// MARK: - Mute / unmute actor list
+
+public struct ListMuteRequest: Encodable, Sendable {
+    public let list: String
+    public init(list: ATURI) { self.list = list.rawValue }
+}
+
+// MARK: - Actor preferences (app.bsky.actor.getPreferences / putPreferences)
+
+public struct ContentLabelPref: Sendable {
+    public let label: String
+    public var visibility: String
+    public let labelerDid: DID?
+
+    public init(label: String, visibility: String, labelerDid: DID? = nil) {
+        self.label = label
+        self.visibility = visibility
+        self.labelerDid = labelerDid
+    }
+}
+
+public struct GetPreferencesResponse: Decodable, Sendable {
+    public let adultContentEnabled: Bool
+    public let contentLabels: [ContentLabelPref]
+
+    private enum OuterKeys: String, CodingKey { case preferences }
+
+    public init(from decoder: any Decoder) throws {
+        struct Item: Decodable {
+            let type: String
+            let enabled: Bool?
+            let label: String?
+            let visibility: String?
+            let labelerDid: DID?
+            private enum CodingKeys: String, CodingKey {
+                case type = "$type", enabled, label, visibility, labelerDid
+            }
+        }
+
+        let outer = try decoder.container(keyedBy: OuterKeys.self)
+        let items = try outer.decode([Item].self, forKey: .preferences)
+
+        self.adultContentEnabled = items
+            .first { $0.type == "app.bsky.actor.defs#adultContentPref" }
+            .flatMap { $0.enabled } ?? false
+
+        self.contentLabels = items
+            .filter { $0.type == "app.bsky.actor.defs#contentLabelPref" }
+            .compactMap { item in
+                guard let label = item.label, let vis = item.visibility else { return nil }
+                return ContentLabelPref(label: label, visibility: vis, labelerDid: item.labelerDid)
+            }
+    }
+}
+
+public struct PutPreferencesRequest: Encodable, Sendable {
+    public let preferences: [AnyEncodable]
+
+    public init(adultContentEnabled: Bool, contentLabels: [ContentLabelPref]) {
+        var prefs: [AnyEncodable] = [AnyEncodable(_AdultPref(enabled: adultContentEnabled))]
+        prefs += contentLabels.map { AnyEncodable(_LabelPref($0)) }
+        self.preferences = prefs
+    }
+
+    private struct _AdultPref: Encodable, Sendable {
+        let enabled: Bool
+        private enum K: String, CodingKey { case type = "$type", enabled }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: K.self)
+            try c.encode("app.bsky.actor.defs#adultContentPref", forKey: .type)
+            try c.encode(enabled, forKey: .enabled)
+        }
+    }
+
+    private struct _LabelPref: Encodable, Sendable {
+        let pref: ContentLabelPref
+        private enum K: String, CodingKey { case type = "$type", label, visibility, labelerDid }
+        init(_ pref: ContentLabelPref) { self.pref = pref }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: K.self)
+            try c.encode("app.bsky.actor.defs#contentLabelPref", forKey: .type)
+            try c.encode(pref.label, forKey: .label)
+            try c.encode(pref.visibility, forKey: .visibility)
+            try c.encodeIfPresent(pref.labelerDid, forKey: .labelerDid)
+        }
+    }
+}
+
 // MARK: - app.bsky.labeler.defs#labelerView
 
 /// A labeler service view returned by `app.bsky.labeler.getServices`.
