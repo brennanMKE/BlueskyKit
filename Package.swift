@@ -25,6 +25,7 @@ let package = Package(
         .library(name: "BlueskyComposer", targets: ["BlueskyComposer"]),
         .library(name: "BlueskyModeration", targets: ["BlueskyModeration"]),
         .library(name: "BlueskySettings", targets: ["BlueskySettings"]),
+        .library(name: "BlueskyLists", targets: ["BlueskyLists"]),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -50,6 +51,7 @@ let package = Package(
         .target(name: "BlueskyComposer", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
         .target(name: "BlueskyModeration", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
         .target(name: "BlueskySettings", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
+        .target(name: "BlueskyLists", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
         .testTarget(
             name: "BlueskyKitTests",
             dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyDataStore"]

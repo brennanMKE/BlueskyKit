@@ -37,6 +37,12 @@ public struct SettingsScreen: View {
                     Label("Find Friends", systemImage: "person.2")
                 }
 
+                NavigationLink {
+                    AppPasswordsScreen(network: network)
+                } label: {
+                    Label("App Passwords", systemImage: "key")
+                }
+
                 Button(role: .destructive) {
                     onSignOut()
                 } label: {

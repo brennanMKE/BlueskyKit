@@ -117,21 +117,48 @@ public struct ContentLabelPref: Sendable {
     }
 }
 
+// MARK: - app.bsky.actor.defs#savedFeed
+
+public struct SavedFeed: Codable, Sendable, Identifiable {
+    public let id: String
+    /// `"feed"`, `"list"`, or `"timeline"`.
+    public let type: String
+    /// AT-URI for feed/list, or `"following"` for the timeline.
+    public let value: String
+    public var pinned: Bool
+
+    public init(id: String, type: String, value: String, pinned: Bool) {
+        self.id = id
+        self.type = type
+        self.value = value
+        self.pinned = pinned
+    }
+}
+
 public struct GetPreferencesResponse: Decodable, Sendable {
     public let adultContentEnabled: Bool
     public let contentLabels: [ContentLabelPref]
+    public let savedFeeds: [SavedFeed]
 
     private enum OuterKeys: String, CodingKey { case preferences }
 
     public init(from decoder: any Decoder) throws {
+        struct FeedItemHelper: Decodable {
+            let id: String
+            let type: String
+            let value: String
+            let pinned: Bool
+        }
         struct Item: Decodable {
             let type: String
             let enabled: Bool?
             let label: String?
             let visibility: String?
             let labelerDid: DID?
+            let feedItems: [FeedItemHelper]?
             private enum CodingKeys: String, CodingKey {
                 case type = "$type", enabled, label, visibility, labelerDid
+                case feedItems = "items"
             }
         }
 
@@ -148,6 +175,12 @@ public struct GetPreferencesResponse: Decodable, Sendable {
                 guard let label = item.label, let vis = item.visibility else { return nil }
                 return ContentLabelPref(label: label, visibility: vis, labelerDid: item.labelerDid)
             }
+
+        self.savedFeeds = items
+            .first { $0.type == "app.bsky.actor.defs#savedFeedsPrefV2" }?
+            .feedItems?
+            .map { SavedFeed(id: $0.id, type: $0.type, value: $0.value, pinned: $0.pinned) }
+            ?? []
     }
 }
 
@@ -182,6 +215,26 @@ public struct PutPreferencesRequest: Encodable, Sendable {
             try c.encodeIfPresent(pref.labelerDid, forKey: .labelerDid)
         }
     }
+
+    public init(savedFeeds: [SavedFeed]) {
+        self.preferences = [AnyEncodable(_SavedFeedsPrefV2(items: savedFeeds))]
+    }
+
+    private struct _SavedFeedsPrefV2: Encodable, Sendable {
+        let items: [SavedFeed]
+        private enum K: String, CodingKey { case type = "$type", items }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: K.self)
+            try c.encode("app.bsky.actor.defs#savedFeedsPrefV2", forKey: .type)
+            try c.encode(items, forKey: .items)
+        }
+    }
+}
+
+// MARK: - app.bsky.labeler.getServices response
+
+public struct GetLabelerServicesResponse: Decodable, Sendable {
+    public let views: [LabelerView]
 }
 
 // MARK: - app.bsky.labeler.defs#labelerView
