@@ -62,7 +62,7 @@ public final class SettingsViewModel {
     // MARK: - Dependencies
 
     private let preferences: any PreferencesStore
-    private let accountStore: any AccountStore
+    let accountStore: any AccountStore
 
     public init(preferences: any PreferencesStore, accountStore: any AccountStore) {
         self.preferences = preferences

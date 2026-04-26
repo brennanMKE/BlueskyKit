@@ -31,6 +31,12 @@ public struct SettingsScreen: View {
                     Label("Account", systemImage: "person.circle")
                 }
 
+                NavigationLink {
+                    FindContactsScreen(network: network, accountStore: viewModel.accountStore)
+                } label: {
+                    Label("Find Friends", systemImage: "person.2")
+                }
+
                 Button(role: .destructive) {
                     onSignOut()
                 } label: {
