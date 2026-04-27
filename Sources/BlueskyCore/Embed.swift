@@ -148,7 +148,7 @@ public indirect enum Embed: Codable, Sendable {
             let media = try c.decode(Embed.self, forKey: .media)
             self = .recordWithMedia(record: record, media: media)
         case "app.bsky.embed.video":
-            let video = try c.decode(EmbedVideo.self, forKey: .video)
+            let video = try EmbedVideo(from: decoder)
             self = .video(video)
         default:
             self = .unknown(type)

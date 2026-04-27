@@ -5,12 +5,8 @@ import BlueskyUI
 
 public struct StarterPackScreen: View {
 
-    @State private var starterPack: StarterPackView?
-    @State private var isLoading = false
-    @State private var error: String?
+    @State private var viewModel: StarterPackViewModel
     private let starterPackURI: ATURI
-    private let network: any NetworkClient
-    private let accountStore: any AccountStore
 
     public init(
         starterPackURI: ATURI,
@@ -18,16 +14,15 @@ public struct StarterPackScreen: View {
         accountStore: any AccountStore
     ) {
         self.starterPackURI = starterPackURI
-        self.network = network
-        self.accountStore = accountStore
+        _viewModel = State(initialValue: StarterPackViewModel(network: network, accountStore: accountStore))
     }
 
     public var body: some View {
         List {
-            if let pack = starterPack {
+            if let pack = viewModel.starterPack {
                 packHeaderSection(pack)
                 membersSection(pack)
-            } else if isLoading {
+            } else if viewModel.isLoading {
                 ProgressView()
                     .frame(maxWidth: .infinity)
                     .listRowSeparator(.hidden)
@@ -38,15 +33,15 @@ public struct StarterPackScreen: View {
         #else
         .listStyle(.inset)
         #endif
-        .navigationTitle(starterPack?.list?.name ?? "Starter Pack")
-        .task { await loadStarterPack() }
+        .navigationTitle(viewModel.starterPack?.list?.name ?? "Starter Pack")
+        .task { await viewModel.load(uri: starterPackURI) }
         .alert("Error", isPresented: Binding(
-            get: { error != nil },
-            set: { if !$0 { error = nil } }
+            get: { viewModel.error != nil },
+            set: { if !$0 { viewModel.clearError() } }
         )) {
-            Button("OK") { error = nil }
+            Button("OK") { viewModel.clearError() }
         } message: {
-            Text(error ?? "")
+            Text(viewModel.error ?? "")
         }
     }
 
@@ -87,7 +82,7 @@ public struct StarterPackScreen: View {
             }
 
             Button("Follow All") {
-                Task { await followAll(pack) }
+                Task { await viewModel.followAll(pack: pack) }
             }
             .buttonStyle(.borderedProminent)
             .frame(maxWidth: .infinity)
@@ -121,44 +116,6 @@ public struct StarterPackScreen: View {
             } else {
                 Text("No members")
                     .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    // MARK: - Actions
-
-    private func loadStarterPack() async {
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            let resp: GetStarterPackResponse = try await network.get(
-                lexicon: "app.bsky.graph.getStarterPack",
-                params: ["starterPack": starterPackURI.rawValue]
-            )
-            starterPack = resp.starterPack
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    private func followAll(_ pack: StarterPackView) async {
-        guard let viewerDID = try? await accountStore.loadCurrentDID(),
-              let members = pack.listItemsSample else { return }
-        for item in members {
-            do {
-                let record = FollowRecord(subject: item.subject.did)
-                let req = CreateRecordRequest(
-                    repo: viewerDID.rawValue,
-                    collection: "app.bsky.graph.follow",
-                    record: record
-                )
-                let _: CreateRecordResponse = try await network.post(
-                    lexicon: "com.atproto.repo.createRecord",
-                    body: req
-                )
-            } catch {
-                self.error = error.localizedDescription
-                return
             }
         }
     }

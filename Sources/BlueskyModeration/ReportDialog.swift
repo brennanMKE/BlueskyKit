@@ -8,8 +8,8 @@ public enum ReportSubjectKind: Sendable {
 }
 
 public struct ReportDialog: View {
-    private let network: any NetworkClient
     private let subject: ReportSubjectKind
+    private let onSubmit: (_ reasonType: String, _ reason: String?) async throws -> Void
     private let onDismiss: () -> Void
 
     @State private var selectedReason = "com.atproto.moderation.defs#reasonSpam"
@@ -28,12 +28,12 @@ public struct ReportDialog: View {
     ]
 
     public init(
-        network: any NetworkClient,
         subject: ReportSubjectKind,
+        onSubmit: @escaping (_ reasonType: String, _ reason: String?) async throws -> Void,
         onDismiss: @escaping () -> Void
     ) {
-        self.network = network
         self.subject = subject
+        self.onSubmit = onSubmit
         self.onDismiss = onDismiss
     }
 
@@ -90,28 +90,7 @@ public struct ReportDialog: View {
         errorMessage = nil
         let reason = additionalDetails.isEmpty ? nil : additionalDetails
         do {
-            switch subject {
-            case .account(let did):
-                let req = CreateReportRequest(
-                    reasonType: selectedReason,
-                    reason: reason,
-                    subject: ReportSubjectRepo(did: did)
-                )
-                let _: CreateReportResponse = try await network.post(
-                    lexicon: "com.atproto.moderation.createReport",
-                    body: req
-                )
-            case .record(let uri, let cid):
-                let req = CreateReportRequest(
-                    reasonType: selectedReason,
-                    reason: reason,
-                    subject: ReportSubjectRecord(uri: uri, cid: cid)
-                )
-                let _: CreateReportResponse = try await network.post(
-                    lexicon: "com.atproto.moderation.createReport",
-                    body: req
-                )
-            }
+            try await onSubmit(selectedReason, reason)
             didReport = true
         } catch {
             errorMessage = error.localizedDescription

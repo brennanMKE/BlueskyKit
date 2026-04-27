@@ -6,38 +6,23 @@ import BlueskyKit
 @Observable
 public final class SearchViewModel {
 
-    public enum SearchTab: String, CaseIterable, Identifiable {
-        case people, posts, feeds
-        public var id: String { rawValue }
-        public var title: String {
-            switch self {
-            case .people: "People"
-            case .posts:  "Posts"
-            case .feeds:  "Feeds"
-            }
-        }
-    }
+    public var actors: [ProfileView] { store.actors }
+    public var posts: [PostView] { store.posts }
+    public var suggestedFeeds: [GeneratorView] { store.suggestedFeeds }
+    public var suggestedActors: [ProfileView] { store.suggestedActors }
+    public var actorsCursor: String? { store.actorsCursor }
+    public var postsCursor: String? { store.postsCursor }
+    public var isLoading: Bool { store.isLoading }
+    public var errorMessage: String? { store.errorMessage }
 
     public var query: String = ""
     public var activeTab: SearchTab = .people
 
-    public var actors: [ProfileView] = []
-    public var posts: [PostView] = []
-    public var suggestedFeeds: [GeneratorView] = []
-
-    public var actorsCursor: String?
-    public var postsCursor: String?
-
-    public var suggestedActors: [ProfileView] = []
-
-    public var isLoading = false
-    public var errorMessage: String?
-
-    private let network: any NetworkClient
+    private let store: any SearchStoring
     private var debounceTask: Task<Void, Never>?
 
     public init(network: any NetworkClient) {
-        self.network = network
+        self.store = SearchStore(network: network)
     }
 
     // MARK: - Debounced search trigger
@@ -45,72 +30,27 @@ public final class SearchViewModel {
     public func onQueryChange() {
         debounceTask?.cancel()
         let q = query
+        let tab = activeTab
         debounceTask = Task {
-            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms debounce
+            try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled, !q.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-            await search(fresh: true)
+            await store.search(query: q, tab: tab, fresh: true)
         }
     }
 
-    // MARK: - Search
-
     public func search(fresh: Bool) async {
-        let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return }
-        guard !isLoading else { return }
-        if fresh {
-            actors = []
-            posts = []
-            suggestedFeeds = []
-            actorsCursor = nil
-            postsCursor = nil
-        }
-        isLoading = true
-        defer { isLoading = false }
-        errorMessage = nil
-        do {
-            switch activeTab {
-            case .people:
-                var params: [String: String] = ["q": q, "limit": "25"]
-                if !fresh, let c = actorsCursor { params["cursor"] = c }
-                let resp: SearchActorsResponse = try await network.get(
-                    lexicon: "app.bsky.actor.searchActors", params: params
-                )
-                if fresh { actors = resp.actors } else { actors.append(contentsOf: resp.actors) }
-                actorsCursor = resp.cursor
-            case .posts:
-                var params: [String: String] = ["q": q, "limit": "25"]
-                if !fresh, let c = postsCursor { params["cursor"] = c }
-                let resp: SearchPostsResponse = try await network.get(
-                    lexicon: "app.bsky.feed.searchPosts", params: params
-                )
-                if fresh { posts = resp.posts } else { posts.append(contentsOf: resp.posts) }
-                postsCursor = resp.cursor
-            case .feeds:
-                let params: [String: String] = ["q": q, "limit": "25"]
-                let resp: GetSuggestedFeedsResponse = try await network.get(
-                    lexicon: "app.bsky.feed.getSuggestedFeeds", params: params
-                )
-                suggestedFeeds = resp.feeds
-            }
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await store.search(query: query, tab: activeTab, fresh: fresh)
     }
 
     public func loadMore() async {
-        await search(fresh: false)
+        await store.search(query: query, tab: activeTab, fresh: false)
     }
 
-    // MARK: - Suggestions (shown when query is empty)
-
     public func loadSuggestions() async {
-        guard suggestedActors.isEmpty else { return }
-        do {
-            let resp: GetSuggestionsResponse = try await network.get(
-                lexicon: "app.bsky.actor.getSuggestions", params: ["limit": "20"]
-            )
-            suggestedActors = resp.actors
-        } catch {}
+        await store.loadSuggestions()
+    }
+
+    public func clearResults() {
+        store.clearResults()
     }
 }

@@ -15,174 +15,56 @@ public enum FeedSelection: Hashable, Sendable {
 @Observable
 public final class FeedViewModel {
 
-    public var posts: [FeedViewPost] = []
-    public var isLoading = false
+    public var posts: [FeedViewPost] { store.posts }
+    public var isLoading: Bool { store.isLoading }
     public var isRefreshing = false
-    public var errorMessage: String?
+    public var errorMessage: String? { store.errorMessage }
 
-    private var cursor: String?
-    private var hasMore = true
-
-    private let network: any NetworkClient
-    private let accountStore: any AccountStore
+    private let store: any FeedStoring
     private let selection: FeedSelection
 
     public init(
         network: any NetworkClient,
         accountStore: any AccountStore,
+        cache: any CacheStore,
         selection: FeedSelection = .timeline
     ) {
-        self.network = network
-        self.accountStore = accountStore
+        self.store = FeedStore(network: network, accountStore: accountStore, cache: cache)
         self.selection = selection
     }
 
     // MARK: - Loading
 
     public func loadInitial() async {
-        guard !isLoading, posts.isEmpty else { return }
-        await fetch(reset: false)
+        await store.loadInitial(selection: selection)
     }
 
     public func loadMore() async {
-        guard !isLoading, hasMore else { return }
-        await fetch(reset: false)
+        await store.loadMore(selection: selection)
     }
 
     public func refresh() async {
         isRefreshing = true
         defer { isRefreshing = false }
-        await fetch(reset: true)
-    }
-
-    private func fetch(reset: Bool) async {
-        isLoading = true
-        defer { isLoading = false }
-        if reset { cursor = nil; hasMore = true }
-        errorMessage = nil
-        do {
-            var params: [String: String] = ["limit": "50"]
-            if let cursor { params["cursor"] = cursor }
-            let response: FeedResponse
-            switch selection {
-            case .timeline:
-                response = try await network.get(
-                    lexicon: "app.bsky.feed.getTimeline",
-                    params: params
-                )
-            case .feed(let uri):
-                params["feed"] = uri
-                response = try await network.get(
-                    lexicon: "app.bsky.feed.getFeed",
-                    params: params
-                )
-            }
-            cursor = response.cursor
-            hasMore = response.cursor != nil
-            if reset {
-                posts = response.feed
-            } else {
-                posts.append(contentsOf: response.feed)
-            }
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await store.refresh(selection: selection)
     }
 
     // MARK: - Interactions
 
     public func like(post: PostView) async {
-        guard let did = await loadCurrentDID() else { return }
-        let wasLiked = post.viewer?.like != nil
-        guard !wasLiked else { return }
-        updatePost(uri: post.uri) { $0.withLike(ATURI(rawValue: "pending://like")) }
-        do {
-            let req = CreateRecordRequest(
-                repo: did.rawValue,
-                collection: "app.bsky.feed.like",
-                record: LikeRecord(subject: PostRef(uri: post.uri, cid: post.cid))
-            )
-            let resp: CreateRecordResponse = try await network.post(
-                lexicon: "com.atproto.repo.createRecord",
-                body: req
-            )
-            updatePost(uri: post.uri) { $0.withLike(resp.uri) }
-        } catch {
-            updatePost(uri: post.uri) { $0.withLike(nil) }
-        }
+        await store.like(post: post)
     }
 
     public func unlike(post: PostView) async {
-        guard let likeURI = post.viewer?.like,
-              let did = await loadCurrentDID(),
-              let rkey = likeURI.rkey else { return }
-        updatePost(uri: post.uri) { $0.withLike(nil) }
-        do {
-            let req = DeleteRecordRequest(
-                repo: did.rawValue,
-                collection: "app.bsky.feed.like",
-                rkey: rkey
-            )
-            let _: EmptyResponse = try await network.post(
-                lexicon: "com.atproto.repo.deleteRecord",
-                body: req
-            )
-        } catch {
-            updatePost(uri: post.uri) { $0.withLike(likeURI) }
-        }
+        await store.unlike(post: post)
     }
 
     public func repost(post: PostView) async {
-        guard let did = await loadCurrentDID() else { return }
-        let wasReposted = post.viewer?.repost != nil
-        guard !wasReposted else { return }
-        updatePost(uri: post.uri) { $0.withRepost(ATURI(rawValue: "pending://repost")) }
-        do {
-            let req = CreateRecordRequest(
-                repo: did.rawValue,
-                collection: "app.bsky.feed.repost",
-                record: RepostRecord(subject: PostRef(uri: post.uri, cid: post.cid))
-            )
-            let resp: CreateRecordResponse = try await network.post(
-                lexicon: "com.atproto.repo.createRecord",
-                body: req
-            )
-            updatePost(uri: post.uri) { $0.withRepost(resp.uri) }
-        } catch {
-            updatePost(uri: post.uri) { $0.withRepost(nil) }
-        }
+        await store.repost(post: post)
     }
 
     public func unrepost(post: PostView) async {
-        guard let repostURI = post.viewer?.repost,
-              let did = await loadCurrentDID(),
-              let rkey = repostURI.rkey else { return }
-        updatePost(uri: post.uri) { $0.withRepost(nil) }
-        do {
-            let req = DeleteRecordRequest(
-                repo: did.rawValue,
-                collection: "app.bsky.feed.repost",
-                rkey: rkey
-            )
-            let _: EmptyResponse = try await network.post(
-                lexicon: "com.atproto.repo.deleteRecord",
-                body: req
-            )
-        } catch {
-            updatePost(uri: post.uri) { $0.withRepost(repostURI) }
-        }
-    }
-
-    // MARK: - Helpers
-
-    private func loadCurrentDID() async -> DID? {
-        try? await accountStore.loadCurrentDID()
-    }
-
-    private func updatePost(uri: ATURI, transform: (PostView) -> PostView) {
-        guard let idx = posts.firstIndex(where: { $0.post.uri == uri }) else { return }
-        let old = posts[idx]
-        posts[idx] = FeedViewPost(post: transform(old.post), reply: old.reply, reason: old.reason)
+        await store.unrepost(post: post)
     }
 }
 

@@ -55,7 +55,7 @@ struct AppPasswordsScreen: View {
         }
         .alert("App Password Created", isPresented: Binding(
             get: { viewModel.newPassword != nil },
-            set: { if !$0 { viewModel.newPassword = nil } }
+            set: { if !$0 { viewModel.clearNewPassword() } }
         )) {
             Button("Copy") {
                 if let pw = viewModel.newPassword {
@@ -64,10 +64,10 @@ struct AppPasswordsScreen: View {
                     #else
                     NSPasteboard.general.setString(pw, forType: .string)
                     #endif
-                    viewModel.newPassword = nil
+                    viewModel.clearNewPassword()
                 }
             }
-            Button("OK", role: .cancel) { viewModel.newPassword = nil }
+            Button("OK", role: .cancel) { viewModel.clearNewPassword() }
         } message: {
             if let pw = viewModel.newPassword {
                 Text("Save this password — it won't be shown again.\n\n\(pw)")

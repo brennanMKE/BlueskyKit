@@ -9,10 +9,9 @@ struct StarterPackCreateSheet: View {
     @State private var description = ""
     @State private var selectedList: ListView?
     @State private var showListPicker = false
+    @State private var viewModel: ListsViewModel
     @Environment(\.dismiss) private var dismiss
 
-    let network: any NetworkClient
-    let accountStore: any AccountStore
     let onDismiss: () -> Void
 
     public init(
@@ -20,8 +19,7 @@ struct StarterPackCreateSheet: View {
         accountStore: any AccountStore,
         onDismiss: @escaping () -> Void
     ) {
-        self.network = network
-        self.accountStore = accountStore
+        _viewModel = State(initialValue: ListsViewModel(network: network, accountStore: accountStore))
         self.onDismiss = onDismiss
     }
 
@@ -96,10 +94,7 @@ struct StarterPackCreateSheet: View {
 
     private var listPickerSheet: some View {
         NavigationStack {
-            ListPickerView(
-                network: network,
-                accountStore: accountStore
-            ) { list in
+            ListPickerView(viewModel: viewModel) { list in
                 selectedList = list
                 showListPicker = false
             }
@@ -115,42 +110,23 @@ struct StarterPackCreateSheet: View {
     // MARK: - Create
 
     private func createStarterPack() async {
-        guard let list = selectedList,
-              let viewerDID = try? await accountStore.loadCurrentDID() else { return }
+        guard let list = selectedList else { return }
         let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
-        let record = StarterPackRecord(
+        await viewModel.createStarterPack(
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             description: trimmedDescription.isEmpty ? nil : trimmedDescription,
-            list: list.uri
+            listURI: list.uri
         )
-        let req = CreateRecordRequest(
-            repo: viewerDID.rawValue,
-            collection: "app.bsky.graph.starterpack",
-            record: record
-        )
-        do {
-            let _: CreateRecordResponse = try await network.post(
-                lexicon: "com.atproto.repo.createRecord",
-                body: req
-            )
-            dismiss()
-            onDismiss()
-        } catch {
-            // Error silently — could surface via alert in a future iteration
-        }
+        dismiss()
+        onDismiss()
     }
 }
 
 // MARK: - ListPickerView
 
 private struct ListPickerView: View {
-    @State private var viewModel: ListsViewModel
+    @Bindable var viewModel: ListsViewModel
     let onSelect: (ListView) -> Void
-
-    init(network: any NetworkClient, accountStore: any AccountStore, onSelect: @escaping (ListView) -> Void) {
-        _viewModel = State(initialValue: ListsViewModel(network: network, accountStore: accountStore))
-        self.onSelect = onSelect
-    }
 
     var body: some View {
         List(viewModel.lists, id: \.uri) { list in

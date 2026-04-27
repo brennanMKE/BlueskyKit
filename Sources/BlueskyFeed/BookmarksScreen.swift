@@ -33,9 +33,9 @@ public struct BookmarksScreen: View {
         .refreshable { await viewModel.loadInitial() }
         .alert("Error", isPresented: Binding(
             get: { viewModel.error != nil },
-            set: { if !$0 { viewModel.error = nil } }
+            set: { if !$0 { viewModel.clearError() } }
         )) {
-            Button("OK") { viewModel.error = nil }
+            Button("OK") { viewModel.clearError() }
         } message: {
             Text(viewModel.error ?? "")
         }

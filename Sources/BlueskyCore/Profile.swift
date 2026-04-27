@@ -48,6 +48,19 @@ public struct ProfileBasic: Codable, Hashable, Sendable {
         self.avatar = avatar
         self.labels = labels
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case did, handle, displayName, avatar, labels
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        did = try c.decode(DID.self, forKey: .did)
+        handle = try c.decode(Handle.self, forKey: .handle)
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        avatar = try c.decodeIfPresent(URL.self, forKey: .avatar)
+        labels = try c.decodeIfPresent([Label].self, forKey: .labels) ?? []
+    }
 }
 
 /// Profile view with bio and viewer-state fields (used in follow lists, search results).
@@ -79,6 +92,22 @@ public struct ProfileView: Codable, Hashable, Sendable {
         self.labels = labels
         self.indexedAt = indexedAt
         self.viewer = viewer
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case did, handle, displayName, description, avatar, labels, indexedAt, viewer
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        did = try c.decode(DID.self, forKey: .did)
+        handle = try c.decode(Handle.self, forKey: .handle)
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        avatar = try c.decodeIfPresent(URL.self, forKey: .avatar)
+        labels = try c.decodeIfPresent([Label].self, forKey: .labels) ?? []
+        indexedAt = try c.decodeIfPresent(Date.self, forKey: .indexedAt)
+        viewer = try c.decodeIfPresent(ProfileViewerState.self, forKey: .viewer)
     }
 }
 
@@ -126,6 +155,29 @@ public struct ProfileDetailed: Codable, Sendable {
         self.createdAt = createdAt
         self.indexedAt = indexedAt
         self.viewer = viewer
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case did, handle, displayName, description, avatar, banner
+        case followersCount, followsCount, postsCount
+        case labels, createdAt, indexedAt, viewer
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        did = try c.decode(DID.self, forKey: .did)
+        handle = try c.decode(Handle.self, forKey: .handle)
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        avatar = try c.decodeIfPresent(URL.self, forKey: .avatar)
+        banner = try c.decodeIfPresent(URL.self, forKey: .banner)
+        followersCount = try c.decodeIfPresent(Int.self, forKey: .followersCount) ?? 0
+        followsCount = try c.decodeIfPresent(Int.self, forKey: .followsCount) ?? 0
+        postsCount = try c.decodeIfPresent(Int.self, forKey: .postsCount) ?? 0
+        labels = try c.decodeIfPresent([Label].self, forKey: .labels) ?? []
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
+        indexedAt = try c.decodeIfPresent(Date.self, forKey: .indexedAt)
+        viewer = try c.decodeIfPresent(ProfileViewerState.self, forKey: .viewer)
     }
 }
 

@@ -5,54 +5,33 @@ import BlueskyKit
 
 @Observable
 public final class SavedFeedsViewModel {
-    public var feeds: [SavedFeed] = []
-    public var isLoading = false
-    public var isSaving = false
-    public var error: String?
+    public var feeds: [SavedFeed] {
+        get { store.feeds }
+        set { store.feeds = newValue }
+    }
+    public var isLoading: Bool { store.isLoading }
+    public var isSaving: Bool { store.isSaving }
+    public var error: String? { store.error }
 
-    private let network: any NetworkClient
+    private let store: any SavedFeedsStoring
 
-    public init(network: any NetworkClient) {
-        self.network = network
+    public init(network: any NetworkClient, cache: any CacheStore) {
+        self.store = SavedFeedsStore(network: network, cache: cache)
     }
 
-    public func load() async {
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            let prefs: GetPreferencesResponse = try await network.get(
-                lexicon: "app.bsky.actor.getPreferences",
-                params: [:]
-            )
-            feeds = prefs.savedFeeds
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    public func save() async {
-        isSaving = true
-        defer { isSaving = false }
-        do {
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences",
-                body: PutPreferencesRequest(savedFeeds: feeds)
-            )
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
+    public func load() async { await store.load() }
+    public func save() async { await store.save() }
 
     public func togglePin(id: String) {
-        guard let index = feeds.firstIndex(where: { $0.id == id }) else { return }
-        feeds[index].pinned.toggle()
+        guard let index = store.feeds.firstIndex(where: { $0.id == id }) else { return }
+        store.feeds[index].pinned.toggle()
     }
 
     public func move(fromOffsets: IndexSet, toOffset: Int) {
-        feeds.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        store.feeds.move(fromOffsets: fromOffsets, toOffset: toOffset)
     }
 
     public func remove(atOffsets: IndexSet) {
-        feeds.remove(atOffsets: atOffsets)
+        store.feeds.remove(atOffsets: atOffsets)
     }
 }

@@ -9,11 +9,12 @@ public struct VideoFeedView: View {
     @State private var viewModel: FeedViewModel
     @State private var currentIndex = 0
 
-    public init(network: any NetworkClient, accountStore: any AccountStore, feedURI: String) {
+    public init(network: any NetworkClient, accountStore: any AccountStore, cache: any CacheStore, feedURI: String) {
         _viewModel = State(
             initialValue: FeedViewModel(
                 network: network,
                 accountStore: accountStore,
+                cache: cache,
                 selection: .feed(uri: feedURI)
             )
         )

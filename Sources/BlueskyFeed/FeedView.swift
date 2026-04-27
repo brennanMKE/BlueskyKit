@@ -8,30 +8,26 @@ public struct FeedView: View {
 
     private let network: any NetworkClient
     private let accountStore: any AccountStore
+    private let cache: any CacheStore
     var onPostTap: ((PostView) -> Void)?
     var onAuthorTap: ((ProfileBasic) -> Void)?
 
     public init(
         network: any NetworkClient,
         accountStore: any AccountStore,
+        cache: any CacheStore,
         onPostTap: ((PostView) -> Void)? = nil,
         onAuthorTap: ((ProfileBasic) -> Void)? = nil
     ) {
         self.network = network
         self.accountStore = accountStore
+        self.cache = cache
         self.onPostTap = onPostTap
         self.onAuthorTap = onAuthorTap
     }
 
     @State private var selection: FeedSelection = .timeline
     @State private var viewModels: [FeedSelection: FeedViewModel] = [:]
-
-    private var currentViewModel: FeedViewModel {
-        if let existing = viewModels[selection] { return existing }
-        let vm = FeedViewModel(network: network, accountStore: accountStore, selection: selection)
-        viewModels[selection] = vm
-        return vm
-    }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -43,19 +39,31 @@ public struct FeedView: View {
     }
 
     private var feedList: some View {
-        let vm = currentViewModel
-        return Group {
-            if vm.posts.isEmpty && vm.isLoading {
+        Group {
+            if let vm = viewModels[selection] {
+                if vm.posts.isEmpty && vm.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if vm.posts.isEmpty, let msg = vm.errorMessage {
+                    errorView(msg, vm: vm)
+                } else {
+                    list(vm: vm)
+                }
+            } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if vm.posts.isEmpty, let msg = vm.errorMessage {
-                errorView(msg, vm: vm)
-            } else {
-                list(vm: vm)
             }
         }
         .task(id: selection) {
-            await vm.loadInitial()
+            if viewModels[selection] == nil {
+                viewModels[selection] = FeedViewModel(
+                    network: network,
+                    accountStore: accountStore,
+                    cache: cache,
+                    selection: selection
+                )
+            }
+            await viewModels[selection]?.loadInitial()
         }
     }
 

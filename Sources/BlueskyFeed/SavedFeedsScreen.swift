@@ -7,8 +7,8 @@ public struct SavedFeedsScreen: View {
     @State private var viewModel: SavedFeedsViewModel
     @State private var hasChanges = false
 
-    public init(network: any NetworkClient) {
-        _viewModel = State(initialValue: SavedFeedsViewModel(network: network))
+    public init(network: any NetworkClient, cache: any CacheStore) {
+        _viewModel = State(initialValue: SavedFeedsViewModel(network: network, cache: cache))
     }
 
     public var body: some View {

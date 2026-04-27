@@ -11,7 +11,7 @@ public struct ProfileScreen: View {
     private let viewerDID: DID?
 
     @State private var viewModel: ProfileViewModel
-    @State private var selectedTab: ProfileViewModel.ProfileTab = .posts
+    @State private var selectedTab: ProfileTab = .posts
     @State private var showEditProfile = false
     @State private var threadURI: ATURI?
 
@@ -91,7 +91,7 @@ public struct ProfileScreen: View {
 
     private var tabStrip: some View {
         Picker("", selection: $selectedTab) {
-            ForEach(ProfileViewModel.ProfileTab.allCases) { tab in
+            ForEach(ProfileTab.allCases) { tab in
                 Text(tab.title).tag(tab)
             }
         }

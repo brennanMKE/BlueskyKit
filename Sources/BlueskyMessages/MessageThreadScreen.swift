@@ -41,7 +41,7 @@ public struct MessageThreadScreen: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 4) {
-                    if viewModel.cursor != nil {
+                    if viewModel.hasOlderMessages {
                         Button("Load older messages") {
                             Task { await viewModel.loadOlder() }
                         }

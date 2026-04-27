@@ -97,6 +97,28 @@ public struct PostView: Codable, Sendable {
         self.labels = labels
         self.viewer = viewer
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case uri, cid, author, record, embed
+        case replyCount, repostCount, likeCount, quoteCount
+        case indexedAt, labels, viewer
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        uri = try c.decode(ATURI.self, forKey: .uri)
+        cid = try c.decode(CID.self, forKey: .cid)
+        author = try c.decode(ProfileBasic.self, forKey: .author)
+        record = try c.decode(PostRecord.self, forKey: .record)
+        embed = try c.decodeIfPresent(EmbedView.self, forKey: .embed)
+        replyCount = try c.decodeIfPresent(Int.self, forKey: .replyCount) ?? 0
+        repostCount = try c.decodeIfPresent(Int.self, forKey: .repostCount) ?? 0
+        likeCount = try c.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
+        quoteCount = try c.decodeIfPresent(Int.self, forKey: .quoteCount) ?? 0
+        indexedAt = try c.decode(Date.self, forKey: .indexedAt)
+        labels = try c.decodeIfPresent([Label].self, forKey: .labels) ?? []
+        viewer = try c.decodeIfPresent(PostViewerState.self, forKey: .viewer)
+    }
 }
 
 /// The authenticated viewer's relationship to a post (liked, reposted, etc.).

@@ -1,30 +1,19 @@
 import SwiftUI
-import Contacts
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
 
 struct FindContactsScreen: View {
-    private enum FlowStep {
-        case phoneInput
-        case verifyCode(phone: String)
-        case requestContacts(phone: String, token: String)
-        case viewMatches([ProfileBasic])
+
+    @State private var viewModel: FindContactsViewModel
+
+    init(network: any NetworkClient, accountStore: any AccountStore) {
+        _viewModel = State(initialValue: FindContactsViewModel(network: network, accountStore: accountStore))
     }
-
-    @State private var step: FlowStep = .phoneInput
-    @State private var phone = ""
-    @State private var otp = ""
-    @State private var isLoading = false
-    @State private var errorMessage: String?
-    @State private var followedDIDs: Set<String> = []
-
-    let network: any NetworkClient
-    let accountStore: any AccountStore
 
     var body: some View {
         Group {
-            switch step {
+            switch viewModel.step {
             case .phoneInput:
                 phoneInputStep
             case .verifyCode(let ph):
@@ -50,14 +39,14 @@ struct FindContactsScreen: View {
                 header: Text("Phone Number"),
                 footer: Text("A verification code will be sent to confirm your number.")
             ) {
-                TextField("+1 555 000 0000", text: $phone)
+                TextField("+1 555 000 0000", text: $viewModel.phone)
                     #if os(iOS)
                     .keyboardType(.phonePad)
                     .textContentType(.telephoneNumber)
                     #endif
             }
 
-            if let msg = errorMessage {
+            if let msg = viewModel.errorMessage {
                 Section {
                     Label(msg, systemImage: "exclamationmark.circle")
                         .foregroundStyle(.red)
@@ -66,15 +55,15 @@ struct FindContactsScreen: View {
 
             Section {
                 Button {
-                    Task { await sendCode() }
+                    Task { await viewModel.sendCode() }
                 } label: {
                     HStack {
                         Spacer()
-                        if isLoading { ProgressView() } else { Text("Send Code") }
+                        if viewModel.isLoading { ProgressView() } else { Text("Send Code") }
                         Spacer()
                     }
                 }
-                .disabled(phone.trimmingCharacters(in: .whitespaces).isEmpty || isLoading)
+                .disabled(viewModel.phone.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isLoading)
             }
         }
         .navigationTitle("Find Friends")
@@ -90,7 +79,7 @@ struct FindContactsScreen: View {
             }
 
             Section("Verification Code") {
-                TextField("000000", text: $otp)
+                TextField("000000", text: $viewModel.otp)
                     #if os(iOS)
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
@@ -99,7 +88,7 @@ struct FindContactsScreen: View {
                     .font(.title3.monospaced())
             }
 
-            if let msg = errorMessage {
+            if let msg = viewModel.errorMessage {
                 Section {
                     Label(msg, systemImage: "exclamationmark.circle")
                         .foregroundStyle(.red)
@@ -108,68 +97,48 @@ struct FindContactsScreen: View {
 
             Section {
                 Button {
-                    Task { await verifyCode(phone: phone) }
+                    Task { await viewModel.verifyCode(phone: phone) }
                 } label: {
                     HStack {
                         Spacer()
-                        if isLoading { ProgressView() } else { Text("Verify") }
+                        if viewModel.isLoading { ProgressView() } else { Text("Verify") }
                         Spacer()
                     }
                 }
-                .disabled(otp.count < 6 || isLoading)
-
-                Button("Resend Code") {
-                    Task { await sendCode() }
-                }
-                .disabled(isLoading)
+                .disabled(viewModel.otp.count < 6 || viewModel.isLoading)
             }
+
+            Spacer()
         }
-        .navigationTitle("Verify Number")
+        .navigationTitle("Find Friends")
     }
 
-    // MARK: - Step 3: Import Contacts
+    // MARK: - Step 3: Request Contacts
 
     private func requestContactsStep(phone: String, token: String) -> some View {
-        VStack(spacing: Spacing.xl) {
-            Spacer()
-
-            Image(systemName: "person.2.circle.fill")
-                .font(.system(size: 80))
-                .foregroundStyle(.tint)
-
-            VStack(spacing: Spacing.sm) {
-                Text("Find People You Know")
-                    .font(.title2.bold())
-
-                Text("Bluesky hashes your contacts' phone numbers and checks for matches. Names and other contact info are never uploaded.")
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, Spacing.xl)
-            }
-
-            if let msg = errorMessage {
-                Text(msg)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, Spacing.xl)
-            }
-
-            Button {
-                Task { await importContacts(phone: phone, token: token) }
-            } label: {
-                if isLoading {
-                    ProgressView().frame(maxWidth: .infinity)
-                } else {
-                    Label("Find Friends from Contacts", systemImage: "person.badge.plus")
-                        .frame(maxWidth: .infinity)
+        VStack(spacing: Spacing.lg) {
+            Image(systemName: "person.2.circle")
+                .font(.system(size: 64))
+                .foregroundStyle(.secondary)
+            Text("Find Your Contacts")
+                .font(.title2)
+                .fontWeight(.semibold)
+            Text("Allow access to your contacts to find friends already on Bluesky.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+            if viewModel.isLoading {
+                ProgressView()
+            } else {
+                Button("Allow Contacts Access") {
+                    Task { await viewModel.importContacts(phone: phone, token: token) }
                 }
+                .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.borderedProminent)
-            .padding(.horizontal, Spacing.xl)
-            .disabled(isLoading)
-
-            Spacer()
+            if let msg = viewModel.errorMessage {
+                Text(msg).foregroundStyle(.red)
+            }
         }
+        .padding()
         .navigationTitle("Find Friends")
     }
 
@@ -196,9 +165,9 @@ struct FindContactsScreen: View {
                                 .font(.subheadline)
                         }
                         Spacer()
-                        let isFollowing = followedDIDs.contains(profile.did.rawValue)
+                        let isFollowing = viewModel.followedDIDs.contains(profile.did.rawValue)
                         Button(isFollowing ? "Following" : "Follow") {
-                            Task { await follow(profile: profile) }
+                            Task { await viewModel.follow(profile: profile) }
                         }
                         .buttonStyle(.bordered)
                         .disabled(isFollowing)
@@ -207,112 +176,5 @@ struct FindContactsScreen: View {
             }
         }
         .navigationTitle("People You Know")
-    }
-
-    // MARK: - Network Actions
-
-    private func sendCode() async {
-        let trimmed = phone.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        errorMessage = nil
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.contact.startPhoneVerification",
-                body: StartPhoneVerificationRequest(phone: trimmed)
-            )
-            step = .verifyCode(phone: trimmed)
-            otp = ""
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func verifyCode(phone: String) async {
-        let code = otp.trimmingCharacters(in: .whitespaces)
-        errorMessage = nil
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            let response: VerifyPhoneResponse = try await network.post(
-                lexicon: "app.bsky.contact.verifyPhone",
-                body: VerifyPhoneRequest(phone: phone, code: code)
-            )
-            step = .requestContacts(phone: phone, token: response.token)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func importContacts(phone: String, token: String) async {
-        errorMessage = nil
-        isLoading = true
-        defer { isLoading = false }
-
-        let store = CNContactStore()
-        do {
-            let granted = try await store.requestAccess(for: .contacts)
-            guard granted else {
-                errorMessage = "Contacts access is required to find friends."
-                return
-            }
-        } catch {
-            errorMessage = "Contacts access was denied."
-            return
-        }
-
-        let phoneNumbers = await Task.detached(priority: .userInitiated) {
-            let s = CNContactStore()
-            let keys = [CNContactPhoneNumbersKey as CNKeyDescriptor]
-            let request = CNContactFetchRequest(keysToFetch: keys)
-            var numbers: [String] = []
-            try? s.enumerateContacts(with: request) { contact, _ in
-                for ph in contact.phoneNumbers {
-                    numbers.append(ph.value.stringValue)
-                }
-            }
-            return numbers
-        }.value
-
-        guard !phoneNumbers.isEmpty else {
-            errorMessage = "No phone numbers found in your contacts."
-            return
-        }
-
-        do {
-            let importResp: ImportContactsResponse = try await network.post(
-                lexicon: "app.bsky.contact.importContacts",
-                body: ImportContactsRequest(token: token, contacts: Array(phoneNumbers.prefix(1000)))
-            )
-            if importResp.matchesAndContactIndexes.isEmpty {
-                step = .viewMatches([])
-            } else {
-                let matchesResp: GetContactMatchesResponse = try await network.get(
-                    lexicon: "app.bsky.contact.getMatches",
-                    params: [:]
-                )
-                step = .viewMatches(matchesResp.matches)
-            }
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func follow(profile: ProfileBasic) async {
-        guard let currentDID = try? await accountStore.loadCurrentDID() else { return }
-        followedDIDs.insert(profile.did.rawValue)
-        do {
-            let _: CreateRecordResponse = try await network.post(
-                lexicon: "com.atproto.repo.createRecord",
-                body: CreateRecordRequest(
-                    repo: currentDID.rawValue,
-                    collection: "app.bsky.graph.follow",
-                    record: FollowRecord(subject: profile.did)
-                )
-            )
-        } catch {
-            followedDIDs.remove(profile.did.rawValue)
-        }
     }
 }

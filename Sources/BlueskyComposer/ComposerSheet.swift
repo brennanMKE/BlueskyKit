@@ -69,9 +69,9 @@ public struct ComposerSheet: View {
             }
             .alert("Post failed", isPresented: Binding(
                 get: { viewModel.errorMessage != nil },
-                set: { if !$0 { viewModel.errorMessage = nil } }
+                set: { if !$0 { viewModel.clearError() } }
             )) {
-                Button("OK") { viewModel.errorMessage = nil }
+                Button("OK") { viewModel.clearError() }
             } message: {
                 Text(viewModel.errorMessage ?? "")
             }
@@ -231,7 +231,7 @@ public struct ComposerSheet: View {
 // MARK: - Image attachment cell
 
 private struct ImageAttachmentCell: View {
-    let attachment: ComposerViewModel.ImageAttachment
+    let attachment: ComposerImageAttachment
     @Binding var altText: String
     let onRemove: () -> Void
     @State private var showAltInput = false

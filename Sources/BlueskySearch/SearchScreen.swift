@@ -51,8 +51,7 @@ public struct SearchScreen: View {
             if !viewModel.query.isEmpty {
                 Button {
                     viewModel.query = ""
-                    viewModel.actors = []
-                    viewModel.posts = []
+                    viewModel.clearResults()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -109,7 +108,7 @@ public struct SearchScreen: View {
 
     private var tabStrip: some View {
         Picker("", selection: $viewModel.activeTab) {
-            ForEach(SearchViewModel.SearchTab.allCases) { tab in
+            ForEach(SearchTab.allCases) { tab in
                 Text(tab.title).tag(tab)
             }
         }
