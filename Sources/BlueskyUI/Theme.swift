@@ -107,6 +107,22 @@ public extension View {
     func blueskyTheme(_ theme: BlueskyTheme) -> some View {
         environment(\.blueskyTheme, theme)
     }
+
+    /// Injects a `BlueskyTheme` that automatically tracks the system appearance.
+    /// Uses `.dark` when the OS is in dark mode and `.light` otherwise.
+    func adaptiveBlueskyTheme() -> some View {
+        modifier(AdaptiveBlueskyThemeModifier())
+    }
+}
+
+// MARK: - Adaptive modifier
+
+private struct AdaptiveBlueskyThemeModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content.environment(\.blueskyTheme, colorScheme == .dark ? .dark : .light)
+    }
 }
 
 // MARK: - Color helper

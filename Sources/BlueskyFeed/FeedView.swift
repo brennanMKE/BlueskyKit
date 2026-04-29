@@ -42,6 +42,7 @@ public struct FeedView: View {
             feedList
         }
         .navigationTitle("Home")
+        .adaptiveBlueskyTheme()
     }
 
     private var feedList: some View {
@@ -87,6 +88,7 @@ public struct FeedView: View {
                 PostCard(item: item, actions: actions(for: item, vm: vm))
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                     .onAppear {
                         if item.post.uri == vm.posts.last?.post.uri {
                             Task { await vm.loadMore() }
