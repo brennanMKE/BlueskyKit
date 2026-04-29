@@ -1,7 +1,13 @@
+import OSLog
 import SwiftUI
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
+
+nonisolated private let logger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "co.sstools.Bluesky",
+    category: "FeedView"
+)
 
 /// The home feed view — feed switcher at top, infinite-scroll post list below.
 public struct FeedView: View {
@@ -55,15 +61,23 @@ public struct FeedView: View {
             }
         }
         .task(id: selection) {
+            logger.debug("task fired, selection=\(String(describing: selection), privacy: .public)")
             if viewModels[selection] == nil {
+                logger.debug("creating FeedViewModel for \(String(describing: selection), privacy: .public)")
                 viewModels[selection] = FeedViewModel(
                     network: network,
                     accountStore: accountStore,
                     cache: cache,
                     selection: selection
                 )
+            } else {
+                logger.debug("reusing existing FeedViewModel for \(String(describing: selection), privacy: .public)")
             }
+            logger.debug("calling loadInitial")
             await viewModels[selection]?.loadInitial()
+            let postCount = viewModels[selection]?.posts.count ?? -1
+            let errorMsg = viewModels[selection]?.errorMessage ?? "nil"
+            logger.debug("loadInitial returned, posts=\(postCount, privacy: .public), error=\(errorMsg, privacy: .public)")
         }
     }
 

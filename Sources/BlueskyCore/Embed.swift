@@ -141,12 +141,19 @@ public indirect enum Embed: Codable, Sendable {
             let external = try c.decode(EmbedExternal.self, forKey: .external)
             self = .external(external)
         case "app.bsky.embed.record":
-            let record = try c.decode(EmbedRecordRef.self, forKey: .record)
-            self = .record(record)
+            // Some stored records (feed generators, lists, etc.) omit uri/cid.
+            if let record = try? c.decode(EmbedRecordRef.self, forKey: .record) {
+                self = .record(record)
+            } else {
+                self = .unknown(type)
+            }
         case "app.bsky.embed.recordWithMedia":
-            let record = try c.decode(EmbedRecordRef.self, forKey: .record)
-            let media = try c.decode(Embed.self, forKey: .media)
-            self = .recordWithMedia(record: record, media: media)
+            if let record = try? c.decode(EmbedRecordRef.self, forKey: .record) {
+                let media = try c.decode(Embed.self, forKey: .media)
+                self = .recordWithMedia(record: record, media: media)
+            } else {
+                self = .unknown(type)
+            }
         case "app.bsky.embed.video":
             let video = try EmbedVideo(from: decoder)
             self = .video(video)
@@ -291,6 +298,20 @@ public struct EmbedViewRecord: Codable, Sendable {
         self.labels = labels
         self.indexedAt = indexedAt
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case uri, cid, author, value, labels, indexedAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        uri = try c.decode(ATURI.self, forKey: .uri)
+        cid = try c.decode(CID.self, forKey: .cid)
+        author = try c.decode(ProfileBasic.self, forKey: .author)
+        value = try c.decode(PostRecord.self, forKey: .value)
+        labels = try c.decodeIfPresent([Label].self, forKey: .labels) ?? []
+        indexedAt = try c.decode(Date.self, forKey: .indexedAt)
+    }
 }
 
 public struct EmbedRecordView: Codable, Sendable {
@@ -298,6 +319,13 @@ public struct EmbedRecordView: Codable, Sendable {
 
     public init(record: EmbedRecordContent) {
         self.record = record
+    }
+
+    // The API places the EmbedRecordContent fields directly at this level —
+    // there is no nested "record" key, so we decode the content from the
+    // same decoder position rather than looking for a sub-key.
+    public init(from decoder: any Decoder) throws {
+        record = try EmbedRecordContent(from: decoder)
     }
 }
 
@@ -328,12 +356,18 @@ public indirect enum EmbedView: Codable, Sendable {
             let external = try c.decode(EmbedExternalView.self, forKey: .external)
             self = .external(external)
         case "app.bsky.embed.record#view":
-            let record = try c.decode(EmbedRecordView.self, forKey: .record)
-            self = .record(record)
+            if let record = try c.decodeIfPresent(EmbedRecordView.self, forKey: .record) {
+                self = .record(record)
+            } else {
+                self = .unknown(type)
+            }
         case "app.bsky.embed.recordWithMedia#view":
-            let record = try c.decode(EmbedRecordView.self, forKey: .record)
-            let media = try c.decode(EmbedView.self, forKey: .media)
-            self = .recordWithMedia(record: record, media: media)
+            if let record = try c.decodeIfPresent(EmbedRecordView.self, forKey: .record) {
+                let media = try c.decode(EmbedView.self, forKey: .media)
+                self = .recordWithMedia(record: record, media: media)
+            } else {
+                self = .unknown(type)
+            }
         case "app.bsky.embed.video#view":
             let video = try EmbedVideoView(from: decoder)
             self = .video(video)

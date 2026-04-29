@@ -54,10 +54,15 @@ public final class FeedStore: FeedStoring {
     // MARK: - Loading
 
     public func loadInitial(selection: FeedSelection) async {
-        guard !isLoading, posts.isEmpty else { return }
+        logger.debug("loadInitial called, isLoading=\(self.isLoading, privacy: .public), posts=\(self.posts.count, privacy: .public)")
+        guard !isLoading, posts.isEmpty else {
+            logger.debug("loadInitial guard failed — returning early (isLoading=\(self.isLoading, privacy: .public), posts=\(self.posts.count, privacy: .public))")
+            return
+        }
         currentSelection = selection
         // Serve stale cache immediately, then refresh in background
         if let cached = try? await cache.fetch([FeedViewPost].self, for: cacheKey(selection)) {
+            logger.debug("serving \(cached.value.count, privacy: .public) cached posts (expired=\(cached.isExpired, privacy: .public))")
             posts = cached.value
         }
         await fetch(selection: selection, reset: posts.isEmpty)
@@ -73,6 +78,7 @@ public final class FeedStore: FeedStoring {
     }
 
     private func fetch(selection: FeedSelection, reset: Bool) async {
+        logger.debug("fetch start, reset=\(reset, privacy: .public)")
         isLoading = true
         defer { isLoading = false }
         if reset { cursor = nil; hasMore = true }
@@ -83,11 +89,13 @@ public final class FeedStore: FeedStoring {
             let response: FeedResponse
             switch selection {
             case .timeline:
+                logger.debug("calling getTimeline")
                 response = try await network.get(lexicon: "app.bsky.feed.getTimeline", params: params)
             case .feed(let uri):
-                params["feed"] = uri
+                logger.debug("calling getFeed uri=\(uri, privacy: .public)")
                 response = try await network.get(lexicon: "app.bsky.feed.getFeed", params: params)
             }
+            logger.debug("fetch succeeded, count=\(response.feed.count, privacy: .public), cursor=\(response.cursor ?? "nil", privacy: .public)")
             cursor = response.cursor
             hasMore = response.cursor != nil
             if reset {
