@@ -36,6 +36,9 @@ public struct FeedView: View {
     @State private var selection: FeedSelection = .timeline
     @State private var viewModels: [FeedSelection: FeedViewModel] = [:]
     @State private var replyTarget: PostView? = nil
+    @State private var repostMenuTarget: PostView? = nil
+    @State private var repostTargetVM: FeedViewModel? = nil
+    @State private var quoteTarget: PostView? = nil
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -56,6 +59,39 @@ public struct FeedView: View {
                     replyTo: PostRef(uri: post.uri, cid: post.cid),
                     replyToView: post
                 )
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { quoteTarget != nil },
+            set: { if !$0 { quoteTarget = nil } }
+        )) {
+            if let post = quoteTarget {
+                ComposerSheet(
+                    network: network,
+                    accountStore: accountStore,
+                    quotedPost: PostRef(uri: post.uri, cid: post.cid),
+                    quotedPostView: post
+                )
+            }
+        }
+        .confirmationDialog("", isPresented: Binding(
+            get: { repostMenuTarget != nil },
+            set: { if !$0 { repostMenuTarget = nil; repostTargetVM = nil } }
+        ), titleVisibility: .hidden) {
+            Button("Repost") {
+                guard let post = repostMenuTarget, let vm = repostTargetVM else { return }
+                repostMenuTarget = nil
+                repostTargetVM = nil
+                Task { await vm.repost(post: post) }
+            }
+            Button("Quote Post") {
+                quoteTarget = repostMenuTarget
+                repostMenuTarget = nil
+                repostTargetVM = nil
+            }
+            Button("Cancel", role: .cancel) {
+                repostMenuTarget = nil
+                repostTargetVM = nil
             }
         }
     }
@@ -150,12 +186,11 @@ public struct FeedView: View {
             }
         }
         a.onRepost = { post in
-            Task {
-                if post.viewer?.repost != nil {
-                    await vm.unrepost(post: post)
-                } else {
-                    await vm.repost(post: post)
-                }
+            if post.viewer?.repost != nil {
+                Task { await vm.unrepost(post: post) }
+            } else {
+                repostMenuTarget = post
+                repostTargetVM = vm
             }
         }
         return a
