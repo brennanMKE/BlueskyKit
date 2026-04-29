@@ -43,7 +43,7 @@ let package = Package(
         // BlueskyNetworking is a pure I/O module. No actor isolation — ATProtoClient is a custom actor,
         // and its private Decodable helpers must be nonisolated.
         .target(name: "BlueskyNetworking", dependencies: ["BlueskyKit", "BlueskyCore"]),
-        .target(name: "BlueskyFeed", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
+        .target(name: "BlueskyFeed", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI", "BlueskyComposer"], swiftSettings: swiftSettings),
         .target(name: "BlueskyProfile", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
         .target(name: "BlueskySearch", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
         .target(name: "BlueskyNotifications", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),

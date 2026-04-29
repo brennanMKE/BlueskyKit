@@ -3,6 +3,7 @@ import SwiftUI
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
+import BlueskyComposer
 
 nonisolated private let logger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "co.sstools.Bluesky",
@@ -34,6 +35,7 @@ public struct FeedView: View {
 
     @State private var selection: FeedSelection = .timeline
     @State private var viewModels: [FeedSelection: FeedViewModel] = [:]
+    @State private var replyTarget: PostView? = nil
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +45,19 @@ public struct FeedView: View {
         }
         .navigationTitle("Home")
         .adaptiveBlueskyTheme()
+        .sheet(isPresented: Binding(
+            get: { replyTarget != nil },
+            set: { if !$0 { replyTarget = nil } }
+        )) {
+            if let post = replyTarget {
+                ComposerSheet(
+                    network: network,
+                    accountStore: accountStore,
+                    replyTo: PostRef(uri: post.uri, cid: post.cid),
+                    replyToView: post
+                )
+            }
+        }
     }
 
     private var feedList: some View {
@@ -124,6 +139,7 @@ public struct FeedView: View {
         var a = PostCard.Actions()
         a.onTap = onPostTap
         a.onAuthorTap = onAuthorTap
+        a.onReply = { post in replyTarget = post }
         a.onLike = { post in
             Task {
                 if post.viewer?.like != nil {
