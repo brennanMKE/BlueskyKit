@@ -39,6 +39,16 @@ See `../Bluesky-Migration/Progress.md` → "Up Next" for the exact checklist.
 - **Private `Decodable` structs in `@MainActor` modules** — their conformances are `@MainActor`-isolated. Avoid `T: Decodable & Sendable` constraints from `@MainActor` callers; use `T: Decodable` only.
 - **Auth endpoints** (`createSession`, `refreshSession`, `deleteSession`) use URLSession directly in `SessionManager` — they need no-auth or refreshJwt bearer, not the access-token `NetworkClient`.
 
+## Debugging rule
+
+**Never guess at a bug without log evidence.** When the app misbehaves and the cause is not visible in existing logs:
+
+1. Add `print()` (or `logger.debug`) at every branch point relevant to the symptom — task entry, guard exit, network call start, response count, error catch.
+2. Ask the user to run the app and share the new log output.
+3. Read the log, identify the exact branch that's hit, **then** propose a fix.
+
+Do not propose a fix based on code reading alone when runtime behaviour is ambiguous.
+
 ## Running tests
 
 ```
@@ -46,4 +56,4 @@ swift build
 swift test
 ```
 
-9 tests pass (BlueskyKit protocols, BlueskyCore Codable round-trips).
+Tests pass (BlueskyKit protocols, BlueskyCore Codable round-trips).

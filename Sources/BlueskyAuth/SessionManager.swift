@@ -1,7 +1,13 @@
 import Foundation
+import OSLog
 import Observation
 import BlueskyCore
 import BlueskyKit
+
+nonisolated private let logger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "co.sstools.Bluesky",
+    category: "SessionManager"
+)
 
 /// Production implementation of `SessionManaging`.
 ///
@@ -44,16 +50,25 @@ public final class SessionManager: SessionManaging {
     /// Loads all stored accounts and resumes the last active session.
     /// Call once from the app's root view on appear.
     public func restoreLastSession() async {
+        logger.debug("restoreLastSession start")
         do {
             let allStored = try await accountStore.loadAll()
+            logger.debug("loadAll returned \(allStored.count, privacy: .public) stored accounts")
             accounts = allStored.map { $0.account }
 
-            if let currentDID = try await accountStore.loadCurrentDID(),
+            let currentDID = try await accountStore.loadCurrentDID()
+            logger.debug("loadCurrentDID returned \(currentDID?.rawValue ?? "nil", privacy: .public)")
+
+            if let currentDID,
                let stored = allStored.first(where: { $0.account.did == currentDID }) {
+                logger.debug("resuming session for \(currentDID.rawValue, privacy: .public)")
                 try await resumeSession(stored)
+                logger.debug("resumeSession succeeded")
+            } else {
+                logger.debug("no session to restore — showing login")
             }
         } catch {
-            // Failure is silent — app falls through to login screen
+            logger.error("restoreLastSession failed: \(error, privacy: .public)")
         }
     }
 
