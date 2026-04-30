@@ -46,6 +46,7 @@ public struct SearchScreen: View {
                 HashtagView(hashtag: hashtag, network: network)
             }
         }
+        .adaptiveBlueskyTheme()
     }
 
     // MARK: - Search bar

@@ -53,6 +53,7 @@ public struct HashtagView: View {
         }
         .navigationTitle("#\(hashtag)")
         .task { await load(reset: true) }
+        .adaptiveBlueskyTheme()
     }
 
     // MARK: - Data loading
