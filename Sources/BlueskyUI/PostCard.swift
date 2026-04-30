@@ -39,10 +39,19 @@ public struct PostCard: View {
             HStack(alignment: .top, spacing: Spacing.sm) {
                 avatarColumn
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    authorHeader
-                    postBody
-                    if let embed = item.post.embed {
-                        PostEmbedView(embed: embed)
+                    // Content area: author header, post body, and optional embed.
+                    // Wrapped in its own tappable region so the card-level tap
+                    // does not extend over the action bar (which has its own buttons).
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        authorHeader
+                        postBody
+                        if let embed = item.post.embed {
+                            PostEmbedView(embed: embed)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        actions?.onTap?(item.post)
                     }
                     actionBar
                 }
@@ -51,10 +60,6 @@ public struct PostCard: View {
             .padding(.vertical, Spacing.sm)
         }
         .background(theme.colors.background)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            actions?.onTap?(item.post)
-        }
     }
 
     // MARK: - Subviews
