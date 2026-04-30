@@ -1,5 +1,10 @@
 import SwiftUI
 import BlueskyCore
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// A full post card: repost banner, author header, body text, optional embed, and action bar.
 ///
@@ -27,6 +32,7 @@ public struct PostCard: View {
         public var onShare: ((PostView) -> Void)?
         public var onBookmark: ((PostView) -> Void)?
         public var onHashtagTap: ((String) -> Void)?
+        public var onMore: ((PostView) -> Void)?
 
         public init() {}
     }
@@ -154,6 +160,41 @@ public struct PostCard: View {
                 color: theme.colors.textTertiary,
                 helpText: "Bookmark"
             ) { actions?.onBookmark?(post) }
+
+            Menu {
+                Button {
+                    let text = post.record.text
+                    #if canImport(UIKit)
+                    UIPasteboard.general.string = text
+                    #elseif canImport(AppKit)
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    pb.setString(text, forType: .string)
+                    #endif
+                } label: {
+                    Label("Copy post text", systemImage: "doc.on.doc")
+                }
+
+                Button {
+                    actions?.onMore?(post)
+                } label: {
+                    Label("Mute thread", systemImage: "speaker.slash")
+                }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    actions?.onMore?(post)
+                } label: {
+                    Label("Report post", systemImage: "flag")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 16))
+                    .foregroundStyle(theme.colors.textTertiary)
+            }
+            .buttonStyle(.plain)
+            .help("More actions")
 
             Spacer(minLength: 0)
         }
