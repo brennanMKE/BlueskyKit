@@ -83,6 +83,21 @@ public struct SearchScreen: View {
     private var suggestionsSection: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                if !viewModel.trendingTopics.isEmpty {
+                    Text("Trending")
+                        .font(.headline)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                    ForEach(viewModel.trendingTopics, id: \.topic) { topic in
+                        Button {
+                            // topic tap: no-op until hashtag navigation is wired (issue #0027)
+                        } label: {
+                            TrendingTopicRow(topic: topic)
+                        }
+                        .buttonStyle(.plain)
+                        Divider().padding(.leading, 16)
+                    }
+                }
                 if !viewModel.suggestedActors.isEmpty {
                     Text("Suggested")
                         .font(.headline)
@@ -102,6 +117,7 @@ public struct SearchScreen: View {
                 }
             }
         }
+        .refreshable { await viewModel.loadSuggestions() }
     }
 
     // MARK: - Tab strip
@@ -210,6 +226,35 @@ public struct SearchScreen: View {
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
             .padding(40)
+    }
+}
+
+// MARK: - Trending topic row
+
+private struct TrendingTopicRow: View {
+    let topic: TrendingTopic
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(topic.displayName ?? topic.topic)
+                    .font(.subheadline).fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+                if let description = topic.description, !description.isEmpty {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
     }
 }
 

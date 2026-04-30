@@ -27,6 +27,7 @@ public protocol SearchStoring: AnyObject, Observable, Sendable {
     var posts: [PostView] { get }
     var suggestedFeeds: [GeneratorView] { get }
     var suggestedActors: [ProfileView] { get }
+    var trendingTopics: [TrendingTopic] { get }
     var actorsCursor: String? { get }
     var postsCursor: String? { get }
     var isLoading: Bool { get }
@@ -34,6 +35,7 @@ public protocol SearchStoring: AnyObject, Observable, Sendable {
 
     func search(query: String, tab: SearchTab, fresh: Bool) async
     func loadSuggestions() async
+    func loadTrending() async
     func clearResults()
 }
 
@@ -46,6 +48,7 @@ public final class SearchStore: SearchStoring {
     public private(set) var posts: [PostView] = []
     public private(set) var suggestedFeeds: [GeneratorView] = []
     public private(set) var suggestedActors: [ProfileView] = []
+    public private(set) var trendingTopics: [TrendingTopic] = []
     public private(set) var actorsCursor: String?
     public private(set) var postsCursor: String?
     public private(set) var isLoading = false
@@ -121,5 +124,17 @@ public final class SearchStore: SearchStoring {
             )
             suggestedActors = resp.actors
         } catch {}
+    }
+
+    public func loadTrending() async {
+        do {
+            let resp: GetTrendingTopicsResponse = try await network.get(
+                lexicon: "app.bsky.unspecced.getTrendingTopics", params: ["limit": "10"]
+            )
+            trendingTopics = resp.topics
+        } catch {
+            logger.info("Trending topics unavailable: \(error, privacy: .public)")
+            // trendingTopics stays empty if the endpoint is unavailable
+        }
     }
 }

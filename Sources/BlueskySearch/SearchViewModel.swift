@@ -10,6 +10,7 @@ public final class SearchViewModel {
     public var posts: [PostView] { store.posts }
     public var suggestedFeeds: [GeneratorView] { store.suggestedFeeds }
     public var suggestedActors: [ProfileView] { store.suggestedActors }
+    public var trendingTopics: [TrendingTopic] { store.trendingTopics }
     public var actorsCursor: String? { store.actorsCursor }
     public var postsCursor: String? { store.postsCursor }
     public var isLoading: Bool { store.isLoading }
@@ -48,6 +49,11 @@ public final class SearchViewModel {
 
     public func loadSuggestions() async {
         await store.loadSuggestions()
+        await store.loadTrending()
+    }
+
+    public func loadTrending() async {
+        await store.loadTrending()
     }
 
     public func clearResults() {
