@@ -93,6 +93,7 @@ public final class FeedStore: FeedStoring {
                 response = try await network.get(lexicon: "app.bsky.feed.getTimeline", params: params)
             case .feed(let uri):
                 logger.debug("calling getFeed uri=\(uri, privacy: .public)")
+                params["feed"] = uri
                 response = try await network.get(lexicon: "app.bsky.feed.getFeed", params: params)
             }
             logger.debug("fetch succeeded, count=\(response.feed.count, privacy: .public), cursor=\(response.cursor ?? "nil", privacy: .public)")
