@@ -195,7 +195,8 @@ public struct PostCard: View {
                     .font(.system(size: 16))
                     .foregroundStyle(theme.colors.textTertiary)
             }
-            .buttonStyle(.plain)
+            .menuStyle(.button)
+            .buttonStyle(.borderless)
             .help("More actions")
 
             Spacer(minLength: 0)
