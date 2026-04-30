@@ -131,3 +131,58 @@ private struct AccountSettingsScreen: View {
         .navigationTitle("Account")
     }
 }
+
+// MARK: - Preview helpers
+
+private final class PreviewPreferences: PreferencesStore, @unchecked Sendable {
+    private var store: [String: Data] = [:]
+    nonisolated func set<T: Codable & Sendable>(_ value: T, for key: String) throws {
+        store[key] = try JSONEncoder().encode(value)
+    }
+    nonisolated func get<T: Codable & Sendable>(_ type: T.Type, for key: String) throws -> T? {
+        guard let data = store[key] else { return nil }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+    nonisolated func remove(for key: String) { store.removeValue(forKey: key) }
+}
+
+private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
+    nonisolated func save(_ account: StoredAccount) async throws {}
+    nonisolated func loadAll() async throws -> [StoredAccount] { [] }
+    nonisolated func load(did: DID) async throws -> StoredAccount? { nil }
+    nonisolated func remove(did: DID) async throws {}
+    nonisolated func setCurrentDID(_ did: DID?) async throws {}
+    nonisolated func loadCurrentDID() async throws -> DID? { nil }
+}
+
+private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
+    nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func post<B: Encodable & Sendable, R: Decodable & Sendable>(lexicon: String, body: B) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func upload<R: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> R { throw ATError.unknown("preview") }
+}
+
+// MARK: - Previews
+
+#Preview("SettingsScreen — Light") {
+    NavigationStack {
+        SettingsScreen(
+            preferences: PreviewPreferences(),
+            accountStore: PreviewNoOpAccountStore(),
+            network: PreviewNoOpNetwork(),
+            onSignOut: {}
+        )
+    }
+    .preferredColorScheme(.light)
+}
+
+#Preview("SettingsScreen — Dark") {
+    NavigationStack {
+        SettingsScreen(
+            preferences: PreviewPreferences(),
+            accountStore: PreviewNoOpAccountStore(),
+            network: PreviewNoOpNetwork(),
+            onSignOut: {}
+        )
+    }
+    .preferredColorScheme(.dark)
+}

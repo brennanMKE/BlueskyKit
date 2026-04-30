@@ -247,3 +247,51 @@ public struct FeedView: View {
         return a
     }
 }
+
+// MARK: - Preview helpers
+
+private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
+    nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func post<B: Encodable & Sendable, R: Decodable & Sendable>(lexicon: String, body: B) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func upload<R: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> R { throw ATError.unknown("preview") }
+}
+
+private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
+    nonisolated func save(_ account: StoredAccount) async throws {}
+    nonisolated func loadAll() async throws -> [StoredAccount] { [] }
+    nonisolated func load(did: DID) async throws -> StoredAccount? { nil }
+    nonisolated func remove(did: DID) async throws {}
+    nonisolated func setCurrentDID(_ did: DID?) async throws {}
+    nonisolated func loadCurrentDID() async throws -> DID? { nil }
+}
+
+private final class PreviewNoOpCache: CacheStore, @unchecked Sendable {
+    nonisolated func store<T: Codable & Sendable>(_ value: T, for key: String, ttl: TimeInterval?) async throws {}
+    nonisolated func fetch<T: Codable & Sendable>(_ type: T.Type, for key: String) async throws -> CacheResult<T>? { nil }
+    nonisolated func evict(for key: String) async throws {}
+    nonisolated func evictAll() async throws {}
+}
+
+// MARK: - Previews
+
+#Preview("FeedView — Light") {
+    NavigationStack {
+        FeedView(
+            network: PreviewNoOpNetwork(),
+            accountStore: PreviewNoOpAccountStore(),
+            cache: PreviewNoOpCache()
+        )
+    }
+    .preferredColorScheme(.light)
+}
+
+#Preview("FeedView — Dark") {
+    NavigationStack {
+        FeedView(
+            network: PreviewNoOpNetwork(),
+            accountStore: PreviewNoOpAccountStore(),
+            cache: PreviewNoOpCache()
+        )
+    }
+    .preferredColorScheme(.dark)
+}

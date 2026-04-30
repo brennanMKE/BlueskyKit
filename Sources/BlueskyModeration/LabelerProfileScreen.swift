@@ -3,6 +3,12 @@ import BlueskyCore
 import BlueskyKit
 import BlueskyUI
 
+private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
+    nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func post<B: Encodable & Sendable, R: Decodable & Sendable>(lexicon: String, body: B) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func upload<R: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> R { throw ATError.unknown("preview") }
+}
+
 public struct LabelerProfileScreen: View {
     @State private var viewModel: LabelerProfileViewModel
 
@@ -97,4 +103,26 @@ public struct LabelerProfileScreen: View {
             }
         }
     }
+}
+
+// MARK: - Previews
+
+#Preview("LabelerProfileScreen — Light") {
+    NavigationStack {
+        LabelerProfileScreen(
+            labelerDID: "did:plc:ar7c4by46qjdydhdevvrndac",
+            network: PreviewNoOpNetwork()
+        )
+    }
+    .preferredColorScheme(.light)
+}
+
+#Preview("LabelerProfileScreen — Dark") {
+    NavigationStack {
+        LabelerProfileScreen(
+            labelerDID: "did:plc:ar7c4by46qjdydhdevvrndac",
+            network: PreviewNoOpNetwork()
+        )
+    }
+    .preferredColorScheme(.dark)
 }

@@ -210,3 +210,65 @@ public struct ProfileHeaderView: View {
     }
 }
 
+// MARK: - Previews
+
+private let previewProfile = ProfileDetailed(
+    did: DID(rawValue: "did:plc:alice"),
+    handle: Handle(rawValue: "alice.bsky.social"),
+    displayName: "Alice",
+    description: "Building the open social web. Bluesky enthusiast.",
+    avatar: nil,
+    banner: nil,
+    followersCount: 1240,
+    followsCount: 320,
+    postsCount: 487,
+    labels: [],
+    createdAt: nil,
+    indexedAt: nil,
+    viewer: ProfileViewerState(
+        muted: false,
+        mutedByList: nil,
+        blockedBy: false,
+        blocking: nil,
+        following: nil,
+        followedBy: nil
+    )
+)
+
+#Preview("ProfileHeaderView — Light") {
+    ScrollView {
+        ProfileHeaderView(
+            profile: previewProfile,
+            isOwnProfile: false,
+            knownFollowers: [],
+            onFollow: {},
+            onUnfollow: {},
+            onBlock: {},
+            onUnblock: {},
+            onMute: {},
+            onUnmute: {},
+            onEditProfile: {}
+        )
+        .blueskyTheme(.light)
+    }
+    .preferredColorScheme(.light)
+}
+
+#Preview("ProfileHeaderView — Dark") {
+    ScrollView {
+        ProfileHeaderView(
+            profile: previewProfile,
+            isOwnProfile: false,
+            knownFollowers: [],
+            onFollow: {},
+            onUnfollow: {},
+            onBlock: {},
+            onUnblock: {},
+            onMute: {},
+            onUnmute: {},
+            onEditProfile: {}
+        )
+        .blueskyTheme(.dark)
+    }
+    .preferredColorScheme(.dark)
+}

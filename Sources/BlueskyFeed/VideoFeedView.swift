@@ -4,6 +4,28 @@ import BlueskyCore
 import BlueskyKit
 import BlueskyUI
 
+private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
+    nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func post<B: Encodable & Sendable, R: Decodable & Sendable>(lexicon: String, body: B) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func upload<R: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> R { throw ATError.unknown("preview") }
+}
+
+private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
+    nonisolated func save(_ account: StoredAccount) async throws {}
+    nonisolated func loadAll() async throws -> [StoredAccount] { [] }
+    nonisolated func load(did: DID) async throws -> StoredAccount? { nil }
+    nonisolated func remove(did: DID) async throws {}
+    nonisolated func setCurrentDID(_ did: DID?) async throws {}
+    nonisolated func loadCurrentDID() async throws -> DID? { nil }
+}
+
+private final class PreviewNoOpCache: CacheStore, @unchecked Sendable {
+    nonisolated func store<T: Codable & Sendable>(_ value: T, for key: String, ttl: TimeInterval?) async throws {}
+    nonisolated func fetch<T: Codable & Sendable>(_ type: T.Type, for key: String) async throws -> CacheResult<T>? { nil }
+    nonisolated func evict(for key: String) async throws {}
+    nonisolated func evictAll() async throws {}
+}
+
 /// Full-screen vertical-scroll video feed backed by a video algorithm feed generator.
 public struct VideoFeedView: View {
     @State private var viewModel: FeedViewModel
@@ -129,4 +151,32 @@ private struct VideoPostPage: View {
             player = nil
         }
     }
+}
+
+// MARK: - Previews
+
+private let previewVideoFeedURI = "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot"
+
+#Preview("VideoFeedView — Light") {
+    NavigationStack {
+        VideoFeedView(
+            network: PreviewNoOpNetwork(),
+            accountStore: PreviewNoOpAccountStore(),
+            cache: PreviewNoOpCache(),
+            feedURI: previewVideoFeedURI
+        )
+    }
+    .preferredColorScheme(.light)
+}
+
+#Preview("VideoFeedView — Dark") {
+    NavigationStack {
+        VideoFeedView(
+            network: PreviewNoOpNetwork(),
+            accountStore: PreviewNoOpAccountStore(),
+            cache: PreviewNoOpCache(),
+            feedURI: previewVideoFeedURI
+        )
+    }
+    .preferredColorScheme(.dark)
 }

@@ -3,6 +3,19 @@ import BlueskyCore
 import BlueskyKit
 import BlueskyUI
 
+private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
+    nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func post<B: Encodable & Sendable, R: Decodable & Sendable>(lexicon: String, body: B) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func upload<R: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> R { throw ATError.unknown("preview") }
+}
+
+private final class PreviewNoOpCache: CacheStore, @unchecked Sendable {
+    nonisolated func store<T: Codable & Sendable>(_ value: T, for key: String, ttl: TimeInterval?) async throws {}
+    nonisolated func fetch<T: Codable & Sendable>(_ type: T.Type, for key: String) async throws -> CacheResult<T>? { nil }
+    nonisolated func evict(for key: String) async throws {}
+    nonisolated func evictAll() async throws {}
+}
+
 public struct SavedFeedsScreen: View {
     @State private var viewModel: SavedFeedsViewModel
     @State private var hasChanges = false
@@ -111,4 +124,26 @@ public struct SavedFeedsScreen: View {
         let unpinned = viewModel.feeds.filter { !$0.pinned }
         viewModel.feeds = pinned + unpinned
     }
+}
+
+// MARK: - Previews
+
+#Preview("SavedFeedsScreen — Light") {
+    NavigationStack {
+        SavedFeedsScreen(
+            network: PreviewNoOpNetwork(),
+            cache: PreviewNoOpCache()
+        )
+    }
+    .preferredColorScheme(.light)
+}
+
+#Preview("SavedFeedsScreen — Dark") {
+    NavigationStack {
+        SavedFeedsScreen(
+            network: PreviewNoOpNetwork(),
+            cache: PreviewNoOpCache()
+        )
+    }
+    .preferredColorScheme(.dark)
 }

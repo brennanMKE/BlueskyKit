@@ -3,6 +3,12 @@ import BlueskyCore
 import BlueskyKit
 import BlueskyUI
 
+private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
+    nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func post<B: Encodable & Sendable, R: Decodable & Sendable>(lexicon: String, body: B) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func upload<R: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> R { throw ATError.unknown("preview") }
+}
+
 struct AppPasswordsScreen: View {
     @State private var viewModel: AppPasswordsViewModel
     @State private var isShowingCreate = false
@@ -107,4 +113,20 @@ struct AppPasswordsScreen: View {
             }
         }
     }
+}
+
+// MARK: - Previews
+
+#Preview("AppPasswordsScreen — Light") {
+    NavigationStack {
+        AppPasswordsScreen(network: PreviewNoOpNetwork())
+    }
+    .preferredColorScheme(.light)
+}
+
+#Preview("AppPasswordsScreen — Dark") {
+    NavigationStack {
+        AppPasswordsScreen(network: PreviewNoOpNetwork())
+    }
+    .preferredColorScheme(.dark)
 }

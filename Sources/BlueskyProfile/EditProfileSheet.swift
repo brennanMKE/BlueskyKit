@@ -1,4 +1,6 @@
 import SwiftUI
+import BlueskyCore
+import BlueskyKit
 
 public struct EditProfileSheet: View {
 
@@ -46,4 +48,24 @@ public struct EditProfileSheet: View {
             }
         }
     }
+}
+
+// MARK: - Previews
+
+#Preview("EditProfileSheet — Light") {
+    EditProfileSheet(
+        displayName: "Alice",
+        description: "Building the open social web. 🦋",
+        onSave: { _, _ in }
+    )
+    .preferredColorScheme(.light)
+}
+
+#Preview("EditProfileSheet — Dark") {
+    EditProfileSheet(
+        displayName: "Alice",
+        description: "Building the open social web. 🦋",
+        onSave: { _, _ in }
+    )
+    .preferredColorScheme(.dark)
 }

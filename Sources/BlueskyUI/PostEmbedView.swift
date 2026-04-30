@@ -232,3 +232,43 @@ public struct PostEmbedView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
+
+// MARK: - Previews
+
+#Preview("PostEmbedView — Light") {
+    let linkEmbed = EmbedView.external(EmbedExternalView(
+        uri: "https://bsky.social",
+        title: "Bluesky Social",
+        description: "The open social network built on AT Protocol.",
+        thumb: nil
+    ))
+    let notFoundURI = ATURI(rawValue: "at://did:plc:alice/app.bsky.feed.post/404")
+    ScrollView {
+        VStack(spacing: 16) {
+            PostEmbedView(embed: linkEmbed)
+            PostEmbedView(embed: .record(EmbedRecordView(record: .notFound(uri: notFoundURI))))
+        }
+        .padding()
+    }
+    .blueskyTheme(.light)
+    .preferredColorScheme(.light)
+}
+
+#Preview("PostEmbedView — Dark") {
+    let linkEmbed = EmbedView.external(EmbedExternalView(
+        uri: "https://bsky.social",
+        title: "Bluesky Social",
+        description: "The open social network built on AT Protocol.",
+        thumb: nil
+    ))
+    let notFoundURI = ATURI(rawValue: "at://did:plc:alice/app.bsky.feed.post/404")
+    ScrollView {
+        VStack(spacing: 16) {
+            PostEmbedView(embed: linkEmbed)
+            PostEmbedView(embed: .record(EmbedRecordView(record: .notFound(uri: notFoundURI))))
+        }
+        .padding()
+    }
+    .blueskyTheme(.dark)
+    .preferredColorScheme(.dark)
+}

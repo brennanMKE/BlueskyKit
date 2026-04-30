@@ -451,6 +451,41 @@ private extension Image {
 }
 #endif
 
+// MARK: - Preview helpers
+
+private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
+    nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func post<B: Encodable & Sendable, R: Decodable & Sendable>(lexicon: String, body: B) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func upload<R: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> R { throw ATError.unknown("preview") }
+}
+
+private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
+    nonisolated func save(_ account: StoredAccount) async throws {}
+    nonisolated func loadAll() async throws -> [StoredAccount] { [] }
+    nonisolated func load(did: DID) async throws -> StoredAccount? { nil }
+    nonisolated func remove(did: DID) async throws {}
+    nonisolated func setCurrentDID(_ did: DID?) async throws {}
+    nonisolated func loadCurrentDID() async throws -> DID? { nil }
+}
+
+// MARK: - Previews
+
+#Preview("ComposerSheet — Light") {
+    ComposerSheet(
+        network: PreviewNoOpNetwork(),
+        accountStore: PreviewNoOpAccountStore()
+    )
+    .preferredColorScheme(.light)
+}
+
+#Preview("ComposerSheet — Dark") {
+    ComposerSheet(
+        network: PreviewNoOpNetwork(),
+        accountStore: PreviewNoOpAccountStore()
+    )
+    .preferredColorScheme(.dark)
+}
+
 // MARK: - iOS image picker button
 
 #if os(iOS)

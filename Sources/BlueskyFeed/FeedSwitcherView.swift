@@ -49,3 +49,17 @@ public struct FeedSwitcherView: View {
         .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 }
+
+// MARK: - Previews
+
+#Preview("FeedSwitcherView — Light") {
+    @Previewable @State var selection: FeedSelection = .timeline
+    FeedSwitcherView(selection: $selection)
+        .preferredColorScheme(.light)
+}
+
+#Preview("FeedSwitcherView — Dark") {
+    @Previewable @State var selection: FeedSelection = .timeline
+    FeedSwitcherView(selection: $selection)
+        .preferredColorScheme(.dark)
+}

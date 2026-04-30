@@ -3,6 +3,12 @@ import BlueskyCore
 import BlueskyKit
 import BlueskyUI
 
+private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
+    nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func post<B: Encodable & Sendable, R: Decodable & Sendable>(lexicon: String, body: B) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func upload<R: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> R { throw ATError.unknown("preview") }
+}
+
 /// Conversation inbox — list of direct message conversations.
 public struct ConversationListScreen: View {
 
@@ -196,3 +202,18 @@ private struct ConvoRow: View {
     }
 }
 
+// MARK: - Previews
+
+#Preview("ConversationListScreen — Light") {
+    NavigationStack {
+        ConversationListScreen(network: PreviewNoOpNetwork())
+    }
+    .preferredColorScheme(.light)
+}
+
+#Preview("ConversationListScreen — Dark") {
+    NavigationStack {
+        ConversationListScreen(network: PreviewNoOpNetwork())
+    }
+    .preferredColorScheme(.dark)
+}

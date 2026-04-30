@@ -3,6 +3,12 @@ import BlueskyCore
 import BlueskyKit
 import BlueskyUI
 
+private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
+    nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func post<B: Encodable & Sendable, R: Decodable & Sendable>(lexicon: String, body: B) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func upload<R: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> R { throw ATError.unknown("preview") }
+}
+
 /// Shows pending DM requests from accounts not yet followed.
 ///
 /// Each row navigates into the existing `MessageThreadScreen`.
@@ -112,4 +118,51 @@ private struct RequestConvoRow: View {
             size: 44
         )
     }
+}
+
+// MARK: - Previews
+
+private let previewRequestConvos = [
+    ConvoView(
+        id: "req-1",
+        rev: "1",
+        members: [
+            ProfileBasic(
+                did: DID(rawValue: "did:plc:stranger"),
+                handle: Handle(rawValue: "stranger.bsky.social"),
+                displayName: "Stranger",
+                avatar: nil
+            )
+        ],
+        lastMessage: MessageView(
+            id: "msg-1",
+            rev: "1",
+            text: "Hi, I found your account interesting!",
+            embed: nil,
+            sender: MessageSender(did: DID(rawValue: "did:plc:stranger")),
+            sentAt: Date(timeIntervalSinceNow: -300)
+        ),
+        unreadCount: 1,
+        muted: false
+    )
+]
+
+#Preview("MessageRequestsScreen — Light") {
+    NavigationStack {
+        MessageRequestsScreen(
+            convos: previewRequestConvos,
+            network: PreviewNoOpNetwork()
+        )
+    }
+    .preferredColorScheme(.light)
+}
+
+#Preview("MessageRequestsScreen — Dark") {
+    NavigationStack {
+        MessageRequestsScreen(
+            convos: previewRequestConvos,
+            network: PreviewNoOpNetwork()
+        )
+    }
+    .preferredColorScheme(.dark)
 }

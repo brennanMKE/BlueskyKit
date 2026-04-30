@@ -1,5 +1,6 @@
 import SwiftUI
 import BlueskyCore
+import BlueskyKit
 
 struct ListCreateSheet: View {
 
@@ -62,4 +63,16 @@ struct ListCreateSheet: View {
             }
         }
     }
+}
+
+// MARK: - Previews
+
+#Preview("ListCreateSheet — Light") {
+    ListCreateSheet { _, _, _ in }
+        .preferredColorScheme(.light)
+}
+
+#Preview("ListCreateSheet — Dark") {
+    ListCreateSheet { _, _, _ in }
+        .preferredColorScheme(.dark)
 }

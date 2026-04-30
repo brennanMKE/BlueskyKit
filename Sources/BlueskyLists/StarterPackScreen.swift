@@ -3,6 +3,21 @@ import BlueskyCore
 import BlueskyKit
 import BlueskyUI
 
+private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
+    nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func post<B: Encodable & Sendable, R: Decodable & Sendable>(lexicon: String, body: B) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func upload<R: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> R { throw ATError.unknown("preview") }
+}
+
+private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
+    nonisolated func save(_ account: StoredAccount) async throws {}
+    nonisolated func loadAll() async throws -> [StoredAccount] { [] }
+    nonisolated func load(did: DID) async throws -> StoredAccount? { nil }
+    nonisolated func remove(did: DID) async throws {}
+    nonisolated func setCurrentDID(_ did: DID?) async throws {}
+    nonisolated func loadCurrentDID() async throws -> DID? { nil }
+}
+
 public struct StarterPackScreen: View {
 
     @State private var viewModel: StarterPackViewModel
@@ -119,4 +134,28 @@ public struct StarterPackScreen: View {
             }
         }
     }
+}
+
+// MARK: - Previews
+
+#Preview("StarterPackScreen — Light") {
+    NavigationStack {
+        StarterPackScreen(
+            starterPackURI: ATURI(rawValue: "at://did:plc:alice/app.bsky.graph.starterpack/abc"),
+            network: PreviewNoOpNetwork(),
+            accountStore: PreviewNoOpAccountStore()
+        )
+    }
+    .preferredColorScheme(.light)
+}
+
+#Preview("StarterPackScreen — Dark") {
+    NavigationStack {
+        StarterPackScreen(
+            starterPackURI: ATURI(rawValue: "at://did:plc:alice/app.bsky.graph.starterpack/abc"),
+            network: PreviewNoOpNetwork(),
+            accountStore: PreviewNoOpAccountStore()
+        )
+    }
+    .preferredColorScheme(.dark)
 }

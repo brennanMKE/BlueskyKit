@@ -1,4 +1,6 @@
 import SwiftUI
+import BlueskyCore
+import BlueskyKit
 
 struct AboutScreen: View {
     private var appVersion: String {
@@ -32,4 +34,20 @@ struct AboutScreen: View {
         }
         .navigationTitle("About")
     }
+}
+
+// MARK: - Previews
+
+#Preview("AboutScreen — Light") {
+    NavigationStack {
+        AboutScreen()
+    }
+    .preferredColorScheme(.light)
+}
+
+#Preview("AboutScreen — Dark") {
+    NavigationStack {
+        AboutScreen()
+    }
+    .preferredColorScheme(.dark)
 }
