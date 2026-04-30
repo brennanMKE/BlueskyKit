@@ -53,15 +53,16 @@ public struct NotificationsScreen: View {
     // MARK: - List
 
     private var notificationList: some View {
-        List {
-            ForEach(viewModel.notifications, id: \.uri) { notification in
-                NotificationRow(notification: notification, onTap: { uri in
+        let groups = viewModel.groupedNotifications
+        return List {
+            ForEach(groups) { group in
+                GroupedNotificationRow(group: group, onTap: { uri in
                     threadURI = uri
                 })
                 .listRowInsets(EdgeInsets())
                 .listRowSeparator(.hidden)
                 .onAppear {
-                    if notification.uri == viewModel.notifications.last?.uri {
+                    if group.id == groups.last?.id {
                         Task { await viewModel.loadMore() }
                     }
                 }
@@ -94,31 +95,27 @@ public struct NotificationsScreen: View {
     }
 }
 
-// MARK: - Notification row
+// MARK: - Grouped notification row
 
-private struct NotificationRow: View {
-    let notification: NotificationView
+private struct GroupedNotificationRow: View {
+    let group: GroupedNotification
     let onTap: (ATURI) -> Void
 
     var body: some View {
         Button {
-            if let subject = notification.reasonSubject {
+            if let subject = group.reasonSubject {
                 onTap(subject)
             }
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 reasonIcon
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        AvatarView(
-                            url: notification.author.avatar,
-                            handle: notification.author.handle.rawValue,
-                            size: 32
-                        )
-                        Text(authorName)
+                    actorAvatarStack
+                    HStack(spacing: 4) {
+                        Text(actorSummary)
                             .font(.subheadline).fontWeight(.semibold)
-                            .lineLimit(1)
-                        if !notification.isRead {
+                            .lineLimit(2)
+                        if !group.isRead {
                             Circle()
                                 .fill(Color.accentColor)
                                 .frame(width: 8, height: 8)
@@ -129,7 +126,7 @@ private struct NotificationRow: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(notification.indexedAt, style: .relative)
+                Text(group.indexedAt, style: .relative)
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -140,6 +137,24 @@ private struct NotificationRow: View {
         .buttonStyle(.plain)
     }
 
+    // Up to 3 overlapping avatars.
+    private var actorAvatarStack: some View {
+        let visible = Array(group.actors.prefix(3))
+        return HStack(spacing: -8) {
+            ForEach(Array(visible.enumerated()), id: \.offset) { _, actor in
+                AvatarView(
+                    url: actor.avatar,
+                    handle: actor.handle.rawValue,
+                    size: 28
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.uiCompatibleSystemBackground, lineWidth: 1.5)
+                )
+            }
+        }
+    }
+
     private var reasonIcon: some View {
         Image(systemName: iconName)
             .font(.system(size: 16))
@@ -148,7 +163,7 @@ private struct NotificationRow: View {
     }
 
     private var iconName: String {
-        switch notification.reason {
+        switch group.reason {
         case "like":    return "heart.fill"
         case "repost":  return "arrow.2.squarepath"
         case "follow":  return "person.fill.badge.plus"
@@ -160,7 +175,7 @@ private struct NotificationRow: View {
     }
 
     private var iconColor: Color {
-        switch notification.reason {
+        switch group.reason {
         case "like":    return .pink
         case "repost":  return .green
         case "follow":  return .blue
@@ -168,19 +183,44 @@ private struct NotificationRow: View {
         }
     }
 
-    private var authorName: String {
-        notification.author.displayName ?? "@\(notification.author.handle.rawValue)"
+    /// "Alice", "Alice and Bob", "Alice, Bob, and 3 others"
+    private var actorSummary: String {
+        let actors = group.actors
+        let name: (ProfileBasic) -> String = { a in
+            a.displayName ?? "@\(a.handle.rawValue)"
+        }
+        switch actors.count {
+        case 0:  return ""
+        case 1:  return name(actors[0])
+        case 2:  return "\(name(actors[0])) and \(name(actors[1]))"
+        default:
+            let extra = actors.count - 2
+            return "\(name(actors[0])), \(name(actors[1])), and \(extra) other\(extra == 1 ? "" : "s")"
+        }
     }
 
     private var reasonText: String {
-        switch notification.reason {
+        switch group.reason {
         case "like":    return "liked your post"
         case "repost":  return "reposted your post"
         case "follow":  return "followed you"
         case "mention": return "mentioned you"
         case "reply":   return "replied to your post"
         case "quote":   return "quoted your post"
-        default:        return notification.reason
+        default:        return group.reason
         }
+    }
+}
+
+// MARK: - Platform color helper
+
+private extension Color {
+    /// `UIColor.systemBackground` on iOS, `NSColor.windowBackgroundColor` on macOS.
+    static var uiCompatibleSystemBackground: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .systemBackground)
+        #else
+        Color(nsColor: .windowBackgroundColor)
+        #endif
     }
 }
