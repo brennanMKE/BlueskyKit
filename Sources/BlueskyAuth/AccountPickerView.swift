@@ -1,5 +1,6 @@
 import SwiftUI
 import BlueskyCore
+import BlueskyKit
 
 /// Displays all accounts stored on the device and lets the user switch or sign in to one.
 ///
@@ -191,4 +192,65 @@ private struct AccountRow: View {
         }
         return String(name.prefix(2)).uppercased()
     }
+}
+
+// MARK: - Previews
+
+private final class PreviewMultiAccountStore: AccountStore, @unchecked Sendable {
+    private let stub: [StoredAccount] = [
+        StoredAccount(
+            account: Account(
+                did: DID(rawValue: "did:plc:alice"),
+                handle: Handle(rawValue: "alice.bsky.social"),
+                displayName: "Alice",
+                avatarURL: nil,
+                serviceEndpoint: URL(string: "https://bsky.social")!,
+                email: "alice@example.com",
+                emailConfirmed: true
+            ),
+            accessJwt: "", refreshJwt: ""
+        ),
+        StoredAccount(
+            account: Account(
+                did: DID(rawValue: "did:plc:bob"),
+                handle: Handle(rawValue: "bob.bsky.social"),
+                displayName: "Bob",
+                avatarURL: nil,
+                serviceEndpoint: URL(string: "https://bsky.social")!,
+                email: nil,
+                emailConfirmed: nil
+            ),
+            accessJwt: "", refreshJwt: ""
+        ),
+    ]
+    nonisolated func save(_ account: StoredAccount) async throws {}
+    nonisolated func loadAll() async throws -> [StoredAccount] { stub }
+    nonisolated func load(did: DID) async throws -> StoredAccount? { stub.first { $0.account.did == did } }
+    nonisolated func remove(did: DID) async throws {}
+    nonisolated func setCurrentDID(_ did: DID?) async throws {}
+    nonisolated func loadCurrentDID() async throws -> DID? { DID(rawValue: "did:plc:alice") }
+}
+
+private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
+    nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func post<B: Encodable & Sendable, R: Decodable & Sendable>(lexicon: String, body: B) async throws -> R { throw ATError.unknown("preview") }
+    nonisolated func upload<R: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> R { throw ATError.unknown("preview") }
+}
+
+#Preview("AccountPickerView — Light") {
+    let session = SessionManager(accountStore: PreviewMultiAccountStore(), network: PreviewNoOpNetwork())
+    AccountPickerView(session: session, onAccountSelected: {}, onAddAccount: {})
+        .task { await session.restoreLastSession() }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.background)
+        .preferredColorScheme(.light)
+}
+
+#Preview("AccountPickerView — Dark") {
+    let session = SessionManager(accountStore: PreviewMultiAccountStore(), network: PreviewNoOpNetwork())
+    AccountPickerView(session: session, onAccountSelected: {}, onAddAccount: {})
+        .task { await session.restoreLastSession() }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.background)
+        .preferredColorScheme(.dark)
 }
