@@ -11,6 +11,7 @@ public struct ThreadView: View {
     private let network: any NetworkClient
     private let accountStore: any AccountStore
     private let onAuthorTap: ((ProfileBasic) -> Void)?
+    private let onPostTap: ((PostView) -> Void)?
 
     @State private var viewModel: ThreadViewModel
     @State private var replyTarget: PostView? = nil
@@ -19,12 +20,14 @@ public struct ThreadView: View {
         uri: ATURI,
         network: any NetworkClient,
         accountStore: any AccountStore,
-        onAuthorTap: ((ProfileBasic) -> Void)? = nil
+        onAuthorTap: ((ProfileBasic) -> Void)? = nil,
+        onPostTap: ((PostView) -> Void)? = nil
     ) {
         self.uri = uri
         self.network = network
         self.accountStore = accountStore
         self.onAuthorTap = onAuthorTap
+        self.onPostTap = onPostTap
         _viewModel = State(wrappedValue: ThreadViewModel(network: network, uri: uri))
     }
 
@@ -113,6 +116,7 @@ public struct ThreadView: View {
 
     private func actions(for post: PostView) -> PostCard.Actions {
         var a = PostCard.Actions()
+        a.onTap = onPostTap
         a.onReply = { p in replyTarget = p }
         a.onAuthorTap = onAuthorTap
         return a
