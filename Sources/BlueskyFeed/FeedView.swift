@@ -41,6 +41,11 @@ public struct FeedView: View {
     var onPostTap: ((PostView) -> Void)?
     var onAuthorTap: ((ProfileBasic) -> Void)?
 
+    /// Injected from boot() via SwiftUI environment. When present, FeedView uses this
+    /// store for .timeline instead of creating a new one, so the initial load is never
+    /// tied to a SwiftUI .task that can be cancelled by view recreation.
+    @Environment(FeedStore.self) private var bootTimelineStore: FeedStore
+
     public init(
         network: any NetworkClient,
         accountStore: any AccountStore,
@@ -160,21 +165,28 @@ public struct FeedView: View {
         .task(id: selection) {
             logger.debug("task fired, selection=\(String(describing: selection), privacy: .public)")
             if vmCache[selection] == nil {
-                logger.debug("creating FeedViewModel for \(String(describing: selection), privacy: .public)")
-                vmCache[selection] = FeedViewModel(
-                    network: network,
-                    accountStore: accountStore,
-                    cache: cache,
-                    selection: selection
-                )
+                if selection == .timeline {
+                    // Use the store created and started in boot() — no loadInitial needed here
+                    // because it is already in-flight on a plain Task that SwiftUI cannot cancel.
+                    logger.debug("attaching pre-built timeline store from boot()")
+                    vmCache[.timeline] = FeedViewModel(store: bootTimelineStore, selection: .timeline)
+                } else {
+                    logger.debug("creating FeedViewModel for \(String(describing: selection), privacy: .public)")
+                    vmCache[selection] = FeedViewModel(
+                        network: network,
+                        accountStore: accountStore,
+                        cache: cache,
+                        selection: selection
+                    )
+                    logger.debug("calling loadInitial")
+                    await vmCache[selection]?.loadInitial()
+                    let postCount = vmCache[selection]?.posts.count ?? -1
+                    let errorMsg = vmCache[selection]?.errorMessage ?? "nil"
+                    logger.debug("loadInitial returned, posts=\(postCount, privacy: .public), error=\(errorMsg, privacy: .public)")
+                }
             } else {
                 logger.debug("reusing existing FeedViewModel for \(String(describing: selection), privacy: .public)")
             }
-            logger.debug("calling loadInitial")
-            await vmCache[selection]?.loadInitial()
-            let postCount = vmCache[selection]?.posts.count ?? -1
-            let errorMsg = vmCache[selection]?.errorMessage ?? "nil"
-            logger.debug("loadInitial returned, posts=\(postCount, privacy: .public), error=\(errorMsg, privacy: .public)")
         }
         .onChange(of: filter) { _, newFilter in
             vmCache[selection]?.filter = newFilter

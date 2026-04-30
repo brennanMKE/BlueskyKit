@@ -180,7 +180,7 @@ public indirect enum Embed: Codable, Sendable {
             try c.encode(media, forKey: .media)
         case .video(let video):
             try c.encode("app.bsky.embed.video", forKey: .type)
-            try c.encode(video, forKey: .video)
+            try video.encode(to: encoder)
         case .unknown(let t):
             try c.encode(t, forKey: .type)
         }

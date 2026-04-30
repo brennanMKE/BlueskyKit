@@ -49,6 +49,12 @@ public final class FeedStore: FeedStoring {
     /// Same concept for repost operations.
     private var pendingRepostURIs: [ATURI: ATURI] = [:]
 
+    /// Non-observable flag used to prevent two concurrent `loadInitial` calls from
+    /// both passing the guard. Using `@ObservationIgnored` means setting this flag
+    /// does NOT trigger `@Observable` updates, so SwiftUI never re-renders (and
+    /// cancels the active `.task`) as a side-effect of claiming the slot.
+    @ObservationIgnored private var isInitialLoadInFlight = false
+
     private let network: any NetworkClient
     private let accountStore: any AccountStore
     private let cache: any CacheStore
@@ -67,18 +73,27 @@ public final class FeedStore: FeedStoring {
 
     public func loadInitial(selection: FeedSelection) async {
         logger.debug("loadInitial called, isLoading=\(self.isLoading, privacy: .public), posts=\(self.posts.count, privacy: .public)")
-        guard !isLoading, posts.isEmpty else {
-            logger.debug("loadInitial guard failed — returning early (isLoading=\(self.isLoading, privacy: .public), posts=\(self.posts.count, privacy: .public))")
+        // Use @ObservationIgnored flag so claiming the slot does NOT trigger an
+        // @Observable update — that would cause SwiftUI to re-render and cancel
+        // the active .task before the network call completes.
+        guard !isInitialLoadInFlight, posts.isEmpty else {
+            logger.debug("loadInitial guard failed — returning early (inFlight=\(self.isInitialLoadInFlight, privacy: .public), posts=\(self.posts.count, privacy: .public))")
             return
         }
+        isInitialLoadInFlight = true
+        defer { isInitialLoadInFlight = false }
         currentSelection = selection
-        // Serve stale cache immediately, then refresh in background
-        if let cached = try? await cache.fetch([FeedViewPost].self, for: cacheKey(selection)) {
-            logger.debug("serving \(cached.value.count, privacy: .public) cached posts (expired=\(cached.isExpired, privacy: .public))")
-            posts = cached.value
+        // Serve stale cache immediately so the UI has content before the network responds.
+        do {
+            if let cached = try await cache.fetch([FeedViewPost].self, for: cacheKey(selection)) {
+                logger.debug("serving \(cached.value.count, privacy: .public) cached posts (expired=\(cached.isExpired, privacy: .public))")
+                posts = cached.value
+            } else {
+                logger.debug("no cached posts found for key=\(self.cacheKey(selection), privacy: .public)")
+            }
+        } catch {
+            logger.error("cache fetch error for key=\(self.cacheKey(selection), privacy: .public): \(error, privacy: .public)")
         }
-        // Always reset=true so fresh results replace stale cache rather than appending.
-        // fetch() preserves the current posts snapshot if the network call fails (offline fallback).
         await fetch(selection: selection, reset: true)
     }
 
@@ -147,16 +162,23 @@ public final class FeedStore: FeedStoring {
             }
             // Cache first page only
             if reset {
-                try? await cache.store(posts, for: cacheKey(selection), ttl: cacheTTL)
+                do {
+                    try await cache.store(posts, for: cacheKey(selection), ttl: cacheTTL)
+                    logger.debug("cached \(self.posts.count, privacy: .public) posts for key=\(self.cacheKey(selection), privacy: .public)")
+                } catch {
+                    logger.error("cache store failed: \(error, privacy: .public)")
+                }
             }
         } catch {
             logger.error("fetch error: \(error, privacy: .public)")
-            errorMessage = error.localizedDescription
-            // Restore cached posts if available so offline users see stale content
-            // rather than a blank feed.
             if reset, !postsBeforeReset.isEmpty {
+                // Restore cached snapshot so offline users see stale content rather than
+                // a blank feed. Clear errorMessage so the UI shows the cached posts.
                 logger.debug("network failed; restoring \(postsBeforeReset.count, privacy: .public) cached posts")
                 posts = postsBeforeReset
+                errorMessage = nil
+            } else {
+                errorMessage = error.localizedDescription
             }
         }
     }

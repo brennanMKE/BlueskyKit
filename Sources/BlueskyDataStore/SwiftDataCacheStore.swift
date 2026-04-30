@@ -60,9 +60,24 @@ public actor SwiftDataCacheStore: CacheStore {
                   let groupURL = FileManager.default.containerURL(
                       forSecurityApplicationGroupIdentifier: groupID) {
             let url = groupURL.appendingPathComponent("BlueskyCache.store")
+            let exists = FileManager.default.fileExists(atPath: url.path)
+            print("[Cache] App Group store URL: \(url.path) (exists=\(exists))")
             config = ModelConfiguration(schema: schema, url: url)
         } else {
-            config = ModelConfiguration(schema: schema)
+            // Use an explicit path so the store location is consistent across launches.
+            // ModelConfiguration(schema:) with no URL uses a SwiftData-generated name
+            // that can vary, causing data written in one launch to be invisible the next.
+            let support = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first ?? FileManager.default.temporaryDirectory
+            let dir = support.appendingPathComponent(
+                Bundle.main.bundleIdentifier ?? "co.sstools.bluesky", isDirectory: true
+            )
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent("BlueskyCache.store")
+            let exists = FileManager.default.fileExists(atPath: url.path)
+            print("[Cache] Local store URL: \(url.path) (exists=\(exists))")
+            config = ModelConfiguration(schema: schema, url: url)
         }
         return try ModelContainer(for: schema, configurations: [config])
     }

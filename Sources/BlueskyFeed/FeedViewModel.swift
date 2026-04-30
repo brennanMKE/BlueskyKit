@@ -57,6 +57,12 @@ public final class FeedViewModel {
         self.selection = selection
     }
 
+    /// Wraps a store that is already owned and loaded externally (e.g. created in boot()).
+    public init(store: any FeedStoring, selection: FeedSelection) {
+        self.store = store
+        self.selection = selection
+    }
+
     // MARK: - Loading
 
     public func loadInitial() async {
