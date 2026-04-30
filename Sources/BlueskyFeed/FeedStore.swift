@@ -65,7 +65,9 @@ public final class FeedStore: FeedStoring {
             logger.debug("serving \(cached.value.count, privacy: .public) cached posts (expired=\(cached.isExpired, privacy: .public))")
             posts = cached.value
         }
-        await fetch(selection: selection, reset: posts.isEmpty)
+        // Always reset=true so fresh results replace stale cache rather than appending.
+        // fetch() preserves the current posts snapshot if the network call fails (offline fallback).
+        await fetch(selection: selection, reset: true)
     }
 
     public func loadMore(selection: FeedSelection) async {
@@ -81,6 +83,8 @@ public final class FeedStore: FeedStoring {
         logger.debug("fetch start, reset=\(reset, privacy: .public)")
         isLoading = true
         defer { isLoading = false }
+        // Snapshot current posts so we can restore them if a reset-fetch fails (offline fallback).
+        let postsBeforeReset = reset ? posts : []
         if reset { cursor = nil; hasMore = true }
         errorMessage = nil
         do {
@@ -111,6 +115,12 @@ public final class FeedStore: FeedStoring {
         } catch {
             logger.error("fetch error: \(error, privacy: .public)")
             errorMessage = error.localizedDescription
+            // Restore cached posts if available so offline users see stale content
+            // rather than a blank feed.
+            if reset, !postsBeforeReset.isEmpty {
+                logger.debug("network failed; restoring \(postsBeforeReset.count, privacy: .public) cached posts")
+                posts = postsBeforeReset
+            }
         }
     }
 
