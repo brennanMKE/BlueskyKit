@@ -10,6 +10,7 @@ public struct ThreadView: View {
     private let uri: ATURI
     private let network: any NetworkClient
     private let accountStore: any AccountStore
+    private let bookmarks: (any BookmarkStoring)?
     private let onAuthorTap: ((ProfileBasic) -> Void)?
     private let onPostTap: ((PostView) -> Void)?
 
@@ -20,12 +21,14 @@ public struct ThreadView: View {
         uri: ATURI,
         network: any NetworkClient,
         accountStore: any AccountStore,
+        bookmarks: (any BookmarkStoring)? = nil,
         onAuthorTap: ((ProfileBasic) -> Void)? = nil,
         onPostTap: ((PostView) -> Void)? = nil
     ) {
         self.uri = uri
         self.network = network
         self.accountStore = accountStore
+        self.bookmarks = bookmarks
         self.onAuthorTap = onAuthorTap
         self.onPostTap = onPostTap
         _viewModel = State(wrappedValue: ThreadViewModel(network: network, uri: uri))
@@ -119,6 +122,8 @@ public struct ThreadView: View {
         a.onTap = onPostTap
         a.onReply = { p in replyTarget = p }
         a.onAuthorTap = onAuthorTap
+        a.isBookmarked = bookmarks?.isBookmarked(uri: post.uri.rawValue) ?? false
+        a.onBookmark = { p in bookmarks?.toggle(post: p) }
         return a
     }
 

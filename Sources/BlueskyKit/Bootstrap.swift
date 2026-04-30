@@ -29,18 +29,21 @@ public final class BlueskyEnvironment {
     public let preferences: any PreferencesStore
     public let network: any NetworkClient
     public let cache: any CacheStore
+    public let bookmarks: any BookmarkStoring
 
     public init(
         session: any SessionManaging,
         accounts: any AccountStore,
         preferences: any PreferencesStore,
         network: any NetworkClient,
-        cache: any CacheStore
+        cache: any CacheStore,
+        bookmarks: any BookmarkStoring
     ) {
         self.session = session
         self.accounts = accounts
         self.preferences = preferences
         self.network = network
         self.cache = cache
+        self.bookmarks = bookmarks
     }
 }

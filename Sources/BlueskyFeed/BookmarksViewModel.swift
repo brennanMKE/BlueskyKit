@@ -3,21 +3,26 @@ import Observation
 import BlueskyCore
 import BlueskyKit
 
+/// View-model that exposes bookmark state from a `BookmarkStoring` implementation.
+///
+/// Thin wrapper so that `BookmarksScreen` does not need to reference
+/// the concrete `BookmarkStore` type from `BlueskyDataStore`.
 @Observable
 public final class BookmarksViewModel {
-    public var bookmarks: [BookmarkView] { store.bookmarks }
-    public var isLoading: Bool { store.isLoading }
-    public var isLoadingMore: Bool { store.isLoadingMore }
-    public var error: String? { store.error }
+    /// The snapshot list, ordered newest bookmark first.
+    public var bookmarks: [BookmarkedPostSnapshot] { store.bookmarks }
 
-    private let store: any BookmarksStoring
+    private let store: any BookmarkStoring
 
-    public init(network: any NetworkClient) {
-        self.store = BookmarksStore(network: network)
+    public init(store: any BookmarkStoring) {
+        self.store = store
     }
 
-    public func loadInitial() async { await store.loadInitial() }
-    public func loadMore() async { await store.loadMore() }
-    public func delete(bookmarkURI: ATURI) async { await store.delete(bookmarkURI: bookmarkURI) }
-    public func clearError() { store.clearError() }
+    public func isBookmarked(uri: String) -> Bool {
+        store.isBookmarked(uri: uri)
+    }
+
+    public func toggle(post: PostView) {
+        store.toggle(post: post)
+    }
 }

@@ -33,6 +33,8 @@ public struct PostCard: View {
         public var onBookmark: ((PostView) -> Void)?
         public var onHashtagTap: ((String) -> Void)?
         public var onMore: ((PostView) -> Void)?
+        /// Whether the viewer has bookmarked this post (drives the filled/unfilled icon).
+        public var isBookmarked: Bool = false
 
         public init() {}
     }
@@ -155,10 +157,10 @@ public struct PostCard: View {
             }
 
             actionButton(
-                icon: "bookmark",
+                icon: actions?.isBookmarked == true ? "bookmark.fill" : "bookmark",
                 count: nil,
-                color: theme.colors.textTertiary,
-                helpText: "Bookmark"
+                color: actions?.isBookmarked == true ? theme.colors.link : theme.colors.textTertiary,
+                helpText: actions?.isBookmarked == true ? "Remove Bookmark" : "Bookmark"
             ) { actions?.onBookmark?(post) }
 
             Menu {

@@ -37,6 +37,7 @@ public struct FeedView: View {
     private let network: any NetworkClient
     private let accountStore: any AccountStore
     private let cache: any CacheStore
+    private let bookmarks: (any BookmarkStoring)?
     var onPostTap: ((PostView) -> Void)?
     var onAuthorTap: ((ProfileBasic) -> Void)?
 
@@ -44,12 +45,14 @@ public struct FeedView: View {
         network: any NetworkClient,
         accountStore: any AccountStore,
         cache: any CacheStore,
+        bookmarks: (any BookmarkStoring)? = nil,
         onPostTap: ((PostView) -> Void)? = nil,
         onAuthorTap: ((ProfileBasic) -> Void)? = nil
     ) {
         self.network = network
         self.accountStore = accountStore
         self.cache = cache
+        self.bookmarks = bookmarks
         self.onPostTap = onPostTap
         self.onAuthorTap = onAuthorTap
     }
@@ -242,8 +245,10 @@ public struct FeedView: View {
                 repostTargetVM = vm
             }
         }
-        // TODO: wire to a BookmarksStore once the bookmarks module is implemented
-        a.onBookmark = { _ in }
+        a.isBookmarked = bookmarks?.isBookmarked(uri: item.post.uri.rawValue) ?? false
+        a.onBookmark = { post in
+            bookmarks?.toggle(post: post)
+        }
         return a
     }
 }
