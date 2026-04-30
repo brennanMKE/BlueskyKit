@@ -4,7 +4,7 @@ import BlueskyKit
 import BlueskyUI
 import BlueskyComposer
 
-/// Renders a post thread — root post with its parent chain above and reply tree below.
+/// Renders a post thread — focal post at the top, direct replies below as a flat list.
 public struct ThreadView: View {
 
     private let uri: ATURI
@@ -13,7 +13,6 @@ public struct ThreadView: View {
 
     @State private var viewModel: ThreadViewModel
     @State private var replyTarget: PostView? = nil
-    @State private var expandedPostIDs: Set<String> = []
 
     public init(uri: ATURI, network: any NetworkClient, accountStore: any AccountStore) {
         self.uri = uri
@@ -30,18 +29,14 @@ public struct ThreadView: View {
             } else if let msg = viewModel.errorMessage, viewModel.thread == nil {
                 errorView(msg)
             } else if let thread = viewModel.thread {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        threadNodes(thread)
-                    }
-                }
+                threadList(thread)
             } else {
-                // Initial state before .task fires — show a spinner
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .navigationTitle("Thread")
+        .adaptiveBlueskyTheme()
         .task { await viewModel.load() }
         .sheet(isPresented: Binding(
             get: { replyTarget != nil },
@@ -58,119 +53,64 @@ public struct ThreadView: View {
         }
     }
 
-    // MARK: - Recursive tree renderer
-    // Returns AnyView to break the self-referential `some View` compile error on recursive branches.
+    // MARK: - Flat list
 
-    private func threadNodes(_ node: ThreadViewPost) -> AnyView {
-        switch node {
-        case .post(let tp):
-            return AnyView(postNode(tp))
-        case .notFound:
-            return AnyView(unavailablePlaceholder("Post not found"))
-        case .blocked:
-            return AnyView(unavailablePlaceholder("Blocked post"))
-        case .unknown:
-            return AnyView(EmptyView())
+    private func threadList(_ node: ThreadViewPost) -> some View {
+        let rows = flattenThread(node)
+        return List {
+            ForEach(rows, id: \.post.uri) { item in
+                PostCard(item: item, actions: actions(for: item.post))
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
         }
+        .listStyle(.plain)
+        .refreshable { await viewModel.load() }
     }
 
-    private func postNode(_ tp: ThreadPost) -> some View {
-        VStack(spacing: 0) {
-            // Parent chain
-            if let parent = tp.parent {
-                threadNodes(parent)
-                replyConnector
-            }
-            // This post
-            PostCard(
-                item: FeedViewPost(post: tp.post, reply: nil, reason: nil),
-                actions: postCardActions(for: tp.post)
-            )
-            Divider()
-            // Replies — collapsed by default, expand on tap
-            if let replies = tp.replies {
-                ForEach(replies, id: \.stableID) { reply in
-                    HStack(alignment: .top, spacing: 0) {
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.3))
-                            .frame(width: 2)
-                            .padding(.leading, 30)
-                        if case .post(let replyTP) = reply {
-                            let isExpanded = expandedPostIDs.contains(replyTP.post.uri.rawValue)
-                            if isExpanded {
-                                threadNodes(reply)
-                            } else {
-                                collapsedPostRow(replyTP.post)
-                                    .onTapGesture {
-                                        expandedPostIDs.insert(replyTP.post.uri.rawValue)
-                                    }
-                            }
-                        } else {
-                            threadNodes(reply)
-                        }
-                    }
+    /// Walk the thread tree: ancestors (oldest first) → focal post → direct replies.
+    private func flattenThread(_ node: ThreadViewPost) -> [FeedViewPost] {
+        guard case .post(let tp) = node else { return [] }
+
+        var result: [FeedViewPost] = []
+
+        // Ancestors (parent chain, oldest first)
+        let ancestors = collectAncestors(tp.parent)
+        result.append(contentsOf: ancestors)
+
+        // Focal post
+        result.append(FeedViewPost(post: tp.post, reply: nil, reason: nil))
+
+        // Direct replies (flat — one level only)
+        if let replies = tp.replies {
+            for reply in replies {
+                if case .post(let rtp) = reply {
+                    result.append(FeedViewPost(post: rtp.post, reply: nil, reason: nil))
                 }
             }
         }
+
+        return result
     }
 
-    // MARK: - Collapsed reply row
-
-    private func collapsedPostRow(_ post: PostView) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                AvatarView(
-                    url: post.author.avatar,
-                    handle: post.author.handle.rawValue,
-                    size: 20
-                )
-                if let displayName = post.author.displayName, !displayName.isEmpty {
-                    Text(displayName)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                }
-                Text("@\(post.author.handle.rawValue)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Text(post.record.text)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+    /// Recursively collect the parent chain, returning oldest-first.
+    private func collectAncestors(_ node: ThreadViewPost?) -> [FeedViewPost] {
+        guard let node, case .post(let tp) = node else { return [] }
+        var chain = collectAncestors(tp.parent)
+        chain.append(FeedViewPost(post: tp.post, reply: nil, reason: nil))
+        return chain
     }
 
     // MARK: - Actions
 
-    private func postCardActions(for post: PostView) -> PostCard.Actions {
+    private func actions(for post: PostView) -> PostCard.Actions {
         var a = PostCard.Actions()
-        a.onReply = { post in replyTarget = post }
+        a.onReply = { p in replyTarget = p }
         return a
     }
 
-    // MARK: - Supporting views
-
-    private var replyConnector: some View {
-        Rectangle()
-            .fill(Color.secondary.opacity(0.3))
-            .frame(width: 2, height: 20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 30)
-    }
-
-    private func unavailablePlaceholder(_ message: String) -> some View {
-        Text(message)
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    // MARK: - Error view
 
     private func errorView(_ message: String) -> some View {
         VStack(spacing: 12) {
@@ -186,18 +126,5 @@ public struct ThreadView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-// MARK: - Stable ID helper
-
-private extension ThreadViewPost {
-    var stableID: String {
-        switch self {
-        case .post(let tp):        return tp.post.uri.rawValue
-        case .notFound(let uri):   return "notfound:\(uri.rawValue)"
-        case .blocked(let uri):    return "blocked:\(uri.rawValue)"
-        case .unknown(let t):      return "unknown:\(t)"
-        }
     }
 }
