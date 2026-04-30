@@ -13,6 +13,7 @@ public struct ThreadView: View {
 
     @State private var viewModel: ThreadViewModel
     @State private var replyTarget: PostView? = nil
+    @State private var expandedPostIDs: Set<String> = []
 
     public init(uri: ATURI, network: any NetworkClient, accountStore: any AccountStore) {
         self.uri = uri
@@ -82,7 +83,7 @@ public struct ThreadView: View {
                 actions: postCardActions(for: tp.post)
             )
             Divider()
-            // Replies
+            // Replies — collapsed by default, expand on tap
             if let replies = tp.replies {
                 ForEach(replies, id: \.stableID) { reply in
                     HStack(alignment: .top, spacing: 0) {
@@ -90,11 +91,55 @@ public struct ThreadView: View {
                             .fill(Color.secondary.opacity(0.3))
                             .frame(width: 2)
                             .padding(.leading, 30)
-                        threadNodes(reply)
+                        if case .post(let replyTP) = reply {
+                            let isExpanded = expandedPostIDs.contains(replyTP.post.uri.rawValue)
+                            if isExpanded {
+                                threadNodes(reply)
+                            } else {
+                                collapsedPostRow(replyTP.post)
+                                    .onTapGesture {
+                                        expandedPostIDs.insert(replyTP.post.uri.rawValue)
+                                    }
+                            }
+                        } else {
+                            threadNodes(reply)
+                        }
                     }
                 }
             }
         }
+    }
+
+    // MARK: - Collapsed reply row
+
+    private func collapsedPostRow(_ post: PostView) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                AvatarView(
+                    url: post.author.avatar,
+                    handle: post.author.handle.rawValue,
+                    size: 20
+                )
+                if let displayName = post.author.displayName, !displayName.isEmpty {
+                    Text(displayName)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                }
+                Text("@\(post.author.handle.rawValue)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Text(post.record.text)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     // MARK: - Actions
