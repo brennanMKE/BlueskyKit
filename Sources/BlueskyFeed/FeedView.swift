@@ -35,6 +35,7 @@ public struct FeedView: View {
 
     @State private var selection: FeedSelection = .timeline
     @State private var viewModels: [FeedSelection: FeedViewModel] = [:]
+    @State private var filter: FeedFilter = FeedFilter()
     @State private var replyTarget: PostView? = nil
     @State private var repostMenuTarget: PostView? = nil
     @State private var repostTargetVM: FeedViewModel? = nil
@@ -47,6 +48,20 @@ public struct FeedView: View {
             feedList
         }
         .navigationTitle("Home")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Toggle("Hide Replies", isOn: $filter.hideReplies)
+                    Toggle("Hide Reposts", isOn: $filter.hideReposts)
+                } label: {
+                    Image(systemName: filter.isActive
+                          ? "line.3.horizontal.decrease.circle.fill"
+                          : "line.3.horizontal.decrease.circle")
+                        .symbolRenderingMode(.hierarchical)
+                }
+                .help("Filter Feed")
+            }
+        }
         .adaptiveBlueskyTheme()
         .sheet(isPresented: Binding(
             get: { replyTarget != nil },
@@ -131,11 +146,15 @@ public struct FeedView: View {
             let errorMsg = viewModels[selection]?.errorMessage ?? "nil"
             logger.debug("loadInitial returned, posts=\(postCount, privacy: .public), error=\(errorMsg, privacy: .public)")
         }
+        .onChange(of: filter) { _, newFilter in
+            viewModels[selection]?.filter = newFilter
+        }
     }
 
     private func list(vm: FeedViewModel) -> some View {
-        List {
-            ForEach(vm.posts, id: \.post.uri) { item in
+        let displayed = vm.filteredPosts
+        return List {
+            ForEach(displayed, id: \.post.uri) { item in
                 PostCard(item: item, actions: actions(for: item, vm: vm))
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)

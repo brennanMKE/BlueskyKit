@@ -10,6 +10,20 @@ public enum FeedSelection: Hashable, Sendable {
     case feed(uri: String)
 }
 
+// MARK: - FeedFilter
+
+public struct FeedFilter: Equatable, Sendable {
+    public var hideReplies: Bool = false
+    public var hideReposts: Bool = false
+
+    public init(hideReplies: Bool = false, hideReposts: Bool = false) {
+        self.hideReplies = hideReplies
+        self.hideReposts = hideReposts
+    }
+
+    public var isActive: Bool { hideReplies || hideReposts }
+}
+
 // MARK: - FeedViewModel
 
 @Observable
@@ -19,6 +33,16 @@ public final class FeedViewModel {
     public var isLoading: Bool { store.isLoading }
     public var isRefreshing = false
     public var errorMessage: String? { store.errorMessage }
+
+    public var filter: FeedFilter = FeedFilter()
+
+    public var filteredPosts: [FeedViewPost] {
+        store.posts.filter { item in
+            if filter.hideReposts, item.reason != nil { return false }
+            if filter.hideReplies, item.reply != nil { return false }
+            return true
+        }
+    }
 
     private let store: any FeedStoring
     private let selection: FeedSelection
