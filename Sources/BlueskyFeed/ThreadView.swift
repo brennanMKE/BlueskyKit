@@ -2,18 +2,22 @@ import SwiftUI
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
+import BlueskyComposer
 
 /// Renders a post thread — root post with its parent chain above and reply tree below.
 public struct ThreadView: View {
 
     private let uri: ATURI
     private let network: any NetworkClient
+    private let accountStore: any AccountStore
 
     @State private var viewModel: ThreadViewModel
+    @State private var replyTarget: PostView? = nil
 
-    public init(uri: ATURI, network: any NetworkClient) {
+    public init(uri: ATURI, network: any NetworkClient, accountStore: any AccountStore) {
         self.uri = uri
         self.network = network
+        self.accountStore = accountStore
         _viewModel = State(wrappedValue: ThreadViewModel(network: network, uri: uri))
     }
 
@@ -34,6 +38,19 @@ public struct ThreadView: View {
         }
         .navigationTitle("Thread")
         .task { await viewModel.load() }
+        .sheet(isPresented: Binding(
+            get: { replyTarget != nil },
+            set: { if !$0 { replyTarget = nil } }
+        )) {
+            if let post = replyTarget {
+                ComposerSheet(
+                    network: network,
+                    accountStore: accountStore,
+                    replyTo: PostRef(uri: post.uri, cid: post.cid),
+                    replyToView: post
+                )
+            }
+        }
     }
 
     // MARK: - Recursive tree renderer
@@ -60,7 +77,10 @@ public struct ThreadView: View {
                 replyConnector
             }
             // This post
-            PostCard(item: FeedViewPost(post: tp.post, reply: nil, reason: nil))
+            PostCard(
+                item: FeedViewPost(post: tp.post, reply: nil, reason: nil),
+                actions: postCardActions(for: tp.post)
+            )
             Divider()
             // Replies
             if let replies = tp.replies {
@@ -76,6 +96,16 @@ public struct ThreadView: View {
             }
         }
     }
+
+    // MARK: - Actions
+
+    private func postCardActions(for post: PostView) -> PostCard.Actions {
+        var a = PostCard.Actions()
+        a.onReply = { post in replyTarget = post }
+        return a
+    }
+
+    // MARK: - Supporting views
 
     private var replyConnector: some View {
         Rectangle()
