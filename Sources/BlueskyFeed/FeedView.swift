@@ -10,6 +10,27 @@ nonisolated private let logger = Logger(
     category: "FeedView"
 )
 
+// MARK: - FeedViewModelCache
+
+/// Reference-type wrapper around the per-selection `FeedViewModel` dictionary.
+///
+/// Storing this as `@State` inside `FeedView` means SwiftUI keeps the *same
+/// object* alive even when the view struct is re-initialised by its parent
+/// (which happens during auth-state re-renders in `MainTabView`).  A plain
+/// value-type dictionary would reset to `[:]` on every re-init, causing
+/// duplicate `FeedViewModel` creation and two concurrent network fetches
+/// (issue #0049).
+final class FeedViewModelCache {
+    private var storage: [FeedSelection: FeedViewModel] = [:]
+
+    subscript(selection: FeedSelection) -> FeedViewModel? {
+        get { storage[selection] }
+        set { storage[selection] = newValue }
+    }
+}
+
+// MARK: - FeedView
+
 /// The home feed view — feed switcher at top, infinite-scroll post list below.
 public struct FeedView: View {
 
@@ -34,7 +55,13 @@ public struct FeedView: View {
     }
 
     @State private var selection: FeedSelection = .timeline
-    @State private var viewModels: [FeedSelection: FeedViewModel] = [:]
+    /// Wrapped in a reference-type box so that SwiftUI preserves the same
+    /// dictionary even when `FeedView` is reconstructed by its parent (e.g.
+    /// during auth-state re-renders in `MainTabView`).  A plain
+    /// `@State var [FeedSelection: FeedViewModel]` resets to `[:]` every time
+    /// the struct is re-initialised, which causes a fresh `.task(id:)` to fire
+    /// and a duplicate `FeedViewModel` to be created (issue #0049).
+    @State private var vmCache = FeedViewModelCache()
     @State private var filter: FeedFilter = FeedFilter()
     @State private var replyTarget: PostView? = nil
     @State private var repostMenuTarget: PostView? = nil
@@ -113,7 +140,7 @@ public struct FeedView: View {
 
     private var feedList: some View {
         Group {
-            if let vm = viewModels[selection] {
+            if let vm = vmCache[selection] {
                 if vm.posts.isEmpty && vm.isLoading {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -129,9 +156,9 @@ public struct FeedView: View {
         }
         .task(id: selection) {
             logger.debug("task fired, selection=\(String(describing: selection), privacy: .public)")
-            if viewModels[selection] == nil {
+            if vmCache[selection] == nil {
                 logger.debug("creating FeedViewModel for \(String(describing: selection), privacy: .public)")
-                viewModels[selection] = FeedViewModel(
+                vmCache[selection] = FeedViewModel(
                     network: network,
                     accountStore: accountStore,
                     cache: cache,
@@ -141,13 +168,13 @@ public struct FeedView: View {
                 logger.debug("reusing existing FeedViewModel for \(String(describing: selection), privacy: .public)")
             }
             logger.debug("calling loadInitial")
-            await viewModels[selection]?.loadInitial()
-            let postCount = viewModels[selection]?.posts.count ?? -1
-            let errorMsg = viewModels[selection]?.errorMessage ?? "nil"
+            await vmCache[selection]?.loadInitial()
+            let postCount = vmCache[selection]?.posts.count ?? -1
+            let errorMsg = vmCache[selection]?.errorMessage ?? "nil"
             logger.debug("loadInitial returned, posts=\(postCount, privacy: .public), error=\(errorMsg, privacy: .public)")
         }
         .onChange(of: filter) { _, newFilter in
-            viewModels[selection]?.filter = newFilter
+            vmCache[selection]?.filter = newFilter
         }
     }
 
