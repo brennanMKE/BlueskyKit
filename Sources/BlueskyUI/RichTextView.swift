@@ -115,11 +115,11 @@ public struct RichTextView: View {
                 features: [.mention(did: DID(rawValue: "did:plc:alice"))]
             ),
             RichTextFacet(
-                index: ByteSlice(byteStart: 37, byteEnd: 53),
+                index: ByteSlice(byteStart: 36, byteEnd: 52),
                 features: [.link(uri: "https://bsky.app")]
             ),
             RichTextFacet(
-                index: ByteSlice(byteStart: 58, byteEnd: 66),
+                index: ByteSlice(byteStart: 57, byteEnd: 65),
                 features: [.tag(tag: "bluesky")]
             ),
         ]

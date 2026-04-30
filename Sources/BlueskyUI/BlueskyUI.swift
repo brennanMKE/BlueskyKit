@@ -1,3 +1,0 @@
-// BlueskyUI
-
-public struct BlueskyUI {}
