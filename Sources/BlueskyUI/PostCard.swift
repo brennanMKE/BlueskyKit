@@ -221,7 +221,7 @@ public struct PostCard: View {
     }
 }
 
-#Preview("PostCard") {
+#Preview("PostCard - Light") {
     let author = ProfileBasic(
         did: DID(rawValue: "did:plc:alice"),
         handle: Handle(rawValue: "alice.bsky.social"),
