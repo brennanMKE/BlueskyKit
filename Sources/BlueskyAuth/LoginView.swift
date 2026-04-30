@@ -240,9 +240,18 @@ private final class PreviewNetworkClient: NetworkClient, @unchecked Sendable {
     }
 }
 
-#Preview("Login") {
+#Preview("Login — Light") {
     LoginView(
         session: SessionManager(accountStore: PreviewAccountStore(), network: PreviewNetworkClient()),
         onSuccess: {}
     )
+    .preferredColorScheme(.light)
+}
+
+#Preview("Login — Dark") {
+    LoginView(
+        session: SessionManager(accountStore: PreviewAccountStore(), network: PreviewNetworkClient()),
+        onSuccess: {}
+    )
+    .preferredColorScheme(.dark)
 }

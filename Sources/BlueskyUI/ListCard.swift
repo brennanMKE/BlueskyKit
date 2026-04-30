@@ -64,7 +64,7 @@ public struct ListCard: View {
     }
 }
 
-#Preview("ListCard") {
+#Preview("ListCard — Light") {
     let creator = ProfileView(
         did: DID(rawValue: "did:plc:xyz"),
         handle: Handle(rawValue: "bsky.app"),
@@ -85,5 +85,35 @@ public struct ListCard: View {
         indexedAt: .now
     )
     ListCard(list: list)
+        .frame(maxWidth: .infinity)
+        .background(.background)
         .blueskyTheme(.light)
+        .preferredColorScheme(.light)
+}
+
+#Preview("ListCard — Dark") {
+    let creator = ProfileView(
+        did: DID(rawValue: "did:plc:xyz"),
+        handle: Handle(rawValue: "bsky.app"),
+        displayName: "Bluesky",
+        description: nil,
+        avatar: nil,
+        indexedAt: nil,
+        viewer: nil
+    )
+    let list = ListView(
+        uri: ATURI(rawValue: "at://did:plc:xyz/app.bsky.graph.list/abc"),
+        cid: "bafyabc",
+        creator: creator,
+        name: "Swift Developers",
+        purpose: "app.bsky.graph.defs#curatelist",
+        description: "People building great things with Swift.",
+        avatar: nil,
+        indexedAt: .now
+    )
+    ListCard(list: list)
+        .frame(maxWidth: .infinity)
+        .background(.background)
+        .blueskyTheme(.dark)
+        .preferredColorScheme(.dark)
 }

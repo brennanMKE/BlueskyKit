@@ -251,5 +251,44 @@ public struct PostCard: View {
         PostCard(item: item, actions: PostCard.Actions())
         Divider()
     }
+    .frame(maxWidth: .infinity)
+    .background(.background)
     .blueskyTheme(.light)
+    .preferredColorScheme(.light)
+}
+
+#Preview("PostCard — Dark") {
+    let author = ProfileBasic(
+        did: DID(rawValue: "did:plc:alice"),
+        handle: Handle(rawValue: "alice.bsky.social"),
+        displayName: "Alice",
+        avatar: nil
+    )
+    let record = PostRecord(
+        text: "Hello Bluesky! Check out #bluesky — the open social network.",
+        createdAt: Date(timeIntervalSinceNow: -120)
+    )
+    let post = PostView(
+        uri: ATURI(rawValue: "at://did:plc:alice/app.bsky.feed.post/abc"),
+        cid: "bafyabc",
+        author: author,
+        record: record,
+        embed: nil,
+        replyCount: 3,
+        repostCount: 12,
+        likeCount: 47,
+        quoteCount: 2,
+        indexedAt: Date(timeIntervalSinceNow: -120),
+        viewer: nil
+    )
+    let item = FeedViewPost(post: post, reply: nil, reason: nil)
+
+    ScrollView {
+        PostCard(item: item, actions: PostCard.Actions())
+        Divider()
+    }
+    .frame(maxWidth: .infinity)
+    .background(.background)
+    .blueskyTheme(.dark)
+    .preferredColorScheme(.dark)
 }

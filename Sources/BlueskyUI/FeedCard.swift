@@ -60,7 +60,7 @@ public struct FeedCard: View {
     }
 }
 
-#Preview("FeedCard") {
+#Preview("FeedCard — Light") {
     let creator = ProfileView(
         did: DID(rawValue: "did:plc:xyz"),
         handle: Handle(rawValue: "bsky.app"),
@@ -80,5 +80,34 @@ public struct FeedCard: View {
         likeCount: 24000
     )
     FeedCard(feed: feed)
+        .frame(maxWidth: .infinity)
+        .background(.background)
         .blueskyTheme(.light)
+        .preferredColorScheme(.light)
+}
+
+#Preview("FeedCard — Dark") {
+    let creator = ProfileView(
+        did: DID(rawValue: "did:plc:xyz"),
+        handle: Handle(rawValue: "bsky.app"),
+        displayName: "Bluesky",
+        description: nil,
+        avatar: nil,
+        indexedAt: nil,
+        viewer: nil
+    )
+    let feed = GeneratorView(
+        uri: ATURI(rawValue: "at://did:plc:xyz/app.bsky.feed.generator/whats-hot"),
+        cid: "bafyxyz",
+        did: DID(rawValue: "did:web:discover.bsky.app"),
+        creator: creator,
+        displayName: "Discover",
+        description: "Top posts from across the network, ranked by engagement.",
+        likeCount: 24000
+    )
+    FeedCard(feed: feed)
+        .frame(maxWidth: .infinity)
+        .background(.background)
+        .blueskyTheme(.dark)
+        .preferredColorScheme(.dark)
 }

@@ -53,11 +53,26 @@ public struct AvatarView: View {
     }
 }
 
-#Preview("AvatarView") {
+#Preview("AvatarView — Light") {
     HStack(spacing: Spacing.md) {
         AvatarView(url: nil, handle: "alice.bsky.social", size: 40)
         AvatarView(url: nil, handle: "bob.bsky.social",   size: 56)
         AvatarView(url: nil, handle: "carol.bsky.social", size: 32)
     }
     .padding()
+    .frame(maxWidth: .infinity)
+    .background(.background)
+    .preferredColorScheme(.light)
+}
+
+#Preview("AvatarView — Dark") {
+    HStack(spacing: Spacing.md) {
+        AvatarView(url: nil, handle: "alice.bsky.social", size: 40)
+        AvatarView(url: nil, handle: "bob.bsky.social",   size: 56)
+        AvatarView(url: nil, handle: "carol.bsky.social", size: 32)
+    }
+    .padding()
+    .frame(maxWidth: .infinity)
+    .background(.background)
+    .preferredColorScheme(.dark)
 }

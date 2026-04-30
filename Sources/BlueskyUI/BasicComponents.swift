@@ -245,7 +245,7 @@ public extension View {
 
 // MARK: - Previews
 
-#Preview("BasicComponents") {
+#Preview("BasicComponents — Light") {
     VStack(spacing: Spacing.lg) {
         HStack {
             BadgeView(count: 5)
@@ -268,5 +268,37 @@ public extension View {
         BlueskyTextField("Password", text: .constant(""), icon: "lock", isSecure: true)
     }
     .padding()
+    .frame(maxWidth: .infinity)
+    .background(.background)
     .blueskyTheme(.light)
+    .preferredColorScheme(.light)
+}
+
+#Preview("BasicComponents — Dark") {
+    VStack(spacing: Spacing.lg) {
+        HStack {
+            BadgeView(count: 5)
+            BadgeView(count: 99)
+            BadgeView(count: 150)
+        }
+
+        Button("Primary Action") {}
+            .buttonStyle(.bskyPrimary)
+
+        Button("Secondary") {}
+            .buttonStyle(.bskySecondary)
+
+        Button("Delete") {}
+            .buttonStyle(.bskyDestructive)
+
+        BlueskyDivider()
+
+        BlueskyTextField("Username", text: .constant(""))
+        BlueskyTextField("Password", text: .constant(""), icon: "lock", isSecure: true)
+    }
+    .padding()
+    .frame(maxWidth: .infinity)
+    .background(.background)
+    .blueskyTheme(.dark)
+    .preferredColorScheme(.dark)
 }

@@ -105,7 +105,7 @@ public struct RichTextView: View {
     }
 }
 
-#Preview("RichTextView") {
+#Preview("RichTextView — Light") {
     let text = "Hello @alice.bsky.social! Check out https://bsky.app and #bluesky"
     RichTextView(
         text: text,
@@ -125,4 +125,32 @@ public struct RichTextView: View {
         ]
     )
     .padding()
+    .frame(maxWidth: .infinity)
+    .background(.background)
+    .preferredColorScheme(.light)
+}
+
+#Preview("RichTextView — Dark") {
+    let text = "Hello @alice.bsky.social! Check out https://bsky.app and #bluesky"
+    RichTextView(
+        text: text,
+        facets: [
+            RichTextFacet(
+                index: ByteSlice(byteStart: 6, byteEnd: 24),
+                features: [.mention(did: DID(rawValue: "did:plc:alice"))]
+            ),
+            RichTextFacet(
+                index: ByteSlice(byteStart: 36, byteEnd: 52),
+                features: [.link(uri: "https://bsky.app")]
+            ),
+            RichTextFacet(
+                index: ByteSlice(byteStart: 57, byteEnd: 65),
+                features: [.tag(tag: "bluesky")]
+            ),
+        ]
+    )
+    .padding()
+    .frame(maxWidth: .infinity)
+    .background(.background)
+    .preferredColorScheme(.dark)
 }
