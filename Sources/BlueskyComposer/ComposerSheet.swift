@@ -2,12 +2,19 @@ import SwiftUI
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
+#if os(iOS)
+import PhotosUI
+#endif
 
-/// Post composer sheet: text input, character counter, reply context, quote post, image attachments.
+/// Post composer sheet: text input, character counter, reply context, quote post, image attachments,
+/// video picker, link card preview, thread composer, and draft persistence.
 public struct ComposerSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: ComposerViewModel
+    #if os(iOS)
+    @State private var selectedVideo: PhotosPickerItem?
+    #endif
 
     public init(
         network: any NetworkClient,
@@ -41,8 +48,17 @@ public struct ComposerSheet: View {
                     if let quoteView = viewModel.quotedPostView {
                         quotedPostPreview(quoteView)
                     }
+                    // Link card preview (only when no images/video attached)
+                    if let url = viewModel.visibleLinkURL {
+                        linkCardPreview(url)
+                    }
                     imageGrid
-                    imagePicker
+                    videoPreview
+                    mediaToolbar
+                    // Thread posts
+                    threadPosts
+                    // Add-to-thread button
+                    addThreadPostButton
                     Divider().padding(.top, 8)
                     bottomBar
                 }
@@ -76,6 +92,17 @@ public struct ComposerSheet: View {
                 Text(viewModel.errorMessage ?? "")
             }
         }
+        .onChange(of: viewModel.text) { viewModel.saveDraft() }
+        .onDisappear { viewModel.saveDraft() }
+        #if os(iOS)
+        .onChange(of: selectedVideo) { item in
+            guard let item else { return }
+            Task {
+                await viewModel.attachVideo(item)
+                selectedVideo = nil
+            }
+        }
+        #endif
     }
 
     // MARK: - Reply banner
@@ -159,6 +186,37 @@ public struct ComposerSheet: View {
         .padding(.top, 8)
     }
 
+    // MARK: - Link card preview
+
+    private func linkCardPreview(_ url: URL) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "link")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(url.host ?? url.absoluteString)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                Text(url.absoluteString)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button {
+                viewModel.dismissLinkCard()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.top, 8)
+    }
+
     // MARK: - Image grid
 
     @ViewBuilder
@@ -184,17 +242,124 @@ public struct ComposerSheet: View {
         }
     }
 
-    // MARK: - Image picker button
+    // MARK: - Video preview
 
     @ViewBuilder
-    private var imagePicker: some View {
-        if viewModel.images.count < 4 {
-            #if os(iOS)
-            ImagePickerButton { data, mimeType in
-                viewModel.addImage(data: data, mimeType: mimeType)
+    private var videoPreview: some View {
+        if viewModel.attachedVideo != nil {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.secondary.opacity(0.15))
+                    .frame(height: 120)
+                HStack(spacing: 12) {
+                    Image(systemName: "play.circle.fill")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("Video attached")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        viewModel.removeVideo()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
             }
-            #endif
+            .padding(.top, 8)
         }
+    }
+
+    // MARK: - Media toolbar (image picker + video picker)
+
+    @ViewBuilder
+    private var mediaToolbar: some View {
+        #if os(iOS)
+        HStack(spacing: 16) {
+            if viewModel.images.count < 4 && viewModel.attachedVideo == nil {
+                ImagePickerButton { data, mimeType in
+                    viewModel.addImage(data: data, mimeType: mimeType)
+                }
+            }
+            if viewModel.images.isEmpty && viewModel.attachedVideo == nil {
+                PhotosPicker(selection: $selectedVideo, matching: .videos) {
+                    Label("Add video", systemImage: "video.badge.plus")
+                        .font(.subheadline)
+                }
+                .padding(.top, 8)
+            }
+        }
+        #endif
+    }
+
+    // MARK: - Thread posts
+
+    @ViewBuilder
+    private var threadPosts: some View {
+        if !viewModel.additionalPosts.isEmpty {
+            ForEach(viewModel.additionalPosts.indices, id: \.self) { index in
+                threadPostSection(index: index)
+            }
+        }
+    }
+
+    private func threadPostSection(index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                // Reply connector line
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.3))
+                    .frame(width: 2)
+                    .frame(maxHeight: .infinity)
+                    .padding(.leading, 8)
+                    .padding(.trailing, 12)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    TextEditor(text: Binding(
+                        get: { viewModel.additionalPosts[index] },
+                        set: { viewModel.additionalPosts[index] = $0 }
+                    ))
+                    .font(.body)
+                    .frame(minHeight: 80)
+                    .scrollContentBackground(.hidden)
+
+                    HStack {
+                        let remaining = 300 - viewModel.additionalPosts[index].unicodeScalars.count
+                        Text("\(remaining)")
+                            .font(.caption).monospacedDigit()
+                            .foregroundStyle(remaining < 0 ? .red : remaining < 20 ? .orange : .secondary)
+                        Spacer()
+                        Button {
+                            viewModel.removePost(at: index)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .foregroundStyle(.red.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.top, 8)
+
+            Divider().padding(.top, 4)
+        }
+    }
+
+    // MARK: - Add thread post button
+
+    private var addThreadPostButton: some View {
+        Button {
+            viewModel.addPostToThread()
+        } label: {
+            Label("Add to thread", systemImage: "plus.circle")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 8)
     }
 
     // MARK: - Bottom bar (language + char count)

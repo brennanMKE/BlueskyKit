@@ -17,6 +17,9 @@ public protocol ComposerStoring: AnyObject, Observable, Sendable {
     func post(
         text: String,
         images: [ComposerImageAttachment],
+        attachedVideo: VideoAttachment?,
+        detectedURL: URL?,
+        additionalPosts: [String],
         replyTo: PostRef?,
         quotedPost: PostRef?,
         selectedLanguage: String,
@@ -24,6 +27,18 @@ public protocol ComposerStoring: AnyObject, Observable, Sendable {
     ) async -> [ComposerImageAttachment]
     func searchMentions(_ prefix: String)
     func clearError()
+}
+
+// MARK: - VideoAttachment
+
+public struct VideoAttachment: Sendable {
+    public let data: Data
+    public let mimeType: String
+
+    public init(data: Data, mimeType: String) {
+        self.data = data
+        self.mimeType = mimeType
+    }
 }
 
 // MARK: - ComposerImageAttachment
@@ -69,6 +84,9 @@ public final class ComposerStore: ComposerStoring {
     public func post(
         text: String,
         images: [ComposerImageAttachment],
+        attachedVideo: VideoAttachment?,
+        detectedURL: URL?,
+        additionalPosts: [String],
         replyTo: PostRef?,
         quotedPost: PostRef?,
         selectedLanguage: String,
@@ -102,6 +120,17 @@ public final class ComposerStore: ComposerStoring {
                 return EmbedImage(image: blob, alt: img.altText, aspectRatio: nil)
             }
 
+            // Upload video if attached
+            var videoEmbed: Embed?
+            if let video = attachedVideo {
+                let resp: UploadBlobResponse = try await network.upload(
+                    lexicon: "com.atproto.repo.uploadBlob",
+                    data: video.data,
+                    mimeType: video.mimeType
+                )
+                videoEmbed = .video(EmbedVideo(video: resp.blob, captions: nil, alt: nil, aspectRatio: nil))
+            }
+
             var embed: Embed?
             if !uploadedImages.isEmpty, let qp = quotedPost {
                 embed = .recordWithMedia(
@@ -110,6 +139,15 @@ public final class ComposerStore: ComposerStoring {
                 )
             } else if !uploadedImages.isEmpty {
                 embed = .images(uploadedImages)
+            } else if let videoEmbed {
+                embed = videoEmbed
+            } else if let url = detectedURL, quotedPost == nil {
+                embed = .external(EmbedExternal(
+                    uri: url.absoluteString,
+                    title: url.host ?? url.absoluteString,
+                    description: "",
+                    thumb: nil
+                ))
             } else if let qp = quotedPost {
                 embed = .record(EmbedRecordRef(uri: qp.uri, cid: qp.cid))
             }
@@ -128,9 +166,36 @@ public final class ComposerStore: ComposerStoring {
                 collection: "app.bsky.feed.post",
                 record: record
             )
-            let _: CreateRecordResponse = try await network.post(
+            let firstResponse: CreateRecordResponse = try await network.post(
                 lexicon: "com.atproto.repo.createRecord", body: req
             )
+
+            // Submit additional thread posts
+            if !additionalPosts.isEmpty {
+                let rootRef = PostRef(uri: firstResponse.uri, cid: firstResponse.cid)
+                var parentRef = rootRef
+                for threadText in additionalPosts {
+                    guard !threadText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                    let threadFacets = FacetBuilder.build(from: threadText, mentionDIDs: mentionDIDs)
+                    let threadRecord = PostRecord(
+                        text: threadText,
+                        facets: threadFacets.isEmpty ? nil : threadFacets,
+                        embed: nil,
+                        reply: ReplyRef(root: rootRef, parent: parentRef),
+                        langs: [selectedLanguage]
+                    )
+                    let threadReq = CreateRecordRequest(
+                        repo: viewerDID.rawValue,
+                        collection: "app.bsky.feed.post",
+                        record: threadRecord
+                    )
+                    let threadResponse: CreateRecordResponse = try await network.post(
+                        lexicon: "com.atproto.repo.createRecord", body: threadReq
+                    )
+                    parentRef = PostRef(uri: threadResponse.uri, cid: threadResponse.cid)
+                }
+            }
+
             didPost = true
         } catch {
             logger.error("post error: \(error, privacy: .public)")
