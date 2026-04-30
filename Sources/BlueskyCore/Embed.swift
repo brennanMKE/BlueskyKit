@@ -248,7 +248,7 @@ public enum EmbedRecordContent: Codable, Sendable {
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        let type = try c.decode(String.self, forKey: .type)
+        let type = (try? c.decode(String.self, forKey: .type)) ?? "unknown"
         switch type {
         case "app.bsky.embed.record#viewRecord":
             let record = try EmbedViewRecord(from: decoder)
