@@ -37,6 +37,18 @@ public final class FeedStore: FeedStoring {
     private var hasMore = true
     private var currentSelection: FeedSelection?
 
+    /// Post URIs whose like state is currently being mutated (like or unlike in-flight).
+    /// Used both as a double-tap guard and to re-apply viewer state if a background
+    /// refresh replaces the posts array before the API call completes.
+    private var likeInFlight: Set<ATURI> = []
+    /// Post URIs whose repost state is currently being mutated.
+    private var repostInFlight: Set<ATURI> = []
+    /// Confirmed like URI for each post that has a completed-but-not-yet-indexed like.
+    /// Keyed by post URI; value is the server-returned like AT-URI.
+    private var pendingLikeURIs: [ATURI: ATURI] = [:]
+    /// Same concept for repost operations.
+    private var pendingRepostURIs: [ATURI: ATURI] = [:]
+
     private let network: any NetworkClient
     private let accountStore: any AccountStore
     private let cache: any CacheStore
@@ -104,7 +116,32 @@ public final class FeedStore: FeedStoring {
             cursor = response.cursor
             hasMore = response.cursor != nil
             if reset {
-                posts = response.feed
+                // Re-apply any viewer state that is still in-flight so that a background
+                // refresh does not silently revert an optimistic like/repost that hasn't
+                // been confirmed yet (or has been confirmed but the server hasn't indexed
+                // it into this feed response yet).
+                let hasPendingLikes = !likeInFlight.isEmpty || !pendingLikeURIs.isEmpty
+                let hasPendingReposts = !repostInFlight.isEmpty || !pendingRepostURIs.isEmpty
+                if hasPendingLikes || hasPendingReposts {
+                    posts = response.feed.map { item in
+                        var pv = item.post
+                        // Prefer the server-confirmed URI; fall back to optimistic "pending://"
+                        // for operations that haven't completed yet.
+                        if let confirmedLikeURI = pendingLikeURIs[pv.uri] {
+                            pv = pv.withLike(confirmedLikeURI)
+                        } else if likeInFlight.contains(pv.uri) {
+                            pv = pv.withLike(ATURI(rawValue: "pending://like"))
+                        }
+                        if let confirmedRepostURI = pendingRepostURIs[pv.uri] {
+                            pv = pv.withRepost(confirmedRepostURI)
+                        } else if repostInFlight.contains(pv.uri) {
+                            pv = pv.withRepost(ATURI(rawValue: "pending://repost"))
+                        }
+                        return FeedViewPost(post: pv, reply: item.reply, reason: item.reason)
+                    }
+                } else {
+                    posts = response.feed
+                }
             } else {
                 posts.append(contentsOf: response.feed)
             }
@@ -134,8 +171,21 @@ public final class FeedStore: FeedStoring {
     // MARK: - Interactions
 
     public func like(post: PostView) async {
+        // Double-tap guard: claim the slot synchronously (before any await) so a second
+        // concurrent call that arrives before loadCurrentDID returns is also blocked.
+        guard likeInFlight.insert(post.uri).inserted else {
+            logger.debug("like ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+            return
+        }
+        defer { likeInFlight.remove(post.uri) }
         guard let did = await loadCurrentDID() else { return }
-        guard post.viewer?.like == nil else { return }
+        // Re-check viewer state from the live posts array — the passed-in post may be stale
+        // if a feed refresh ran during the loadCurrentDID await above.
+        let livePost = posts.first(where: { $0.post.uri == post.uri })?.post ?? post
+        guard livePost.viewer?.like == nil else {
+            logger.debug("like ignored — post already liked: \(post.uri.rawValue, privacy: .public)")
+            return
+        }
         updatePost(uri: post.uri) { $0.withLike(ATURI(rawValue: "pending://like")) }
         do {
             let req = CreateRecordRequest(
@@ -146,28 +196,56 @@ public final class FeedStore: FeedStoring {
             let resp: CreateRecordResponse = try await network.post(
                 lexicon: "com.atproto.repo.createRecord", body: req
             )
+            logger.debug("like succeeded, likeURI=\(resp.uri.rawValue, privacy: .public)")
+            // Store the confirmed URI so that if a feed refresh fires before the server
+            // has indexed this like, the refresh can re-apply it rather than reverting.
+            pendingLikeURIs[post.uri] = resp.uri
             updatePost(uri: post.uri) { $0.withLike(resp.uri) }
         } catch {
+            logger.error("like failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
             updatePost(uri: post.uri) { $0.withLike(nil) }
         }
+        // Clear the confirmed URI now that the operation is settled — the next feed refresh
+        // will include the server's authoritative viewer state.
+        pendingLikeURIs.removeValue(forKey: post.uri)
+        // defer removes likeInFlight entry.
     }
 
     public func unlike(post: PostView) async {
-        guard let likeURI = post.viewer?.like,
-              let did = await loadCurrentDID(),
+        guard let likeURI = post.viewer?.like else { return }
+        // Claim the slot synchronously before any await.
+        guard likeInFlight.insert(post.uri).inserted else {
+            logger.debug("unlike ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+            return
+        }
+        defer { likeInFlight.remove(post.uri) }
+        guard let did = await loadCurrentDID(),
               let rkey = likeURI.rkey else { return }
         updatePost(uri: post.uri) { $0.withLike(nil) }
         do {
             let req = DeleteRecordRequest(repo: did.rawValue, collection: "app.bsky.feed.like", rkey: rkey)
             let _: EmptyResponse = try await network.post(lexicon: "com.atproto.repo.deleteRecord", body: req)
+            logger.debug("unlike succeeded for \(post.uri.rawValue, privacy: .public)")
         } catch {
+            logger.error("unlike failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
             updatePost(uri: post.uri) { $0.withLike(likeURI) }
         }
+        // defer removes likeInFlight entry.
     }
 
     public func repost(post: PostView) async {
+        // Claim the slot synchronously before any await.
+        guard repostInFlight.insert(post.uri).inserted else {
+            logger.debug("repost ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+            return
+        }
+        defer { repostInFlight.remove(post.uri) }
         guard let did = await loadCurrentDID() else { return }
-        guard post.viewer?.repost == nil else { return }
+        let livePost = posts.first(where: { $0.post.uri == post.uri })?.post ?? post
+        guard livePost.viewer?.repost == nil else {
+            logger.debug("repost ignored — post already reposted: \(post.uri.rawValue, privacy: .public)")
+            return
+        }
         updatePost(uri: post.uri) { $0.withRepost(ATURI(rawValue: "pending://repost")) }
         do {
             let req = CreateRecordRequest(
@@ -178,23 +256,37 @@ public final class FeedStore: FeedStoring {
             let resp: CreateRecordResponse = try await network.post(
                 lexicon: "com.atproto.repo.createRecord", body: req
             )
+            logger.debug("repost succeeded, repostURI=\(resp.uri.rawValue, privacy: .public)")
+            pendingRepostURIs[post.uri] = resp.uri
             updatePost(uri: post.uri) { $0.withRepost(resp.uri) }
         } catch {
+            logger.error("repost failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
             updatePost(uri: post.uri) { $0.withRepost(nil) }
         }
+        pendingRepostURIs.removeValue(forKey: post.uri)
+        // defer removes repostInFlight entry.
     }
 
     public func unrepost(post: PostView) async {
-        guard let repostURI = post.viewer?.repost,
-              let did = await loadCurrentDID(),
+        guard let repostURI = post.viewer?.repost else { return }
+        // Claim the slot synchronously before any await.
+        guard repostInFlight.insert(post.uri).inserted else {
+            logger.debug("unrepost ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+            return
+        }
+        defer { repostInFlight.remove(post.uri) }
+        guard let did = await loadCurrentDID(),
               let rkey = repostURI.rkey else { return }
         updatePost(uri: post.uri) { $0.withRepost(nil) }
         do {
             let req = DeleteRecordRequest(repo: did.rawValue, collection: "app.bsky.feed.repost", rkey: rkey)
             let _: EmptyResponse = try await network.post(lexicon: "com.atproto.repo.deleteRecord", body: req)
+            logger.debug("unrepost succeeded for \(post.uri.rawValue, privacy: .public)")
         } catch {
+            logger.error("unrepost failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
             updatePost(uri: post.uri) { $0.withRepost(repostURI) }
         }
+        // defer removes repostInFlight entry.
     }
 
     // MARK: - Helpers
