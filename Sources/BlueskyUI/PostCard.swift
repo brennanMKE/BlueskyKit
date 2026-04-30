@@ -125,15 +125,27 @@ public struct PostCard: View {
                 color: isLiked ? theme.colors.like : theme.colors.textTertiary
             ) { actions?.onLike?(post) }
 
-            actionButton(
-                icon: "square.and.arrow.up",
-                count: nil,
-                color: theme.colors.textTertiary
-            ) { actions?.onShare?(post) }
+            if let url = shareURL(for: post) {
+                ShareLink(item: url) {
+                    HStack(spacing: Spacing._2xs) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 16))
+                    }
+                    .foregroundStyle(theme.colors.textTertiary)
+                }
+                .buttonStyle(.plain)
+            }
 
             Spacer(minLength: 0)
         }
         .padding(.top, Spacing._2xs)
+    }
+
+    private func shareURL(for post: PostView) -> URL? {
+        let handle = post.author.handle.rawValue
+        let rkey = post.uri.rawValue.components(separatedBy: "/").last ?? ""
+        guard !rkey.isEmpty else { return nil }
+        return URL(string: "https://bsky.app/profile/\(handle)/post/\(rkey)")
     }
 
     // MARK: - Helpers
