@@ -197,18 +197,21 @@ public struct FeedView: View {
         a.onReply = { post in replyTarget = post }
         a.onLike = { post in
             Task {
-                if post.viewer?.like != nil {
-                    await vm.unlike(post: post)
+                // Look up the freshest copy of this post from the view model
+                let current = vm.posts.first(where: { $0.post.uri == post.uri })?.post ?? post
+                if current.viewer?.like != nil {
+                    await vm.unlike(post: current)
                 } else {
-                    await vm.like(post: post)
+                    await vm.like(post: current)
                 }
             }
         }
         a.onRepost = { post in
-            if post.viewer?.repost != nil {
-                Task { await vm.unrepost(post: post) }
+            let current = vm.posts.first(where: { $0.post.uri == post.uri })?.post ?? post
+            if current.viewer?.repost != nil {
+                Task { await vm.unrepost(post: current) }
             } else {
-                repostMenuTarget = post
+                repostMenuTarget = current
                 repostTargetVM = vm
             }
         }
