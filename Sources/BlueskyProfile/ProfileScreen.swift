@@ -45,10 +45,10 @@ public struct ProfileScreen: View {
         .navigationTitle(viewModel.profile?.handle.rawValue ?? "Profile")
         .task {
             await viewModel.loadProfile()
-            await viewModel.loadFeed(tab: selectedTab)
+            await loadCurrentTab(selectedTab)
         }
         .onChange(of: selectedTab) { _, newTab in
-            Task { await viewModel.loadFeed(tab: newTab) }
+            Task { await loadCurrentTab(newTab) }
         }
         .navigationDestination(isPresented: Binding(
             get: { threadURI != nil },
@@ -77,6 +77,7 @@ public struct ProfileScreen: View {
         ProfileHeaderView(
             profile: viewModel.profile,
             isOwnProfile: viewModel.actorDID == viewerDID,
+            knownFollowers: viewModel.knownFollowers,
             onFollow:      { Task { await viewModel.follow() } },
             onUnfollow:    { Task { await viewModel.unfollow() } },
             onBlock:       { Task { await viewModel.block() } },
@@ -101,10 +102,35 @@ public struct ProfileScreen: View {
         .background(.bar)
     }
 
+    // MARK: - Tab loading
+
+    private func loadCurrentTab(_ tab: ProfileTab) async {
+        switch tab {
+        case .feeds:
+            await viewModel.loadFeeds()
+        case .lists:
+            await viewModel.loadLists()
+        default:
+            await viewModel.loadFeed(tab: tab)
+        }
+    }
+
     // MARK: - Feed content
 
     @ViewBuilder
     private var feedContent: some View {
+        switch selectedTab {
+        case .feeds:
+            feedsTabContent
+        case .lists:
+            listsTabContent
+        default:
+            postsTabContent
+        }
+    }
+
+    @ViewBuilder
+    private var postsTabContent: some View {
         let posts = viewModel.posts(for: selectedTab)
         if posts.isEmpty && viewModel.isLoadingFeed(for: selectedTab) {
             ProgressView()
@@ -128,6 +154,38 @@ public struct ProfileScreen: View {
             }
             if viewModel.isLoadingFeed(for: selectedTab) {
                 HStack { Spacer(); ProgressView(); Spacer() }.padding()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var feedsTabContent: some View {
+        if viewModel.actorFeeds.isEmpty {
+            Text("No feeds")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(40)
+        } else {
+            ForEach(viewModel.actorFeeds, id: \.uri) { feed in
+                FeedCard(feed: feed)
+                Divider()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var listsTabContent: some View {
+        if viewModel.actorLists.isEmpty {
+            Text("No lists")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(40)
+        } else {
+            ForEach(viewModel.actorLists, id: \.uri) { list in
+                ListCard(list: list)
+                Divider()
             }
         }
     }

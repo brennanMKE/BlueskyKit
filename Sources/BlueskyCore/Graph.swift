@@ -90,6 +90,20 @@ public struct GetBlocksResponse: Codable, Sendable {
     }
 }
 
+// MARK: - app.bsky.graph.getKnownFollowers
+
+public struct GetKnownFollowersResponse: Codable, Sendable {
+    public let subject: ProfileView
+    public let cursor: String?
+    public let followers: [ProfileView]
+
+    public init(subject: ProfileView, cursor: String?, followers: [ProfileView]) {
+        self.subject = subject
+        self.cursor = cursor
+        self.followers = followers
+    }
+}
+
 // MARK: - app.bsky.graph.getLists
 
 public struct GetListsResponse: Codable, Sendable {

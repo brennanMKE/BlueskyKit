@@ -6,6 +6,7 @@ public struct ProfileHeaderView: View {
 
     let profile: ProfileDetailed?
     let isOwnProfile: Bool
+    let knownFollowers: [ProfileView]
     let onFollow: () -> Void
     let onUnfollow: () -> Void
     let onBlock: () -> Void
@@ -17,6 +18,7 @@ public struct ProfileHeaderView: View {
     public init(
         profile: ProfileDetailed?,
         isOwnProfile: Bool,
+        knownFollowers: [ProfileView] = [],
         onFollow: @escaping () -> Void,
         onUnfollow: @escaping () -> Void,
         onBlock: @escaping () -> Void,
@@ -27,6 +29,7 @@ public struct ProfileHeaderView: View {
     ) {
         self.profile = profile
         self.isOwnProfile = isOwnProfile
+        self.knownFollowers = knownFollowers
         self.onFollow = onFollow
         self.onUnfollow = onUnfollow
         self.onBlock = onBlock
@@ -35,6 +38,8 @@ public struct ProfileHeaderView: View {
         self.onUnmute = onUnmute
         self.onEditProfile = onEditProfile
     }
+
+    @Environment(\.blueskyTheme) private var theme
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -48,6 +53,9 @@ public struct ProfileHeaderView: View {
                     .padding(.top, 8)
             }
             statsRow
+            if !knownFollowers.isEmpty {
+                knownFollowersChip
+            }
             Divider().padding(.top, 12)
         }
     }
@@ -141,14 +149,44 @@ public struct ProfileHeaderView: View {
 
     private var nameSection: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(profile?.displayName ?? profile?.handle.rawValue ?? "")
-                .font(.title3).fontWeight(.bold)
+            HStack(spacing: 4) {
+                Text(profile?.displayName ?? profile?.handle.rawValue ?? "")
+                    .font(.title3).fontWeight(.bold)
+                if profile?.labels.contains(where: { $0.val == "verified" }) == true {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.blue)
+                        .font(.system(size: 14))
+                }
+            }
             Text("@\(profile?.handle.rawValue ?? "")")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
         .padding(.top, 28)
+    }
+
+    // MARK: - Known followers chip
+
+    private var knownFollowersChip: some View {
+        Text(knownFollowersText)
+            .font(Typography.bodySmall)
+            .foregroundStyle(theme.colors.textSecondary)
+            .padding(.horizontal, 16)
+            .padding(.top, Spacing._2xs)
+    }
+
+    private var knownFollowersText: String {
+        let handles = knownFollowers.map { "@\($0.handle.rawValue)" }
+        switch handles.count {
+        case 1:
+            return "Followed by \(handles[0])"
+        case 2:
+            return "Followed by \(handles[0]) and \(handles[1])"
+        default:
+            let listed = handles.dropLast().joined(separator: ", ")
+            return "Followed by \(listed), and others you follow"
+        }
     }
 
     // MARK: - Stats

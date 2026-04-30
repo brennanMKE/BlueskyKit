@@ -9,7 +9,7 @@ private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstoo
 // MARK: - ProfileTab
 
 public enum ProfileTab: String, CaseIterable, Identifiable {
-    case posts, replies, media, likes
+    case posts, replies, media, likes, feeds, lists
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -17,6 +17,8 @@ public enum ProfileTab: String, CaseIterable, Identifiable {
         case .replies: "Replies"
         case .media:   "Media"
         case .likes:   "Likes"
+        case .feeds:   "Feeds"
+        case .lists:   "Lists"
         }
     }
 }
@@ -27,6 +29,9 @@ public protocol ProfileStoring: AnyObject, Observable, Sendable {
     var profile: ProfileDetailed? { get }
     var isLoading: Bool { get }
     var errorMessage: String? { get }
+    var actorFeeds: [GeneratorView] { get }
+    var actorLists: [ListView] { get }
+    var knownFollowers: [ProfileView] { get }
 
     func posts(for tab: ProfileTab) -> [FeedViewPost]
     func isLoadingFeed(for tab: ProfileTab) -> Bool
@@ -34,6 +39,8 @@ public protocol ProfileStoring: AnyObject, Observable, Sendable {
     func loadProfile(actorDID: DID) async
     func loadFeed(tab: ProfileTab, actorDID: DID) async
     func loadMoreFeed(tab: ProfileTab, actorDID: DID) async
+    func loadFeeds(actorDID: DID) async
+    func loadLists(actorDID: DID) async
     func follow() async
     func unfollow() async
     func block() async
@@ -51,6 +58,9 @@ public final class ProfileStore: ProfileStoring {
     public private(set) var profile: ProfileDetailed?
     public private(set) var isLoading = false
     public private(set) var errorMessage: String?
+    public private(set) var actorFeeds: [GeneratorView] = []
+    public private(set) var actorLists: [ListView] = []
+    public private(set) var knownFollowers: [ProfileView] = []
 
     private var tabPosts: [ProfileTab: [FeedViewPost]] = [:]
     private var tabCursors: [ProfileTab: String?] = [:]
@@ -82,6 +92,44 @@ public final class ProfileStore: ProfileStoring {
         } catch {
             logger.error("profile fetch error: \(error, privacy: .public)")
             errorMessage = error.localizedDescription
+        }
+        do {
+            let response: GetKnownFollowersResponse = try await network.get(
+                lexicon: "app.bsky.graph.getKnownFollowers",
+                params: ["actor": actorDID.rawValue, "limit": "3"]
+            )
+            knownFollowers = Array(response.followers.prefix(3))
+        } catch {
+            logger.debug("getKnownFollowers unavailable or error: \(error, privacy: .public)")
+            // graceful degradation: knownFollowers stays empty
+        }
+    }
+
+    // MARK: - Load feeds / lists tabs
+
+    public func loadFeeds(actorDID: DID) async {
+        guard actorFeeds.isEmpty else { return }
+        do {
+            let response: GetActorFeedsResponse = try await network.get(
+                lexicon: "app.bsky.feed.getActorFeeds",
+                params: ["actor": actorDID.rawValue, "limit": "50"]
+            )
+            actorFeeds = response.feeds
+        } catch {
+            logger.error("getActorFeeds error: \(error, privacy: .public)")
+        }
+    }
+
+    public func loadLists(actorDID: DID) async {
+        guard actorLists.isEmpty else { return }
+        do {
+            let response: GetListsResponse = try await network.get(
+                lexicon: "app.bsky.graph.getLists",
+                params: ["actor": actorDID.rawValue, "limit": "50"]
+            )
+            actorLists = response.lists
+        } catch {
+            logger.error("getLists error: \(error, privacy: .public)")
         }
     }
 
@@ -125,6 +173,9 @@ public final class ProfileStore: ProfileStoring {
             return try await network.get(lexicon: "app.bsky.feed.getAuthorFeed", params: params)
         case .likes:
             return try await network.get(lexicon: "app.bsky.feed.getActorLikes", params: params)
+        case .feeds, .lists:
+            // Feeds and Lists tabs use dedicated load methods; this path is never reached.
+            throw URLError(.unsupportedURL)
         }
     }
 
