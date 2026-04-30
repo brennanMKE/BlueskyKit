@@ -35,6 +35,10 @@ public struct ThreadView: View {
                         threadNodes(thread)
                     }
                 }
+            } else {
+                // Initial state before .task fires — show a spinner
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .navigationTitle("Thread")
