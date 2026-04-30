@@ -39,10 +39,15 @@ public struct AvatarView: View {
 
     private var initialsView: some View {
         ZStack {
-            Color.gray.opacity(0.25)
+            LinearGradient(
+                colors: [Color(red: 0.0, green: 0.53, blue: 1.0),
+                         Color(red: 0.13, green: 0.55, blue: 0.99)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
             Text(initials)
-                .font(.system(size: size * 0.4, weight: .medium))
-                .foregroundStyle(.secondary)
+                .font(.system(size: size * 0.4, weight: .semibold))
+                .foregroundStyle(.white)
         }
     }
 

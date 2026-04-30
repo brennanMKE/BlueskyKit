@@ -1,5 +1,18 @@
 import Foundation
 
+// MARK: - Decoding helpers
+
+/// Decode a URL field that the server may send as an empty string.
+/// Returns `nil` for missing, null, or empty-string values.
+private func decodeURL<K: CodingKey>(
+    _ container: KeyedDecodingContainer<K>,
+    forKey key: K
+) throws -> URL? {
+    guard let raw = try container.decodeIfPresent(String.self, forKey: key),
+          !raw.isEmpty else { return nil }
+    return URL(string: raw)
+}
+
 // MARK: - Moderation label
 
 /// An `app.bsky.label.defs#label` applied to a record or account.
@@ -58,7 +71,7 @@ public struct ProfileBasic: Codable, Hashable, Sendable {
         did = try c.decode(DID.self, forKey: .did)
         handle = try c.decode(Handle.self, forKey: .handle)
         displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
-        avatar = try c.decodeIfPresent(URL.self, forKey: .avatar)
+        avatar = try decodeURL(c, forKey: .avatar)
         labels = try c.decodeIfPresent([Label].self, forKey: .labels) ?? []
     }
 }
@@ -104,7 +117,7 @@ public struct ProfileView: Codable, Hashable, Sendable {
         handle = try c.decode(Handle.self, forKey: .handle)
         displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
         description = try c.decodeIfPresent(String.self, forKey: .description)
-        avatar = try c.decodeIfPresent(URL.self, forKey: .avatar)
+        avatar = try decodeURL(c, forKey: .avatar)
         labels = try c.decodeIfPresent([Label].self, forKey: .labels) ?? []
         indexedAt = try c.decodeIfPresent(Date.self, forKey: .indexedAt)
         viewer = try c.decodeIfPresent(ProfileViewerState.self, forKey: .viewer)
@@ -169,8 +182,8 @@ public struct ProfileDetailed: Codable, Sendable {
         handle = try c.decode(Handle.self, forKey: .handle)
         displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
         description = try c.decodeIfPresent(String.self, forKey: .description)
-        avatar = try c.decodeIfPresent(URL.self, forKey: .avatar)
-        banner = try c.decodeIfPresent(URL.self, forKey: .banner)
+        avatar = try decodeURL(c, forKey: .avatar)
+        banner = try decodeURL(c, forKey: .banner)
         followersCount = try c.decodeIfPresent(Int.self, forKey: .followersCount) ?? 0
         followsCount = try c.decodeIfPresent(Int.self, forKey: .followsCount) ?? 0
         postsCount = try c.decodeIfPresent(Int.self, forKey: .postsCount) ?? 0

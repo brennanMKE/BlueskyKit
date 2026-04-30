@@ -42,6 +42,7 @@ public struct ProfileScreen: View {
                 }
             }
         }
+        .adaptiveBlueskyTheme()
         .navigationTitle(viewModel.profile?.handle.rawValue ?? "Profile")
         .task {
             await viewModel.loadProfile()
