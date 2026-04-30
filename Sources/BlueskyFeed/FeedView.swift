@@ -193,6 +193,8 @@ public struct FeedView: View {
                 repostTargetVM = vm
             }
         }
+        // TODO: wire to a BookmarksStore once the bookmarks module is implemented
+        a.onBookmark = { _ in }
         return a
     }
 }

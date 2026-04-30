@@ -25,6 +25,7 @@ public struct PostCard: View {
         public var onRepost: ((PostView) -> Void)?
         public var onLike: ((PostView) -> Void)?
         public var onShare: ((PostView) -> Void)?
+        public var onBookmark: ((PostView) -> Void)?
 
         public init() {}
     }
@@ -135,6 +136,12 @@ public struct PostCard: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            actionButton(
+                icon: "bookmark",
+                count: nil,
+                color: theme.colors.textTertiary
+            ) { actions?.onBookmark?(post) }
 
             Spacer(minLength: 0)
         }
