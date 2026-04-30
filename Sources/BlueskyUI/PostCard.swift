@@ -26,6 +26,7 @@ public struct PostCard: View {
         public var onLike: ((PostView) -> Void)?
         public var onShare: ((PostView) -> Void)?
         public var onBookmark: ((PostView) -> Void)?
+        public var onHashtagTap: ((String) -> Void)?
 
         public init() {}
     }
@@ -98,7 +99,13 @@ public struct PostCard: View {
             text: item.post.record.text,
             facets: item.post.record.facets,
             foregroundColor: theme.colors.textPrimary,
-            linkColor: theme.colors.link
+            linkColor: theme.colors.link,
+            onLinkTap: { url in
+                if url.scheme == "bluesky", url.host == "hashtag",
+                   let tag = url.pathComponents.last, !tag.isEmpty {
+                    actions?.onHashtagTap?(tag)
+                }
+            }
         )
     }
 

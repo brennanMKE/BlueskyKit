@@ -9,28 +9,37 @@ public struct SearchScreen: View {
     private let network: any NetworkClient
     private let onActorTap: ((ProfileView) -> Void)?
     private let onPostTap: ((PostView) -> Void)?
+    private let onTopicTap: ((String) -> Void)?
 
     @State private var viewModel: SearchViewModel
+    @State private var hashtagPath: [String] = []
 
     public init(
         network: any NetworkClient,
         onActorTap: ((ProfileView) -> Void)? = nil,
-        onPostTap: ((PostView) -> Void)? = nil
+        onPostTap: ((PostView) -> Void)? = nil,
+        onTopicTap: ((String) -> Void)? = nil
     ) {
         self.network = network
         self.onActorTap = onActorTap
         self.onPostTap = onPostTap
+        self.onTopicTap = onTopicTap
         _viewModel = State(wrappedValue: SearchViewModel(network: network))
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            searchBar
-            Divider()
-            content
+        NavigationStack(path: $hashtagPath) {
+            VStack(spacing: 0) {
+                searchBar
+                Divider()
+                content
+            }
+            .navigationTitle("Search")
+            .task { await viewModel.loadSuggestions() }
+            .navigationDestination(for: String.self) { hashtag in
+                HashtagView(hashtag: hashtag, network: network)
+            }
         }
-        .navigationTitle("Search")
-        .task { await viewModel.loadSuggestions() }
     }
 
     // MARK: - Search bar
@@ -90,7 +99,12 @@ public struct SearchScreen: View {
                         .padding(.vertical, 12)
                     ForEach(viewModel.trendingTopics, id: \.topic) { topic in
                         Button {
-                            // topic tap: no-op until hashtag navigation is wired (issue #0027)
+                            let tag = topic.topic
+                            if let onTopicTap {
+                                onTopicTap(tag)
+                            } else {
+                                hashtagPath.append(tag)
+                            }
                         } label: {
                             TrendingTopicRow(topic: topic)
                         }
@@ -173,6 +187,7 @@ public struct SearchScreen: View {
                 }
             }
         }
+        .refreshable { await viewModel.search(fresh: true) }
     }
 
     private var postResults: some View {
@@ -182,7 +197,11 @@ public struct SearchScreen: View {
                     Button { onPostTap?(post) } label: {
                         PostCard(
                             item: FeedViewPost(post: post, reply: nil, reason: nil),
-                            actions: PostCard.Actions()
+                            actions: {
+                                var a = PostCard.Actions()
+                                a.onHashtagTap = { tag in hashtagPath.append(tag) }
+                                return a
+                            }()
                         )
                     }
                     .buttonStyle(.plain)
@@ -201,6 +220,7 @@ public struct SearchScreen: View {
                 }
             }
         }
+        .refreshable { await viewModel.search(fresh: true) }
     }
 
     private var feedResults: some View {
@@ -218,6 +238,7 @@ public struct SearchScreen: View {
                 }
             }
         }
+        .refreshable { await viewModel.search(fresh: true) }
     }
 
     private func emptyState(_ message: String) -> some View {
