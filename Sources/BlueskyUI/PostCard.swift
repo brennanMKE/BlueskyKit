@@ -196,6 +196,7 @@ public struct PostCard: View {
                     .foregroundStyle(theme.colors.textTertiary)
             }
             .menuStyle(.button)
+            .menuIndicator(.hidden)
             .buttonStyle(.borderless)
             .help("More actions")
 
