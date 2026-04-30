@@ -111,19 +111,22 @@ public struct PostCard: View {
             actionButton(
                 icon: "bubble.left",
                 count: post.replyCount,
-                color: theme.colors.textTertiary
+                color: theme.colors.textTertiary,
+                helpText: "Reply"
             ) { actions?.onReply?(post) }
 
             actionButton(
                 icon: "arrow.2.squarepath",
                 count: post.repostCount,
-                color: isReposted ? theme.colors.success : theme.colors.textTertiary
+                color: isReposted ? theme.colors.success : theme.colors.textTertiary,
+                helpText: "Repost"
             ) { actions?.onRepost?(post) }
 
             actionButton(
                 icon: isLiked ? "heart.fill" : "heart",
                 count: post.likeCount,
-                color: isLiked ? theme.colors.like : theme.colors.textTertiary
+                color: isLiked ? theme.colors.like : theme.colors.textTertiary,
+                helpText: "Like"
             ) { actions?.onLike?(post) }
 
             if let url = shareURL(for: post) {
@@ -135,12 +138,14 @@ public struct PostCard: View {
                     .foregroundStyle(theme.colors.textTertiary)
                 }
                 .buttonStyle(.plain)
+                .help("Share")
             }
 
             actionButton(
                 icon: "bookmark",
                 count: nil,
-                color: theme.colors.textTertiary
+                color: theme.colors.textTertiary,
+                helpText: "Bookmark"
             ) { actions?.onBookmark?(post) }
 
             Spacer(minLength: 0)
@@ -174,6 +179,7 @@ public struct PostCard: View {
         icon: String,
         count: Int?,
         color: Color,
+        helpText: String = "",
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -188,6 +194,7 @@ public struct PostCard: View {
             .foregroundStyle(color)
         }
         .buttonStyle(.plain)
+        .help(helpText)
     }
 
     private func relativeTimestamp(_ date: Date) -> String {
