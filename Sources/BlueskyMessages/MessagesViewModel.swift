@@ -7,6 +7,7 @@ import BlueskyKit
 public final class MessagesViewModel {
 
     public var convos: [ConvoView] { store.convos }
+    public var requestConvos: [ConvoView] { store.requestConvos }
     public var isLoading: Bool { store.isLoading }
     public var errorMessage: String? { store.errorMessage }
 
@@ -21,4 +22,5 @@ public final class MessagesViewModel {
     public func refresh() async { await store.refresh() }
     public func leaveConvo(_ convoId: String) async { await store.leaveConvo(convoId) }
     public func muteConvo(_ convoId: String, muted: Bool) async { await store.muteConvo(convoId, muted: muted) }
+    public func loadRequests() async { await store.loadRequests() }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
@@ -12,6 +13,7 @@ public struct MessageThreadScreen: View {
 
     @State private var viewModel: MessageThreadViewModel
     @State private var draftText: String = ""
+    @State private var selectedPhoto: PhotosPickerItem?
 
     public init(convo: ConvoView, network: any NetworkClient, viewerDID: DID? = nil) {
         self.convo = convo
@@ -69,6 +71,16 @@ public struct MessageThreadScreen: View {
 
     private var composeBar: some View {
         HStack(spacing: 10) {
+            PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                Image(systemName: "photo")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+            }
+            .onChange(of: selectedPhoto) { _, newItem in
+                guard let newItem else { return }
+                Task { await sendImage(newItem) }
+            }
+
             TextField("Message…", text: $draftText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
@@ -93,6 +105,15 @@ public struct MessageThreadScreen: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    // MARK: - Image sending
+
+    private func sendImage(_ item: PhotosPickerItem) async {
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+        let mimeType = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
+        await viewModel.sendImageAttachment(data: data, mimeType: mimeType)
+        selectedPhoto = nil
     }
 
     // MARK: - Title

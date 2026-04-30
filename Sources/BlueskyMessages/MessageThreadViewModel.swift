@@ -31,4 +31,7 @@ public final class MessageThreadViewModel {
     public func load() async { await store.load(convoId: convoId) }
     public func loadOlder() async { await store.loadOlder(convoId: convoId) }
     public func sendMessage(_ text: String) async { await store.sendMessage(text, convoId: convoId) }
+    public func sendImageAttachment(data: Data, mimeType: String = "image/jpeg") async {
+        await store.sendImageAttachment(data: data, mimeType: mimeType, convoId: convoId)
+    }
 }

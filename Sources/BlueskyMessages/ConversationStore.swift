@@ -10,6 +10,7 @@ private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstoo
 
 public protocol ConversationStoring: AnyObject, Observable, Sendable {
     var convos: [ConvoView] { get }
+    var requestConvos: [ConvoView] { get }
     var isLoading: Bool { get }
     var errorMessage: String? { get }
 
@@ -18,6 +19,7 @@ public protocol ConversationStoring: AnyObject, Observable, Sendable {
     func refresh() async
     func leaveConvo(_ convoId: String) async
     func muteConvo(_ convoId: String, muted: Bool) async
+    func loadRequests() async
 }
 
 // MARK: - ConversationStore
@@ -26,6 +28,7 @@ public protocol ConversationStoring: AnyObject, Observable, Sendable {
 public final class ConversationStore: ConversationStoring {
 
     public private(set) var convos: [ConvoView] = []
+    public private(set) var requestConvos: [ConvoView] = []
     public private(set) var isLoading = false
     public private(set) var errorMessage: String?
 
@@ -51,6 +54,19 @@ public final class ConversationStore: ConversationStoring {
         } catch {
             logger.error("convos fetch error: \(error, privacy: .public)")
             errorMessage = error.localizedDescription
+        }
+        await loadRequests()
+    }
+
+    public func loadRequests() async {
+        do {
+            let resp: ListConvosResponse = try await network.get(
+                lexicon: "chat.bsky.convo.listConvos",
+                params: ["limit": "50", "status": "request"]
+            )
+            requestConvos = resp.convos
+        } catch {
+            logger.error("request convos fetch error: \(error, privacy: .public)")
         }
     }
 

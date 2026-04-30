@@ -19,6 +19,7 @@ public protocol MessageThreadStoring: AnyObject, Observable, Sendable {
     func load(convoId: String) async
     func loadOlder(convoId: String) async
     func sendMessage(_ text: String, convoId: String) async
+    func sendImageAttachment(data: Data, mimeType: String, convoId: String) async
 }
 
 // MARK: - MessageThreadStore
@@ -89,6 +90,32 @@ public final class MessageThreadStore: MessageThreadStoring {
             )
             messages.append(sent)
         } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    public func sendImageAttachment(data: Data, mimeType: String, convoId: String) async {
+        guard !isSending else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            let uploadResp: UploadBlobResponse = try await network.upload(
+                lexicon: "com.atproto.repo.uploadBlob",
+                data: data,
+                mimeType: mimeType
+            )
+            let blobRef = uploadResp.blob
+            let embed = Embed.images([EmbedImage(image: blobRef, alt: "", aspectRatio: nil)])
+            let req = SendMessageRequest(
+                convoId: convoId,
+                message: MessageInput(text: "", embed: embed)
+            )
+            let sent: MessageView = try await network.post(
+                lexicon: "chat.bsky.convo.sendMessage", body: req
+            )
+            messages.append(sent)
+        } catch {
+            logger.error("image attachment send error: \(error, privacy: .public)")
             errorMessage = error.localizedDescription
         }
     }

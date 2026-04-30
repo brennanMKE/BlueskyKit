@@ -13,6 +13,7 @@ public struct ConversationListScreen: View {
     @State private var viewModel: MessagesViewModel
     @State private var selectedConvoID: String?
     @State private var selectedConvo: ConvoView?
+    @State private var showingRequests = false
 
     public init(
         network: any NetworkClient,
@@ -47,12 +48,41 @@ public struct ConversationListScreen: View {
                 MessageThreadScreen(convo: convo, network: network, viewerDID: viewerDID)
             }
         }
+        .navigationDestination(isPresented: $showingRequests) {
+            MessageRequestsScreen(
+                convos: viewModel.requestConvos,
+                network: network,
+                viewerDID: viewerDID
+            )
+        }
     }
 
     // MARK: - List
 
     private var convoList: some View {
         List {
+            if !viewModel.requestConvos.isEmpty {
+                Button {
+                    showingRequests = true
+                } label: {
+                    HStack {
+                        Image(systemName: "person.crop.circle.badge.questionmark")
+                            .foregroundStyle(.secondary)
+                        Text("Message Requests")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Spacer()
+                        BadgeView(count: viewModel.requestConvos.count)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets())
+            }
             ForEach(viewModel.convos, id: \.id) { convo in
                 Button {
                     if let onConvoTap { onConvoTap(convo) }
