@@ -70,15 +70,14 @@ public struct ThreadView: View {
 
     private func threadList(_ node: ThreadViewPost) -> some View {
         let rows = flattenThread(node)
-        return List {
-            ForEach(rows, id: \.post.uri) { item in
-                PostCard(item: item, actions: actions(for: item.post))
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+        return ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(rows, id: \.post.uri) { item in
+                    PostCard(item: item, actions: actions(for: item.post))
+                    Divider()
+                }
             }
         }
-        .listStyle(.plain)
         .refreshable { await viewModel.load() }
     }
 
