@@ -22,6 +22,8 @@ public protocol FeedStoring: AnyObject, Observable, Sendable {
     func unlike(post: PostView) async
     func repost(post: PostView) async
     func unrepost(post: PostView) async
+    func bookmark(post: PostView) async
+    func unbookmark(post: PostView) async
 }
 
 // MARK: - FeedStore
@@ -43,6 +45,8 @@ public final class FeedStore: FeedStoring {
     private var likeInFlight: Set<ATURI> = []
     /// Post URIs whose repost state is currently being mutated.
     private var repostInFlight: Set<ATURI> = []
+    /// Post URIs whose bookmark state is currently being mutated.
+    private var bookmarkInFlight: Set<ATURI> = []
     /// Confirmed like URI for each post that has a completed-but-not-yet-indexed like.
     /// Keyed by post URI; value is the server-returned like AT-URI.
     private var pendingLikeURIs: [ATURI: ATURI] = [:]
@@ -309,6 +313,50 @@ public final class FeedStore: FeedStoring {
             updatePost(uri: post.uri) { $0.withRepost(repostURI) }
         }
         // defer removes repostInFlight entry.
+    }
+
+    public func bookmark(post: PostView) async {
+        guard bookmarkInFlight.insert(post.uri).inserted else {
+            logger.debug("bookmark ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+            return
+        }
+        defer { bookmarkInFlight.remove(post.uri) }
+        let livePost = posts.first(where: { $0.post.uri == post.uri })?.post ?? post
+        guard livePost.viewer?.bookmarked != true else {
+            logger.debug("bookmark ignored — post already bookmarked: \(post.uri.rawValue, privacy: .public)")
+            return
+        }
+        updatePost(uri: post.uri) { $0.withBookmarked(true) }
+        do {
+            let _: EmptyResponse = try await network.post(
+                lexicon: "app.bsky.bookmark.createBookmark",
+                body: CreateBookmarkRequest(post: post)
+            )
+            logger.debug("bookmark succeeded for \(post.uri.rawValue, privacy: .public)")
+        } catch {
+            logger.error("bookmark failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
+            updatePost(uri: post.uri) { $0.withBookmarked(false) }
+        }
+    }
+
+    public func unbookmark(post: PostView) async {
+        guard bookmarkInFlight.insert(post.uri).inserted else {
+            logger.debug("unbookmark ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+            return
+        }
+        defer { bookmarkInFlight.remove(post.uri) }
+        updatePost(uri: post.uri) { $0.withBookmarked(false) }
+        do {
+            // The deleteBookmark lexicon takes the post's own AT-URI (not a bookmark record URI).
+            let _: EmptyResponse = try await network.post(
+                lexicon: "app.bsky.bookmark.deleteBookmark",
+                body: DeleteBookmarkRequest(bookmarkURI: post.uri)
+            )
+            logger.debug("unbookmark succeeded for \(post.uri.rawValue, privacy: .public)")
+        } catch {
+            logger.error("unbookmark failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
+            updatePost(uri: post.uri) { $0.withBookmarked(true) }
+        }
     }
 
     // MARK: - Helpers

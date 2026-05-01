@@ -4,15 +4,18 @@ import BlueskyKit
 import BlueskyUI
 
 public struct BookmarksScreen: View {
-    @State private var viewModel: BookmarksViewModel
+    private let store: any BookmarksStoring
 
-    public init(store: any BookmarkStoring) {
-        _viewModel = State(initialValue: BookmarksViewModel(store: store))
+    public init(store: any BookmarksStoring) {
+        self.store = store
     }
 
     public var body: some View {
         Group {
-            if viewModel.bookmarks.isEmpty {
+            if store.isLoading && store.bookmarks.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if store.bookmarks.isEmpty {
                 ContentUnavailableView(
                     "No Bookmarks",
                     systemImage: "bookmark",
@@ -26,91 +29,70 @@ public struct BookmarksScreen: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .task { await store.loadInitial() }
+        .alert("Error", isPresented: Binding(
+            get: { store.error != nil },
+            set: { if !$0 { store.clearError() } }
+        )) {
+            Button("OK") { store.clearError() }
+        } message: {
+            Text(store.error ?? "")
+        }
     }
 
     private var bookmarkList: some View {
         List {
-            ForEach(viewModel.bookmarks, id: \.uri) { snapshot in
+            ForEach(store.bookmarks, id: \.uri) { bookmark in
                 PostCard(
-                    item: feedViewPost(from: snapshot),
-                    actions: actions(for: snapshot)
+                    item: FeedViewPost(post: bookmark.item, reply: nil, reason: nil),
+                    actions: actions(for: bookmark)
                 )
                 .listRowInsets(EdgeInsets())
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
+                .onAppear {
+                    if bookmark.uri == store.bookmarks.last?.uri {
+                        Task { await store.loadMore() }
+                    }
+                }
+            }
+            if store.isLoadingMore {
+                HStack { Spacer(); ProgressView(); Spacer() }
+                    .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Helpers
 
-    private func actions(for snapshot: BookmarkedPostSnapshot) -> PostCard.Actions {
+    private func actions(for bookmark: BookmarkView) -> PostCard.Actions {
         var a = PostCard.Actions()
         a.isBookmarked = true
-        a.onBookmark = { post in viewModel.toggle(post: post) }
+        a.onBookmark = { _ in
+            Task { await store.delete(bookmarkURI: bookmark.uri) }
+        }
         return a
-    }
-
-    /// Reconstruct a minimal `FeedViewPost` from the stored snapshot so we can
-    /// reuse `PostCard` for display without persisting the full `PostView` graph.
-    private func feedViewPost(from s: BookmarkedPostSnapshot) -> FeedViewPost {
-        let author = ProfileBasic(
-            did: DID(rawValue: s.authorDID),
-            handle: Handle(rawValue: s.authorHandle),
-            displayName: s.authorDisplayName,
-            avatar: s.authorAvatarURL.flatMap { URL(string: $0) }
-        )
-        let record = PostRecord(text: s.text, createdAt: s.createdAt)
-        let post = PostView(
-            uri: ATURI(rawValue: s.uri),
-            cid: s.cid,
-            author: author,
-            record: record,
-            embed: nil,
-            replyCount: 0,
-            repostCount: 0,
-            likeCount: 0,
-            quoteCount: 0,
-            indexedAt: s.createdAt,
-            viewer: nil
-        )
-        return FeedViewPost(post: post, reply: nil, reason: nil)
     }
 }
 
 // MARK: - Previews
 
-private final class PreviewBookmarkStore: BookmarkStoring {
-    var bookmarks: [BookmarkedPostSnapshot] = []
-    func isBookmarked(uri: String) -> Bool { false }
-    func toggle(post: PostView) {}
+private final class PreviewBookmarksStore: BookmarksStoring {
+    var bookmarks: [BookmarkView] = []
+    var isLoading = false
+    var isLoadingMore = false
+    var error: String? = nil
+    func loadInitial() async {}
+    func loadMore() async {}
+    func delete(bookmarkURI: ATURI) async {}
+    func clearError() {}
 }
 
 #Preview("BookmarksScreen — Empty") {
     NavigationStack {
-        BookmarksScreen(store: PreviewBookmarkStore())
-    }
-    .preferredColorScheme(.light)
-}
-
-#Preview("BookmarksScreen — With Items") {
-    let store = PreviewBookmarkStore()
-    store.bookmarks = [
-        BookmarkedPostSnapshot(
-            uri: "at://did:plc:alice/app.bsky.feed.post/abc",
-            cid: "bafyabc",
-            authorDID: "did:plc:alice",
-            authorHandle: "alice.bsky.social",
-            authorDisplayName: "Alice",
-            authorAvatarURL: nil,
-            text: "Hello, bookmarks!",
-            createdAt: Date(timeIntervalSinceNow: -3600),
-            bookmarkedAt: Date()
-        )
-    ]
-    return NavigationStack {
-        BookmarksScreen(store: store)
+        BookmarksScreen(store: PreviewBookmarksStore())
     }
     .preferredColorScheme(.light)
 }

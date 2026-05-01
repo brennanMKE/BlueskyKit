@@ -175,8 +175,12 @@ public actor ATProtoClient: NetworkClient {
             }
             throw ATError.httpStatus(http.statusCode)
         }
+        // Some AT Protocol procedures (e.g. createBookmark, deleteBookmark) return
+        // HTTP 200 with an empty body rather than `{}`. Substitute an empty JSON
+        // object so that Decodable types with no required fields decode cleanly.
+        let payload = data.isEmpty ? Data("{}".utf8) : data
         do {
-            return try decoder.decode(type, from: data)
+            return try decoder.decode(type, from: payload)
         } catch {
             throw ATError.decodingFailed(String(describing: error))
         }

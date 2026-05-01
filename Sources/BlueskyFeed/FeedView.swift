@@ -258,10 +258,8 @@ public struct FeedView: View {
                 repostTargetVM = vm
             }
         }
-        a.isBookmarked = bookmarks?.isBookmarked(uri: item.post.uri.rawValue) ?? false
-        a.onBookmark = { post in
-            bookmarks?.toggle(post: post)
-        }
+        a.isBookmarked = item.post.viewer?.bookmarked ?? false
+        a.onBookmark = { post in Task { await vm.bookmark(post: post) } }
         return a
     }
 }

@@ -129,12 +129,15 @@ public struct PostViewerState: Codable, Sendable {
     public let repost: ATURI?
     public let threadMuted: Bool?
     public let replyDisabled: Bool?
+    /// `true` if the authenticated viewer has bookmarked this post.
+    public let bookmarked: Bool?
 
-    public init(like: ATURI?, repost: ATURI?, threadMuted: Bool?, replyDisabled: Bool?) {
+    public init(like: ATURI?, repost: ATURI?, threadMuted: Bool?, replyDisabled: Bool?, bookmarked: Bool? = nil) {
         self.like = like
         self.repost = repost
         self.threadMuted = threadMuted
         self.replyDisabled = replyDisabled
+        self.bookmarked = bookmarked
     }
 }
 

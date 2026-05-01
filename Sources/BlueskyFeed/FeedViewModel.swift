@@ -96,6 +96,14 @@ public final class FeedViewModel {
     public func unrepost(post: PostView) async {
         await store.unrepost(post: post)
     }
+
+    public func bookmark(post: PostView) async {
+        if post.viewer?.bookmarked == true {
+            await store.unbookmark(post: post)
+        } else {
+            await store.bookmark(post: post)
+        }
+    }
 }
 
 // MARK: - PostView mutation helpers (optimistic updates)
@@ -110,7 +118,8 @@ extension PostView {
             like: likeURI,
             repost: viewer?.repost,
             threadMuted: viewer?.threadMuted,
-            replyDisabled: viewer?.replyDisabled
+            replyDisabled: viewer?.replyDisabled,
+            bookmarked: viewer?.bookmarked
         )
         return PostView(
             uri: uri, cid: cid, author: author, record: record, embed: embed,
@@ -129,11 +138,28 @@ extension PostView {
             like: viewer?.like,
             repost: repostURI,
             threadMuted: viewer?.threadMuted,
-            replyDisabled: viewer?.replyDisabled
+            replyDisabled: viewer?.replyDisabled,
+            bookmarked: viewer?.bookmarked
         )
         return PostView(
             uri: uri, cid: cid, author: author, record: record, embed: embed,
             replyCount: replyCount, repostCount: newCount,
+            likeCount: likeCount, quoteCount: quoteCount,
+            indexedAt: indexedAt, labels: labels, viewer: v
+        )
+    }
+
+    func withBookmarked(_ bookmarked: Bool) -> PostView {
+        let v = PostViewerState(
+            like: viewer?.like,
+            repost: viewer?.repost,
+            threadMuted: viewer?.threadMuted,
+            replyDisabled: viewer?.replyDisabled,
+            bookmarked: bookmarked
+        )
+        return PostView(
+            uri: uri, cid: cid, author: author, record: record, embed: embed,
+            replyCount: replyCount, repostCount: repostCount,
             likeCount: likeCount, quoteCount: quoteCount,
             indexedAt: indexedAt, labels: labels, viewer: v
         )
