@@ -169,15 +169,19 @@ public struct FeedView: View {
                     // Use the store created and started in boot() — no loadInitial needed here
                     // because it is already in-flight on a plain Task that SwiftUI cannot cancel.
                     logger.debug("attaching pre-built timeline store from boot()")
-                    vmCache[.timeline] = FeedViewModel(store: bootTimelineStore, selection: .timeline)
+                    let vm = FeedViewModel(store: bootTimelineStore, selection: .timeline)
+                    vm.filter = filter
+                    vmCache[.timeline] = vm
                 } else {
                     logger.debug("creating FeedViewModel for \(String(describing: selection), privacy: .public)")
-                    vmCache[selection] = FeedViewModel(
+                    let vm = FeedViewModel(
                         network: network,
                         accountStore: accountStore,
                         cache: cache,
                         selection: selection
                     )
+                    vm.filter = filter
+                    vmCache[selection] = vm
                     logger.debug("calling loadInitial")
                     await vmCache[selection]?.loadInitial()
                     let postCount = vmCache[selection]?.posts.count ?? -1
