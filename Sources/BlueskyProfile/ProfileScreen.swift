@@ -46,6 +46,10 @@ public struct ProfileScreen: View {
                 }
             }
         }
+        .refreshable {
+            await viewModel.loadProfile()
+            await loadCurrentTab(selectedTab)
+        }
         .adaptiveBlueskyTheme()
         .navigationTitle(viewModel.profile?.handle.rawValue ?? "Profile")
         .task {
