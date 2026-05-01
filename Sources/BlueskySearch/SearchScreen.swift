@@ -18,7 +18,7 @@ public struct SearchScreen: View {
     private let onTopicTap: ((String) -> Void)?
 
     @State private var viewModel: SearchViewModel
-    @State private var hashtagPath: [String] = []
+    @State private var selectedHashtag: String?
 
     public init(
         network: any NetworkClient,
@@ -34,19 +34,16 @@ public struct SearchScreen: View {
     }
 
     public var body: some View {
-        NavigationStack(path: $hashtagPath) {
-            VStack(spacing: 0) {
-                searchBar
-                Divider()
-                content
-            }
-            .navigationTitle("Search")
-            .task { await viewModel.loadSuggestions() }
-            .navigationDestination(for: String.self) { hashtag in
-                HashtagView(hashtag: hashtag, network: network)
-            }
+        VStack(spacing: 0) {
+            searchBar
+            Divider()
+            content
         }
-        .adaptiveBlueskyTheme()
+        .navigationTitle("Search")
+        .task { await viewModel.loadSuggestions() }
+        .navigationDestination(item: $selectedHashtag) { hashtag in
+            HashtagView(hashtag: hashtag, network: network)
+        }
     }
 
     // MARK: - Search bar
@@ -110,7 +107,7 @@ public struct SearchScreen: View {
                             if let onTopicTap {
                                 onTopicTap(tag)
                             } else {
-                                hashtagPath.append(tag)
+                                selectedHashtag = tag
                             }
                         } label: {
                             TrendingTopicRow(topic: topic)
@@ -206,7 +203,7 @@ public struct SearchScreen: View {
                         actions: {
                             var a = PostCard.Actions()
                             a.onTap = { _ in onPostTap?(post) }
-                            a.onHashtagTap = { tag in hashtagPath.append(tag) }
+                            a.onHashtagTap = { tag in selectedHashtag = tag }
                             return a
                         }()
                     )
@@ -317,11 +314,15 @@ private struct ActorRow: View {
 // MARK: - Previews
 
 #Preview("SearchScreen — Light") {
-    SearchScreen(network: PreviewNoOpNetwork())
-        .preferredColorScheme(.light)
+    NavigationStack {
+        SearchScreen(network: PreviewNoOpNetwork())
+    }
+    .preferredColorScheme(.light)
 }
 
 #Preview("SearchScreen — Dark") {
-    SearchScreen(network: PreviewNoOpNetwork())
-        .preferredColorScheme(.dark)
+    NavigationStack {
+        SearchScreen(network: PreviewNoOpNetwork())
+    }
+    .preferredColorScheme(.dark)
 }

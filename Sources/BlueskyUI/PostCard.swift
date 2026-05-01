@@ -151,9 +151,9 @@ public struct PostCard: View {
                             .font(.system(size: 16))
                     }
                     .foregroundStyle(theme.colors.textTertiary)
+                    .help("Share")
                 }
                 .buttonStyle(.plain)
-                .help("Share")
             }
 
             actionButton(
@@ -194,11 +194,11 @@ public struct PostCard: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 16))
                     .foregroundStyle(theme.colors.textTertiary)
+                    .help("More actions")
             }
             .menuStyle(.button)
             .menuIndicator(.hidden)
             .buttonStyle(.borderless)
-            .help("More actions")
 
             Spacer(minLength: 0)
         }
@@ -244,9 +244,9 @@ public struct PostCard: View {
                 }
             }
             .foregroundStyle(color)
+            .help(helpText)
         }
         .buttonStyle(.plain)
-        .help(helpText)
     }
 
     private func relativeTimestamp(_ date: Date) -> String {

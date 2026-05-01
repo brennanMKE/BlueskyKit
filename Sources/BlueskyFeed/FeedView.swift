@@ -195,25 +195,22 @@ public struct FeedView: View {
 
     private func list(vm: FeedViewModel) -> some View {
         let displayed = vm.filteredPosts
-        return List {
-            ForEach(displayed, id: \.post.uri) { item in
-                PostCard(item: item, actions: actions(for: item, vm: vm))
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .onAppear {
-                        if item.post.uri == vm.posts.last?.post.uri {
-                            Task { await vm.loadMore() }
+        return ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(displayed, id: \.post.uri) { item in
+                    PostCard(item: item, actions: actions(for: item, vm: vm))
+                        .onAppear {
+                            if item.post.uri == vm.posts.last?.post.uri {
+                                Task { await vm.loadMore() }
+                            }
                         }
-                    }
-            }
-            if vm.isLoading {
-                HStack { Spacer(); ProgressView(); Spacer() }
-                    .listRowSeparator(.hidden)
+                    Divider()
+                }
+                if vm.isLoading {
+                    HStack { Spacer(); ProgressView(); Spacer() }.padding()
+                }
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
         .refreshable { await vm.refresh() }
     }
 
