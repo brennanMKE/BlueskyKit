@@ -36,6 +36,7 @@ public struct HashtagView: View {
                         PostCard(item: item)
                             .listRowInsets(EdgeInsets())
                             .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                             .onAppear {
                                 if item.post.uri == posts.last?.post.uri {
                                     Task { await loadMore() }
@@ -48,6 +49,7 @@ public struct HashtagView: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
                 .refreshable { await load(reset: true) }
             }
         }

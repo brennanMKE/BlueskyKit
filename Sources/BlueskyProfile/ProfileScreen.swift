@@ -10,6 +10,7 @@ public struct ProfileScreen: View {
     private let accountStore: any AccountStore
     private let viewerDID: DID?
 
+    @Environment(\.blueskyTheme) private var theme
     @State private var viewModel: ProfileViewModel
     @State private var selectedTab: ProfileTab = .posts
     @State private var showEditProfile = false
@@ -37,8 +38,11 @@ public struct ProfileScreen: View {
                 Section {
                     feedContent
                 } header: {
-                    profileHeader
-                    tabStrip
+                    VStack(spacing: 0) {
+                        profileHeader
+                        tabStrip
+                    }
+                    .background(theme.colors.background)
                 }
             }
         }
@@ -100,7 +104,7 @@ public struct ProfileScreen: View {
         .pickerStyle(.segmented)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(.bar)
+        .background(theme.colors.background)
     }
 
     // MARK: - Tab loading

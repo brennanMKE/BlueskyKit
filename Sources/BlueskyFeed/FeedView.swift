@@ -213,6 +213,7 @@ public struct FeedView: View {
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .refreshable { await vm.refresh() }
     }
 

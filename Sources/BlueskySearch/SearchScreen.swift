@@ -201,17 +201,15 @@ public struct SearchScreen: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(viewModel.posts, id: \.uri) { post in
-                    Button { onPostTap?(post) } label: {
-                        PostCard(
-                            item: FeedViewPost(post: post, reply: nil, reason: nil),
-                            actions: {
-                                var a = PostCard.Actions()
-                                a.onHashtagTap = { tag in hashtagPath.append(tag) }
-                                return a
-                            }()
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    PostCard(
+                        item: FeedViewPost(post: post, reply: nil, reason: nil),
+                        actions: {
+                            var a = PostCard.Actions()
+                            a.onTap = { _ in onPostTap?(post) }
+                            a.onHashtagTap = { tag in hashtagPath.append(tag) }
+                            return a
+                        }()
+                    )
                     Divider()
                         .onAppear {
                             if post.uri == viewModel.posts.last?.uri {

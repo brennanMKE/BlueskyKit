@@ -1,8 +1,10 @@
 import SwiftUI
+import BlueskyUI
 
 /// Horizontal tab strip for switching between Following and Discover feeds.
 public struct FeedSwitcherView: View {
 
+    @Environment(\.blueskyTheme) private var theme
     @Binding var selection: FeedSelection
 
     static let discoverURI = "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot"
@@ -26,7 +28,7 @@ public struct FeedSwitcherView: View {
             .padding(.horizontal, 12)
         }
         .frame(height: 44)
-        .background(.bar)
+        .background(theme.colors.background)
     }
 
     private func tab(label: String, feedSelection: FeedSelection) -> some View {
@@ -55,11 +57,13 @@ public struct FeedSwitcherView: View {
 #Preview("FeedSwitcherView — Light") {
     @Previewable @State var selection: FeedSelection = .timeline
     FeedSwitcherView(selection: $selection)
+        .blueskyTheme(.light)
         .preferredColorScheme(.light)
 }
 
 #Preview("FeedSwitcherView — Dark") {
     @Previewable @State var selection: FeedSelection = .timeline
     FeedSwitcherView(selection: $selection)
+        .blueskyTheme(.dark)
         .preferredColorScheme(.dark)
 }
