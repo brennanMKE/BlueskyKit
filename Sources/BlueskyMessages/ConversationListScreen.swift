@@ -56,7 +56,6 @@ public struct ConversationListScreen: View {
         }
         .navigationDestination(isPresented: $showingRequests) {
             MessageRequestsScreen(
-                convos: viewModel.requestConvos,
                 network: network,
                 viewerDID: viewerDID
             )

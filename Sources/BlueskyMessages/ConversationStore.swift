@@ -20,6 +20,10 @@ public protocol ConversationStoring: AnyObject, Observable, Sendable {
     func leaveConvo(_ convoId: String) async
     func muteConvo(_ convoId: String, muted: Bool) async
     func loadRequests() async
+    /// Accept a pending message request — moves the convo from `requestConvos` to `convos`.
+    func acceptRequest(_ convoId: String) async
+    /// Reject a pending message request — removes it from `requestConvos` (calls `leaveConvo` server-side).
+    func rejectRequest(_ convoId: String) async
 }
 
 // MARK: - ConversationStore
@@ -108,6 +112,42 @@ public final class ConversationStore: ConversationStoring {
             )
         } catch {
             await refresh()
+        }
+    }
+
+    public func acceptRequest(_ convoId: String) async {
+        // Optimistic: move convo from requests to main inbox.
+        var movedConvo: ConvoView?
+        if let idx = requestConvos.firstIndex(where: { $0.id == convoId }) {
+            movedConvo = requestConvos.remove(at: idx)
+        }
+        if let movedConvo {
+            convos.insert(movedConvo, at: 0)
+        }
+        do {
+            let _: ConvoResponse = try await network.post(
+                lexicon: "chat.bsky.convo.acceptConvo",
+                body: ConvoIDRequest(convoId: convoId)
+            )
+        } catch {
+            logger.error("acceptConvo error: \(error, privacy: .public)")
+            // Revert: refresh both lists.
+            await refresh()
+            await loadRequests()
+        }
+    }
+
+    public func rejectRequest(_ convoId: String) async {
+        // Optimistic: remove from requests.
+        requestConvos.removeAll { $0.id == convoId }
+        do {
+            let _: EmptyResponse = try await network.post(
+                lexicon: "chat.bsky.convo.leaveConvo",
+                body: ConvoIDRequest(convoId: convoId)
+            )
+        } catch {
+            logger.error("rejectRequest error: \(error, privacy: .public)")
+            await loadRequests()
         }
     }
 

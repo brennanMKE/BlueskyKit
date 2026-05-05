@@ -9,25 +9,33 @@ private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
     nonisolated func upload<R: Decodable & Sendable>(lexicon: String, data: Data, mimeType: String) async throws -> R { throw ATError.unknown("preview") }
 }
 
-/// Shows pending DM requests from accounts not yet followed.
+/// Shows pending DM requests from accounts the viewer does not yet follow.
 ///
-/// Each row navigates into the existing `MessageThreadScreen`.
-/// The list is populated from `chat.bsky.convo.listConvos?status=request`.
+/// Each row offers Accept / Reject actions and navigates into the existing
+/// `MessageThreadScreen`. The list is populated from
+/// `chat.bsky.convo.listConvos?status=request`. Accept calls
+/// `chat.bsky.convo.acceptConvo`; reject calls `chat.bsky.convo.leaveConvo`.
 public struct MessageRequestsScreen: View {
 
-    let convos: [ConvoView]
-    let network: any NetworkClient
-    let viewerDID: DID?
+    private let network: any NetworkClient
+    private let viewerDID: DID?
 
-    public init(convos: [ConvoView], network: any NetworkClient, viewerDID: DID? = nil) {
-        self.convos = convos
+    /// Optional shared view model — when the parent already loaded request convos,
+    /// passing it in avoids a duplicate network round-trip.
+    @State private var viewModel: MessagesViewModel
+
+    public init(
+        network: any NetworkClient,
+        viewerDID: DID? = nil
+    ) {
         self.network = network
         self.viewerDID = viewerDID
+        _viewModel = State(wrappedValue: MessagesViewModel(network: network))
     }
 
     public var body: some View {
         Group {
-            if convos.isEmpty {
+            if viewModel.requestConvos.isEmpty {
                 emptyState
             } else {
                 requestList
@@ -37,13 +45,14 @@ public struct MessageRequestsScreen: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .task { await viewModel.loadRequests() }
     }
 
     // MARK: - List
 
     private var requestList: some View {
         List {
-            ForEach(convos, id: \.id) { convo in
+            ForEach(viewModel.requestConvos, id: \.id) { convo in
                 NavigationLink(destination: MessageThreadScreen(
                     convo: convo,
                     network: network,
@@ -52,9 +61,19 @@ public struct MessageRequestsScreen: View {
                     RequestConvoRow(convo: convo, viewerDID: viewerDID)
                 }
                 .listRowInsets(EdgeInsets())
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button("Reject", role: .destructive) {
+                        Task { await viewModel.rejectRequest(convo.id) }
+                    }
+                    Button("Accept") {
+                        Task { await viewModel.acceptRequest(convo.id) }
+                    }
+                    .tint(.accentColor)
+                }
             }
         }
         .listStyle(.plain)
+        .refreshable { await viewModel.loadRequests() }
     }
 
     // MARK: - Empty state
@@ -87,10 +106,10 @@ private struct RequestConvoRow: View {
                     .fontWeight(.semibold)
                     .lineLimit(1)
                 if let msg = convo.lastMessage {
-                    Text(msg.text)
+                    Text(msg.text.isEmpty ? "(image)" : msg.text)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
             }
             Spacer()
@@ -122,47 +141,16 @@ private struct RequestConvoRow: View {
 
 // MARK: - Previews
 
-private let previewRequestConvos = [
-    ConvoView(
-        id: "req-1",
-        rev: "1",
-        members: [
-            ProfileBasic(
-                did: DID(rawValue: "did:plc:stranger"),
-                handle: Handle(rawValue: "stranger.bsky.social"),
-                displayName: "Stranger",
-                avatar: nil
-            )
-        ],
-        lastMessage: MessageView(
-            id: "msg-1",
-            rev: "1",
-            text: "Hi, I found your account interesting!",
-            embed: nil,
-            sender: MessageSender(did: DID(rawValue: "did:plc:stranger")),
-            sentAt: Date(timeIntervalSinceNow: -300)
-        ),
-        unreadCount: 1,
-        muted: false
-    )
-]
-
 #Preview("MessageRequestsScreen — Light") {
     NavigationStack {
-        MessageRequestsScreen(
-            convos: previewRequestConvos,
-            network: PreviewNoOpNetwork()
-        )
+        MessageRequestsScreen(network: PreviewNoOpNetwork())
     }
     .preferredColorScheme(.light)
 }
 
 #Preview("MessageRequestsScreen — Dark") {
     NavigationStack {
-        MessageRequestsScreen(
-            convos: previewRequestConvos,
-            network: PreviewNoOpNetwork()
-        )
+        MessageRequestsScreen(network: PreviewNoOpNetwork())
     }
     .preferredColorScheme(.dark)
 }

@@ -23,4 +23,6 @@ public final class MessagesViewModel {
     public func leaveConvo(_ convoId: String) async { await store.leaveConvo(convoId) }
     public func muteConvo(_ convoId: String, muted: Bool) async { await store.muteConvo(convoId, muted: muted) }
     public func loadRequests() async { await store.loadRequests() }
+    public func acceptRequest(_ convoId: String) async { await store.acceptRequest(convoId) }
+    public func rejectRequest(_ convoId: String) async { await store.rejectRequest(convoId) }
 }

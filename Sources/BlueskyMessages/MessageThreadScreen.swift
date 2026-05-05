@@ -140,14 +140,62 @@ private struct MessageBubble: View {
     var body: some View {
         HStack {
             if isOwn { Spacer(minLength: 60) }
-            Text(message.text)
-                .font(.subheadline)
-                .foregroundStyle(isOwn ? Color.white : Color.primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(isOwn ? Color.accentColor : Color.secondary.opacity(0.15),
-                            in: RoundedRectangle(cornerRadius: 16))
+            VStack(alignment: isOwn ? .trailing : .leading, spacing: 6) {
+                if let images = embeddedImages, !images.isEmpty {
+                    imageStack(images)
+                }
+                if !message.text.isEmpty {
+                    Text(message.text)
+                        .font(.subheadline)
+                        .foregroundStyle(isOwn ? Color.white : Color.primary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(isOwn ? Color.accentColor : Color.secondary.opacity(0.15),
+                                    in: RoundedRectangle(cornerRadius: 16))
+                }
+            }
             if !isOwn { Spacer(minLength: 60) }
+        }
+    }
+
+    private var embeddedImages: [EmbedImageView]? {
+        guard let embed = message.embed else { return nil }
+        switch embed {
+        case .images(let images): return images
+        case .recordWithMedia(_, let media):
+            if case .images(let images) = media { return images }
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    @ViewBuilder
+    private func imageStack(_ images: [EmbedImageView]) -> some View {
+        VStack(spacing: 4) {
+            ForEach(images.indices, id: \.self) { idx in
+                let img = images[idx]
+                AsyncImage(url: img.thumb) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        Color.secondary.opacity(0.15)
+                    case .empty:
+                        Color.secondary.opacity(0.1)
+                            .overlay(ProgressView())
+                    @unknown default:
+                        Color.secondary.opacity(0.15)
+                    }
+                }
+                .frame(maxWidth: 220, maxHeight: 220)
+                .aspectRatio(
+                    img.aspectRatio.map { CGFloat($0.width) / CGFloat($0.height) } ?? 1.0,
+                    contentMode: .fit
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .accessibilityLabel(img.alt.isEmpty ? "Image" : img.alt)
+            }
         }
     }
 }
