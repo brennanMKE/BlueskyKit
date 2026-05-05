@@ -16,6 +16,8 @@ public struct ThreadView: View {
 
     @State private var viewModel: ThreadViewModel
     @State private var replyTarget: PostView? = nil
+    /// URI of a non-focal post (ancestor or reply) tapped by the user; drives in-thread navigation.
+    @State private var selectedReplyURI: ATURI? = nil
 
     public init(
         uri: ATURI,
@@ -70,15 +72,32 @@ public struct ThreadView: View {
 
     private func threadList(_ node: ThreadViewPost) -> some View {
         let rows = flattenThread(node)
+        let focalURI = focalPostURI(node)
         return ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(rows, id: \.post.uri) { item in
-                    PostCard(item: item, actions: actions(for: item.post))
+                    PostCard(item: item, actions: actions(for: item.post, focalURI: focalURI))
                     Divider()
                 }
             }
         }
         .refreshable { await viewModel.load() }
+        .navigationDestination(item: $selectedReplyURI) { uri in
+            ThreadView(
+                uri: uri,
+                network: network,
+                accountStore: accountStore,
+                bookmarks: bookmarks,
+                onAuthorTap: onAuthorTap,
+                onPostTap: onPostTap
+            )
+        }
+    }
+
+    /// Extract the focal (root) post URI from the loaded thread node.
+    private func focalPostURI(_ node: ThreadViewPost) -> ATURI? {
+        guard case .post(let tp) = node else { return nil }
+        return tp.post.uri
     }
 
     /// Walk the thread tree: ancestors (oldest first) → focal post → direct replies.
@@ -116,9 +135,19 @@ public struct ThreadView: View {
 
     // MARK: - Actions
 
-    private func actions(for post: PostView) -> PostCard.Actions {
+    private func actions(for post: PostView, focalURI: ATURI?) -> PostCard.Actions {
         var a = PostCard.Actions()
-        a.onTap = onPostTap
+        // Tapping a non-focal row (ancestor or reply) pushes a new ThreadView for that
+        // post. The focal post is already on screen, so a tap there is a no-op. Pushing
+        // via a self-owned navigationDestination avoids the "same item rebound" pitfall
+        // that prevented navigation when the parent's binding was re-set to the
+        // currently-displayed URI.
+        a.onTap = { tapped in
+            if tapped.uri == focalURI {
+                return
+            }
+            selectedReplyURI = tapped.uri
+        }
         a.onReply = { p in replyTarget = p }
         a.onAuthorTap = onAuthorTap
         a.isBookmarked = bookmarks?.isBookmarked(uri: post.uri.rawValue) ?? false
