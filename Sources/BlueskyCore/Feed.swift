@@ -45,6 +45,18 @@ public struct GetPostThreadResponse: Decodable, Sendable {
     public let thread: ThreadViewPost
 }
 
+// MARK: - Get posts (app.bsky.feed.getPosts)
+
+/// Response from `app.bsky.feed.getPosts`, which hydrates a list of post URIs
+/// into their current `PostView` (with viewer state, counts, etc.).
+public struct GetPostsResponse: Decodable, Sendable {
+    public let posts: [PostView]
+
+    public init(posts: [PostView]) {
+        self.posts = posts
+    }
+}
+
 // MARK: - Create / delete record (com.atproto.repo.*)
 
 public struct CreateRecordRequest<T: Encodable & Sendable>: Encodable, Sendable {

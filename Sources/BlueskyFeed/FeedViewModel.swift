@@ -81,6 +81,19 @@ public final class FeedViewModel {
 
     // MARK: - Interactions
 
+    /// Toggle the like on `post`, refreshing viewer state from the server first
+    /// when the cached snapshot is stale. Use this for tap handlers; it picks
+    /// like vs unlike based on the freshly confirmed state. See issue #0041.
+    public func toggleLike(post: PostView) async {
+        await store.toggleLike(post: post)
+    }
+
+    /// Toggle the repost on `post`. Refreshes server-side viewer state first
+    /// when the cached snapshot is stale. See issue #0041.
+    public func toggleRepost(post: PostView) async {
+        await store.toggleRepost(post: post)
+    }
+
     public func like(post: PostView) async {
         await store.like(post: post)
     }

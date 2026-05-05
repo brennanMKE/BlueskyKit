@@ -240,20 +240,21 @@ public struct FeedView: View {
         a.onAuthorTap = onAuthorTap
         a.onReply = { post in replyTarget = post }
         a.onLike = { post in
-            Task {
-                // Look up the freshest copy of this post from the view model
-                let current = vm.posts.first(where: { $0.post.uri == post.uri })?.post ?? post
-                if current.viewer?.like != nil {
-                    await vm.unlike(post: current)
-                } else {
-                    await vm.like(post: current)
-                }
-            }
+            // Use the freshest local snapshot as the basis; the store will
+            // re-check the server when its viewer-state cache is stale and
+            // pick like vs unlike against the freshly confirmed state. See
+            // issue #0041.
+            let current = vm.posts.first(where: { $0.post.uri == post.uri })?.post ?? post
+            Task { await vm.toggleLike(post: current) }
         }
         a.onRepost = { post in
             let current = vm.posts.first(where: { $0.post.uri == post.uri })?.post ?? post
+            // If our local snapshot says the post is already reposted, jump
+            // straight to unrepost — the store will still freshen the viewer
+            // state internally and skip the network call when it's already
+            // in the desired state. Otherwise show the Repost / Quote chooser.
             if current.viewer?.repost != nil {
-                Task { await vm.unrepost(post: current) }
+                Task { await vm.toggleRepost(post: current) }
             } else {
                 repostMenuTarget = current
                 repostTargetVM = vm

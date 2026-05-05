@@ -8,6 +8,14 @@ private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstoo
 
 private let cacheTTL: TimeInterval = 60
 
+/// How long a `PostView` snapshot is considered "fresh enough" to base a
+/// like/repost toggle decision on without re-checking the server. Beyond this
+/// window the store re-fetches the post via `app.bsky.feed.getPosts` before
+/// performing the toggle, so actions taken on stale state (e.g. after liking
+/// from another device) operate against the actual current viewer state. See
+/// issue #0041.
+private let viewerStateFreshnessWindow: TimeInterval = 5
+
 // MARK: - FeedStoring
 
 public protocol FeedStoring: AnyObject, Observable, Sendable {
@@ -18,6 +26,14 @@ public protocol FeedStoring: AnyObject, Observable, Sendable {
     func loadInitial(selection: FeedSelection) async
     func loadMore(selection: FeedSelection) async
     func refresh(selection: FeedSelection) async
+    /// Toggle the viewer's like state on `post`. Refreshes the post's viewer
+    /// state from the server first if the cached snapshot is stale, so the
+    /// resulting like/unlike operates on the actual current state. See
+    /// issue #0041.
+    func toggleLike(post: PostView) async
+    /// Toggle the viewer's repost state on `post`. Same staleness handling as
+    /// `toggleLike`.
+    func toggleRepost(post: PostView) async
     func like(post: PostView) async
     func unlike(post: PostView) async
     func repost(post: PostView) async
@@ -52,6 +68,12 @@ public final class FeedStore: FeedStoring {
     private var pendingLikeURIs: [ATURI: ATURI] = [:]
     /// Same concept for repost operations.
     private var pendingRepostURIs: [ATURI: ATURI] = [:]
+
+    /// Wall-clock timestamp (`Date`) at which each post's viewer state was last
+    /// fetched from the server. Used to decide whether a like/repost toggle
+    /// can rely on the cached `viewer` snapshot, or whether the post should be
+    /// re-fetched first via `app.bsky.feed.getPosts`. Issue #0041.
+    @ObservationIgnored private var lastViewerStateCheck: [ATURI: Date] = [:]
 
     /// Non-observable flag used to prevent two concurrent `loadInitial` calls from
     /// both passing the guard. Using `@ObservationIgnored` means setting this flag
@@ -134,6 +156,11 @@ public final class FeedStore: FeedStoring {
             logger.debug("fetch succeeded, count=\(response.feed.count, privacy: .public), cursor=\(response.cursor ?? "nil", privacy: .public)")
             cursor = response.cursor
             hasMore = response.cursor != nil
+            // Mark every post in this response as having a fresh viewer-state
+            // snapshot, so a like/repost tap immediately afterward does not
+            // trigger an unnecessary `getPosts` round-trip.
+            let now = Date()
+            for item in response.feed { lastViewerStateCheck[item.post.uri] = now }
             if reset {
                 // Re-apply any viewer state that is still in-flight so that a background
                 // refresh does not silently revert an optimistic like/repost that hasn't
@@ -194,6 +221,74 @@ public final class FeedStore: FeedStoring {
         }
     }
 
+    // MARK: - Freshness
+
+    /// Returns the current `PostView` for `uri`, re-fetching from the server
+    /// (`app.bsky.feed.getPosts`) when the local viewer-state snapshot is
+    /// older than `viewerStateFreshnessWindow`. The refreshed `PostView` is
+    /// also written back into `posts` so the UI reflects any server-side
+    /// state that changed (e.g. a like added from another device).
+    ///
+    /// If a network error occurs during refresh, the local snapshot is
+    /// returned as a fallback rather than failing the toggle outright.
+    private func freshenedPost(for uri: ATURI) async -> PostView? {
+        let cachedAt = lastViewerStateCheck[uri]
+        let isFresh = cachedAt.map { Date().timeIntervalSince($0) < viewerStateFreshnessWindow } ?? false
+        let local = posts.first(where: { $0.post.uri == uri })?.post
+        if isFresh { return local }
+        do {
+            let response: GetPostsResponse = try await network.get(
+                lexicon: "app.bsky.feed.getPosts",
+                params: ["uris": uri.rawValue]
+            )
+            guard let fresh = response.posts.first(where: { $0.uri == uri }) else {
+                logger.debug("getPosts returned no entry for \(uri.rawValue, privacy: .public); falling back to local snapshot")
+                return local
+            }
+            lastViewerStateCheck[uri] = Date()
+            updatePost(uri: uri) { _ in fresh }
+            logger.debug("refreshed viewer state for \(uri.rawValue, privacy: .public): like=\(fresh.viewer?.like?.rawValue ?? "nil", privacy: .public), repost=\(fresh.viewer?.repost?.rawValue ?? "nil", privacy: .public)")
+            return fresh
+        } catch {
+            logger.error("getPosts refresh failed for \(uri.rawValue, privacy: .public): \(error, privacy: .public); using local snapshot")
+            return local
+        }
+    }
+
+    // MARK: - Toggles
+
+    public func toggleLike(post: PostView) async {
+        // Claim the in-flight slot up front so a stale-state refresh that races
+        // with a second tap can't slip through. The actual create/delete is
+        // dispatched to `like`/`unlike` which see the slot already claimed and
+        // perform only their own work via the `skipInFlightCheck` path.
+        guard likeInFlight.insert(post.uri).inserted else {
+            logger.debug("toggleLike ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+            return
+        }
+        defer { likeInFlight.remove(post.uri) }
+        let current = await freshenedPost(for: post.uri) ?? post
+        if current.viewer?.like != nil {
+            await performUnlike(post: current)
+        } else {
+            await performLike(post: current)
+        }
+    }
+
+    public func toggleRepost(post: PostView) async {
+        guard repostInFlight.insert(post.uri).inserted else {
+            logger.debug("toggleRepost ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+            return
+        }
+        defer { repostInFlight.remove(post.uri) }
+        let current = await freshenedPost(for: post.uri) ?? post
+        if current.viewer?.repost != nil {
+            await performUnrepost(post: current)
+        } else {
+            await performRepost(post: current)
+        }
+    }
+
     // MARK: - Interactions
 
     public func like(post: PostView) async {
@@ -204,10 +299,51 @@ public final class FeedStore: FeedStoring {
             return
         }
         defer { likeInFlight.remove(post.uri) }
+        await performLike(post: post)
+    }
+
+    public func unlike(post: PostView) async {
+        guard post.viewer?.like != nil else { return }
+        // Claim the slot synchronously before any await.
+        guard likeInFlight.insert(post.uri).inserted else {
+            logger.debug("unlike ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+            return
+        }
+        defer { likeInFlight.remove(post.uri) }
+        await performUnlike(post: post)
+    }
+
+    public func repost(post: PostView) async {
+        // Claim the slot synchronously before any await.
+        guard repostInFlight.insert(post.uri).inserted else {
+            logger.debug("repost ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+            return
+        }
+        defer { repostInFlight.remove(post.uri) }
+        await performRepost(post: post)
+    }
+
+    public func unrepost(post: PostView) async {
+        guard post.viewer?.repost != nil else { return }
+        // Claim the slot synchronously before any await.
+        guard repostInFlight.insert(post.uri).inserted else {
+            logger.debug("unrepost ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+            return
+        }
+        defer { repostInFlight.remove(post.uri) }
+        await performUnrepost(post: post)
+    }
+
+    // MARK: - Inner like/repost work (caller owns the in-flight slot)
+
+    /// Create the like record. Caller must already hold `likeInFlight` for this URI.
+    private func performLike(post: PostView) async {
         guard let did = await loadCurrentDID() else { return }
         // Re-check viewer state from the live posts array — the passed-in post may be stale
-        // if a feed refresh ran during the loadCurrentDID await above.
-        let livePost = posts.first(where: { $0.post.uri == post.uri })?.post ?? post
+        // if a feed refresh ran during the loadCurrentDID await above. If the local snapshot
+        // is itself stale, freshen it from the server so we don't double-like a post that
+        // was liked from another device. Issue #0041.
+        let livePost = await freshenedPost(for: post.uri) ?? post
         guard livePost.viewer?.like == nil else {
             logger.debug("like ignored — post already liked: \(post.uri.rawValue, privacy: .public)")
             return
@@ -234,17 +370,19 @@ public final class FeedStore: FeedStoring {
         // Clear the confirmed URI now that the operation is settled — the next feed refresh
         // will include the server's authoritative viewer state.
         pendingLikeURIs.removeValue(forKey: post.uri)
-        // defer removes likeInFlight entry.
     }
 
-    public func unlike(post: PostView) async {
-        guard let likeURI = post.viewer?.like else { return }
-        // Claim the slot synchronously before any await.
-        guard likeInFlight.insert(post.uri).inserted else {
-            logger.debug("unlike ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+    /// Delete the like record. Caller must already hold `likeInFlight` for this URI.
+    private func performUnlike(post: PostView) async {
+        // Freshen viewer state so we don't try to delete a like record that
+        // was already removed from another device. Issue #0041.
+        let livePost = await freshenedPost(for: post.uri) ?? post
+        guard let likeURI = livePost.viewer?.like else {
+            logger.debug("unlike skipped — server reports no active like for \(post.uri.rawValue, privacy: .public)")
+            // Make sure local state matches server.
+            updatePost(uri: post.uri) { $0.withLike(nil) }
             return
         }
-        defer { likeInFlight.remove(post.uri) }
         guard let did = await loadCurrentDID(),
               let rkey = likeURI.rkey else { return }
         updatePost(uri: post.uri) { $0.withLike(nil) }
@@ -256,18 +394,15 @@ public final class FeedStore: FeedStoring {
             logger.error("unlike failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
             updatePost(uri: post.uri) { $0.withLike(likeURI) }
         }
-        // defer removes likeInFlight entry.
     }
 
-    public func repost(post: PostView) async {
-        // Claim the slot synchronously before any await.
-        guard repostInFlight.insert(post.uri).inserted else {
-            logger.debug("repost ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
-            return
-        }
-        defer { repostInFlight.remove(post.uri) }
+    /// Create the repost record. Caller must already hold `repostInFlight` for this URI.
+    private func performRepost(post: PostView) async {
         guard let did = await loadCurrentDID() else { return }
-        let livePost = posts.first(where: { $0.post.uri == post.uri })?.post ?? post
+        // Freshen the viewer state if the cached snapshot is stale so we don't
+        // re-repost a post that was already reposted from another device.
+        // Issue #0041.
+        let livePost = await freshenedPost(for: post.uri) ?? post
         guard livePost.viewer?.repost == nil else {
             logger.debug("repost ignored — post already reposted: \(post.uri.rawValue, privacy: .public)")
             return
@@ -290,17 +425,18 @@ public final class FeedStore: FeedStoring {
             updatePost(uri: post.uri) { $0.withRepost(nil) }
         }
         pendingRepostURIs.removeValue(forKey: post.uri)
-        // defer removes repostInFlight entry.
     }
 
-    public func unrepost(post: PostView) async {
-        guard let repostURI = post.viewer?.repost else { return }
-        // Claim the slot synchronously before any await.
-        guard repostInFlight.insert(post.uri).inserted else {
-            logger.debug("unrepost ignored — already in-flight for \(post.uri.rawValue, privacy: .public)")
+    /// Delete the repost record. Caller must already hold `repostInFlight` for this URI.
+    private func performUnrepost(post: PostView) async {
+        // Freshen viewer state so we don't try to delete a repost record that
+        // was already removed from another device. Issue #0041.
+        let livePost = await freshenedPost(for: post.uri) ?? post
+        guard let repostURI = livePost.viewer?.repost else {
+            logger.debug("unrepost skipped — server reports no active repost for \(post.uri.rawValue, privacy: .public)")
+            updatePost(uri: post.uri) { $0.withRepost(nil) }
             return
         }
-        defer { repostInFlight.remove(post.uri) }
         guard let did = await loadCurrentDID(),
               let rkey = repostURI.rkey else { return }
         updatePost(uri: post.uri) { $0.withRepost(nil) }
@@ -312,7 +448,6 @@ public final class FeedStore: FeedStoring {
             logger.error("unrepost failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
             updatePost(uri: post.uri) { $0.withRepost(repostURI) }
         }
-        // defer removes repostInFlight entry.
     }
 
     public func bookmark(post: PostView) async {
