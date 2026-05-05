@@ -117,11 +117,18 @@ public final class ComposerViewModel {
         if store.didPost {
             clearDraft()
             // Reset transient state so the sheet closes cleanly without leaking
-            // composed content into the next session.
+            // composed content into the next session. Importantly, clear `text`
+            // BEFORE the sheet's onChange/onDisappear hooks fire — otherwise
+            // saveDraft() would re-persist the just-posted text and the next
+            // composer open would restore it.
+            text = ""
+            images = []
             additionalPosts = []
             attachedVideo = nil
             linkMetadata = nil
             detectedURL = nil
+            mentionPrefix = nil
+            mentionDIDs = [:]
         }
     }
 

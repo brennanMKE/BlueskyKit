@@ -330,6 +330,16 @@ public struct ComposerSheet: View {
         }
         #elseif os(macOS)
         HStack(spacing: 16) {
+            if viewModel.images.count < 4 && viewModel.attachedVideo == nil {
+                Button {
+                    pickImagesMac()
+                } label: {
+                    Label("Add image", systemImage: "photo.badge.plus")
+                        .font(.subheadline)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 8)
+            }
             if viewModel.images.isEmpty && viewModel.attachedVideo == nil {
                 Button {
                     pickVideoMac()
@@ -345,6 +355,36 @@ public struct ComposerSheet: View {
     }
 
     #if os(macOS)
+    /// macOS native image picker via NSOpenPanel. Bluesky accepts up to 4 images
+    /// per post; allow multi-selection but cap at the remaining slot count.
+    private func pickImagesMac() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        if #available(macOS 11.0, *) {
+            panel.allowedContentTypes = [.image, .jpeg, .png, .heic, .gif, .webP]
+        }
+        guard panel.runModal() == .OK else { return }
+        let remaining = max(0, 4 - viewModel.images.count)
+        for url in panel.urls.prefix(remaining) {
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let mime = mimeType(forImageExtension: url.pathExtension)
+            viewModel.addImage(data: data, mimeType: mime)
+        }
+    }
+
+    private func mimeType(forImageExtension ext: String) -> String {
+        switch ext.lowercased() {
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png": return "image/png"
+        case "heic": return "image/heic"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        default: return "image/jpeg"
+        }
+    }
+
     /// macOS native video picker via NSOpenPanel. Supports common video MIME types
     /// accepted by the AT Proto blob upload (mp4, mov, m4v, webm).
     private func pickVideoMac() {
