@@ -31,17 +31,12 @@ struct AppearanceSettingsScreen: View {
 
     var body: some View {
         Form {
-            Section("Theme") {
-                Picker("Theme", selection: $viewModel.themeVariant) {
-                    Text("Light").tag(BlueskyTheme.Variant.light)
-                    Text("Dark").tag(BlueskyTheme.Variant.dark)
-                    Text("Dim").tag(BlueskyTheme.Variant.dim)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .onChange(of: viewModel.themeVariant) { _, new in
-                    viewModel.setTheme(new)
-                }
+            Section {
+                Text("Bluesky follows your system appearance. Change Light or Dark mode in System Settings to switch the app's theme.")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+            } header: {
+                Text("Theme")
             }
 
             Section("Font Size") {

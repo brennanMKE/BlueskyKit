@@ -2,12 +2,10 @@ import Foundation
 import Observation
 import BlueskyCore
 import BlueskyKit
-import BlueskyUI
 
 // MARK: - Keys
 
 private enum PrefKey {
-    static let themeVariant = "settings.themeVariant"
     static let fontSize = "settings.fontSize"
     static let autoplayVideo = "settings.autoplayVideo"
     static let externalEmbeds = "settings.externalEmbeds"
@@ -27,8 +25,10 @@ private enum PrefKey {
 public final class SettingsViewModel {
 
     // MARK: - Appearance
+    //
+    // The app follows the system appearance (light/dark) on macOS — there is no
+    // in-app theme picker. Only typographic preferences live here.
 
-    public var themeVariant: BlueskyTheme.Variant = .light
     public var fontSize: Double = 16
 
     // MARK: - Content & media
@@ -72,8 +72,6 @@ public final class SettingsViewModel {
     // MARK: - Load / save
 
     public func load() {
-        themeVariant = (try? preferences.get(String.self, for: PrefKey.themeVariant))
-            .flatMap { BlueskyTheme.Variant(rawValue: $0) } ?? .light
         fontSize = (try? preferences.get(Double.self, for: PrefKey.fontSize)) ?? 16
         autoplayVideo = (try? preferences.get(Bool.self, for: PrefKey.autoplayVideo)) ?? true
         externalEmbeds = (try? preferences.get(Bool.self, for: PrefKey.externalEmbeds)) ?? true
@@ -90,7 +88,6 @@ public final class SettingsViewModel {
     }
 
     public func save() {
-        try? preferences.set(themeVariant.rawValue, for: PrefKey.themeVariant)
         try? preferences.set(fontSize, for: PrefKey.fontSize)
         try? preferences.set(autoplayVideo, for: PrefKey.autoplayVideo)
         try? preferences.set(externalEmbeds, for: PrefKey.externalEmbeds)
@@ -104,10 +101,5 @@ public final class SettingsViewModel {
         try? preferences.set(notifyMentions, for: PrefKey.notifyMentions)
         try? preferences.set(notifyReplies, for: PrefKey.notifyReplies)
         try? preferences.set(notifyQuotes, for: PrefKey.notifyQuotes)
-    }
-
-    public func setTheme(_ variant: BlueskyTheme.Variant) {
-        themeVariant = variant
-        try? preferences.set(variant.rawValue, for: PrefKey.themeVariant)
     }
 }
