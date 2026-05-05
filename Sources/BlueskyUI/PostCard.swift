@@ -85,16 +85,24 @@ public struct PostCard: View {
 
     private var authorHeader: some View {
         HStack(spacing: Spacing._2xs) {
-            if let displayName = item.post.author.displayName, !displayName.isEmpty {
-                Text(displayName)
-                    .font(Typography.headline)
-                    .foregroundStyle(theme.colors.textPrimary)
+            // Display name + handle form a single tappable region that
+            // navigates to the author's profile (issue #0046). The
+            // surrounding content tap (which opens the thread) still fires
+            // when the user taps elsewhere on the row.
+            HStack(spacing: Spacing._2xs) {
+                if let displayName = item.post.author.displayName, !displayName.isEmpty {
+                    Text(displayName)
+                        .font(Typography.headline)
+                        .foregroundStyle(theme.colors.textPrimary)
+                        .lineLimit(1)
+                }
+                Text("@\(item.post.author.handle.rawValue)")
+                    .font(Typography.bodySmall)
+                    .foregroundStyle(theme.colors.textTertiary)
                     .lineLimit(1)
             }
-            Text("@\(item.post.author.handle.rawValue)")
-                .font(Typography.bodySmall)
-                .foregroundStyle(theme.colors.textTertiary)
-                .lineLimit(1)
+            .contentShape(Rectangle())
+            .onTapGesture { actions?.onAuthorTap?(item.post.author) }
             Spacer(minLength: 0)
             Text(relativeTimestamp(item.post.indexedAt))
                 .font(Typography.footnote)
