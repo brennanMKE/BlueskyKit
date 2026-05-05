@@ -38,11 +38,22 @@ public final class ComposerViewModel {
 
     public var detectedURL: URL?
     public var linkCardDismissed: Bool = false
+    public var linkMetadata: LinkMetadata?
+    public var isFetchingLinkMetadata: Bool = false
+    private var linkFetchTask: Task<Void, Never>?
+    private let linkFetcher = LinkMetadataFetcher()
 
     /// The URL shown in the link card preview (nil when dismissed or images are attached).
     public var visibleLinkURL: URL? {
         guard !linkCardDismissed, images.isEmpty, attachedVideo == nil else { return nil }
         return detectedURL
+    }
+
+    /// Metadata to render in the visible link card, if any.
+    public var visibleLinkMetadata: LinkMetadata? {
+        guard let visibleLinkURL else { return nil }
+        guard let linkMetadata, linkMetadata.url == visibleLinkURL else { return nil }
+        return linkMetadata
     }
 
     // MARK: - Thread / multi-post
@@ -96,6 +107,7 @@ public final class ComposerViewModel {
             images: images,
             attachedVideo: attachedVideo,
             detectedURL: visibleLinkURL,
+            linkMetadata: visibleLinkMetadata,
             additionalPosts: additionalPosts,
             replyTo: replyTo,
             quotedPost: quotedPost,
@@ -104,6 +116,12 @@ public final class ComposerViewModel {
         )
         if store.didPost {
             clearDraft()
+            // Reset transient state so the sheet closes cleanly without leaking
+            // composed content into the next session.
+            additionalPosts = []
+            attachedVideo = nil
+            linkMetadata = nil
+            detectedURL = nil
         }
     }
 
@@ -172,11 +190,30 @@ public final class ComposerViewModel {
         if found != detectedURL {
             detectedURL = found
             linkCardDismissed = false
+            linkMetadata = nil
+            linkFetchTask?.cancel()
+            if let url = found {
+                isFetchingLinkMetadata = true
+                let fetcher = linkFetcher
+                linkFetchTask = Task { @MainActor [weak self] in
+                    let meta = await fetcher.fetch(url)
+                    guard let self, !Task.isCancelled else { return }
+                    // Only apply if URL hasn't changed.
+                    if self.detectedURL == url {
+                        self.linkMetadata = meta
+                    }
+                    self.isFetchingLinkMetadata = false
+                }
+            } else {
+                isFetchingLinkMetadata = false
+            }
         }
     }
 
     public func dismissLinkCard() {
         linkCardDismissed = true
+        linkFetchTask?.cancel()
+        isFetchingLinkMetadata = false
     }
 
     // MARK: - Thread management

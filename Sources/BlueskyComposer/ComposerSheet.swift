@@ -5,6 +5,10 @@ import BlueskyUI
 #if os(iOS)
 import PhotosUI
 #endif
+#if os(macOS)
+import AppKit
+import UniformTypeIdentifiers
+#endif
 
 /// Post composer sheet: text input, character counter, reply context, quote post, image attachments,
 /// video picker, link card preview, thread composer, and draft persistence.
@@ -189,21 +193,53 @@ public struct ComposerSheet: View {
     // MARK: - Link card preview
 
     private func linkCardPreview(_ url: URL) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "link")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        let metadata = viewModel.visibleLinkMetadata
+        return HStack(alignment: .top, spacing: 10) {
+            if let imageURL = metadata?.imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    default:
+                        Color.secondary.opacity(0.15)
+                    }
+                }
+                .frame(width: 60, height: 60)
+                .clipped()
+                .cornerRadius(6)
+            } else {
+                Image(systemName: "link")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 60, height: 60)
+                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            }
             VStack(alignment: .leading, spacing: 2) {
+                if viewModel.isFetchingLinkMetadata && metadata == nil {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Fetching preview…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(metadata?.title.isEmpty == false ? metadata!.title : (url.host ?? url.absoluteString))
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .lineLimit(2)
+                    if let desc = metadata?.description, !desc.isEmpty {
+                        Text(desc)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
                 Text(url.host ?? url.absoluteString)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-                Text(url.absoluteString)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: 0)
             Button {
                 viewModel.dismissLinkCard()
             } label: {
@@ -292,8 +328,54 @@ public struct ComposerSheet: View {
                 .padding(.top, 8)
             }
         }
+        #elseif os(macOS)
+        HStack(spacing: 16) {
+            if viewModel.images.isEmpty && viewModel.attachedVideo == nil {
+                Button {
+                    pickVideoMac()
+                } label: {
+                    Label("Add video", systemImage: "video.badge.plus")
+                        .font(.subheadline)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 8)
+            }
+        }
         #endif
     }
+
+    #if os(macOS)
+    /// macOS native video picker via NSOpenPanel. Supports common video MIME types
+    /// accepted by the AT Proto blob upload (mp4, mov, m4v, webm).
+    private func pickVideoMac() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        if #available(macOS 11.0, *) {
+            panel.allowedContentTypes = [.movie, .video, .mpeg4Movie, .quickTimeMovie]
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            let mime = mimeType(forVideoExtension: url.pathExtension)
+            viewModel.attachedVideo = VideoAttachment(data: data, mimeType: mime)
+        } catch {
+            // Surface a non-fatal error inline.
+            viewModel.attachedVideo = nil
+        }
+    }
+
+    private func mimeType(forVideoExtension ext: String) -> String {
+        switch ext.lowercased() {
+        case "mp4", "m4v": return "video/mp4"
+        case "mov", "qt": return "video/quicktime"
+        case "webm": return "video/webm"
+        case "mpeg", "mpg": return "video/mpeg"
+        default: return "video/mp4"
+        }
+    }
+    #endif
 
     // MARK: - Thread posts
 

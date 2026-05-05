@@ -19,6 +19,7 @@ public protocol ComposerStoring: AnyObject, Observable, Sendable {
         images: [ComposerImageAttachment],
         attachedVideo: VideoAttachment?,
         detectedURL: URL?,
+        linkMetadata: LinkMetadata?,
         additionalPosts: [String],
         replyTo: PostRef?,
         quotedPost: PostRef?,
@@ -86,6 +87,7 @@ public final class ComposerStore: ComposerStoring {
         images: [ComposerImageAttachment],
         attachedVideo: VideoAttachment?,
         detectedURL: URL?,
+        linkMetadata: LinkMetadata?,
         additionalPosts: [String],
         replyTo: PostRef?,
         quotedPost: PostRef?,
@@ -142,11 +144,23 @@ public final class ComposerStore: ComposerStoring {
             } else if let videoEmbed {
                 embed = videoEmbed
             } else if let url = detectedURL, quotedPost == nil {
+                // If we have OpenGraph metadata, try to upload the thumbnail blob.
+                var thumb: BlobRef?
+                if let imageURL = linkMetadata?.imageURL {
+                    if let (data, mime) = try? await fetchImageData(imageURL) {
+                        let resp: UploadBlobResponse = try await network.upload(
+                            lexicon: "com.atproto.repo.uploadBlob",
+                            data: data,
+                            mimeType: mime
+                        )
+                        thumb = resp.blob
+                    }
+                }
                 embed = .external(EmbedExternal(
                     uri: url.absoluteString,
-                    title: url.host ?? url.absoluteString,
-                    description: "",
-                    thumb: nil
+                    title: linkMetadata?.title ?? (url.host ?? url.absoluteString),
+                    description: linkMetadata?.description ?? "",
+                    thumb: thumb
                 ))
             } else if let qp = quotedPost {
                 embed = .record(EmbedRecordRef(uri: qp.uri, cid: qp.cid))
@@ -223,5 +237,25 @@ public final class ComposerStore: ComposerStoring {
 
     public func clearError() {
         errorMessage = nil
+    }
+
+    // MARK: - Helpers
+
+    /// Downloads the image data at `url` and returns its raw bytes plus MIME type.
+    /// Caps the payload at 1 MB so a misbehaving server can't stall posting.
+    private func fetchImageData(_ url: URL) async throws -> (Data, String) {
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.setValue("Mozilla/5.0 (compatible; Bluesky-SwiftUI link preview)", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        guard data.count <= 1_000_000 else { throw URLError(.dataLengthExceedsMaximum) }
+        let mime = http.value(forHTTPHeaderField: "Content-Type")?
+            .split(separator: ";")
+            .first
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            ?? "image/jpeg"
+        return (data, mime)
     }
 }
