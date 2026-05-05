@@ -16,6 +16,14 @@ private let cacheTTL: TimeInterval = 60
 /// issue #0041.
 private let viewerStateFreshnessWindow: TimeInterval = 5
 
+/// How long after a successful create-record (like or repost) we keep the
+/// confirmed AT-URI cached in `pendingLikeURIs`/`pendingRepostURIs`. During
+/// this window, any feed fetch or `freshenedPost` call that gets a response
+/// from the AT Protocol indexer where viewer state is missing (the indexer
+/// is lagging behind our just-written record) will be patched to show the
+/// confirmed state instead of reverting. Issue #0053.
+private let pendingURICleanupWindow: TimeInterval = 30
+
 // MARK: - FeedStoring
 
 public protocol FeedStoring: AnyObject, Observable, Sendable {
@@ -165,22 +173,32 @@ public final class FeedStore: FeedStoring {
                 // Re-apply any viewer state that is still in-flight so that a background
                 // refresh does not silently revert an optimistic like/repost that hasn't
                 // been confirmed yet (or has been confirmed but the server hasn't indexed
-                // it into this feed response yet).
+                // it into this feed response yet). Issue #0053.
                 let hasPendingLikes = !likeInFlight.isEmpty || !pendingLikeURIs.isEmpty
                 let hasPendingReposts = !repostInFlight.isEmpty || !pendingRepostURIs.isEmpty
                 if hasPendingLikes || hasPendingReposts {
                     posts = response.feed.map { item in
                         var pv = item.post
-                        // Prefer the server-confirmed URI; fall back to optimistic "pending://"
-                        // for operations that haven't completed yet.
+                        // Like state. If the indexer has now caught up and the server
+                        // is reporting the like, drop the pending entry. Otherwise
+                        // prefer the confirmed URI, then the optimistic placeholder.
                         if let confirmedLikeURI = pendingLikeURIs[pv.uri] {
-                            pv = pv.withLike(confirmedLikeURI)
-                        } else if likeInFlight.contains(pv.uri) {
+                            if pv.viewer?.like != nil {
+                                pendingLikeURIs.removeValue(forKey: pv.uri)
+                            } else {
+                                pv = pv.withLike(confirmedLikeURI)
+                            }
+                        } else if likeInFlight.contains(pv.uri), pv.viewer?.like == nil {
                             pv = pv.withLike(ATURI(rawValue: "pending://like"))
                         }
+                        // Repost state — same handling.
                         if let confirmedRepostURI = pendingRepostURIs[pv.uri] {
-                            pv = pv.withRepost(confirmedRepostURI)
-                        } else if repostInFlight.contains(pv.uri) {
+                            if pv.viewer?.repost != nil {
+                                pendingRepostURIs.removeValue(forKey: pv.uri)
+                            } else {
+                                pv = pv.withRepost(confirmedRepostURI)
+                            }
+                        } else if repostInFlight.contains(pv.uri), pv.viewer?.repost == nil {
                             pv = pv.withRepost(ATURI(rawValue: "pending://repost"))
                         }
                         return FeedViewPost(post: pv, reply: item.reply, reason: item.reason)
@@ -231,6 +249,11 @@ public final class FeedStore: FeedStoring {
     ///
     /// If a network error occurs during refresh, the local snapshot is
     /// returned as a fallback rather than failing the toggle outright.
+    ///
+    /// Server responses are overlaid with any in-flight or recently-confirmed
+    /// optimistic viewer state for `uri` so that the AT Protocol indexer's
+    /// lag (a like/repost can take several seconds to appear in `getPosts`)
+    /// does not silently revert state we already know is correct. Issue #0053.
     private func freshenedPost(for uri: ATURI) async -> PostView? {
         let cachedAt = lastViewerStateCheck[uri]
         let isFresh = cachedAt.map { Date().timeIntervalSince($0) < viewerStateFreshnessWindow } ?? false
@@ -241,18 +264,62 @@ public final class FeedStore: FeedStoring {
                 lexicon: "app.bsky.feed.getPosts",
                 params: ["uris": uri.rawValue]
             )
-            guard let fresh = response.posts.first(where: { $0.uri == uri }) else {
+            guard let serverFresh = response.posts.first(where: { $0.uri == uri }) else {
                 logger.debug("getPosts returned no entry for \(uri.rawValue, privacy: .public); falling back to local snapshot")
                 return local
             }
             lastViewerStateCheck[uri] = Date()
-            updatePost(uri: uri) { _ in fresh }
-            logger.debug("refreshed viewer state for \(uri.rawValue, privacy: .public): like=\(fresh.viewer?.like?.rawValue ?? "nil", privacy: .public), repost=\(fresh.viewer?.repost?.rawValue ?? "nil", privacy: .public)")
-            return fresh
+            let merged = overlayPendingState(on: serverFresh)
+            updatePost(uri: uri) { _ in merged }
+            logger.debug("refreshed viewer state for \(uri.rawValue, privacy: .public): like=\(merged.viewer?.like?.rawValue ?? "nil", privacy: .public), repost=\(merged.viewer?.repost?.rawValue ?? "nil", privacy: .public)")
+            return merged
         } catch {
             logger.error("getPosts refresh failed for \(uri.rawValue, privacy: .public): \(error, privacy: .public); using local snapshot")
             return local
         }
+    }
+
+    /// Overlays any in-flight or recently-confirmed optimistic viewer state on
+    /// top of a server response, so a server-side response that hasn't yet
+    /// reflected a freshly created like/repost record does not revert the UI.
+    /// Issue #0053.
+    ///
+    /// - If we have a confirmed `pendingLikeURIs` entry and the server now
+    ///   reports the like, drop the pending entry (indexer caught up).
+    /// - If we have a confirmed entry but the server still reports no like,
+    ///   keep the confirmed URI (indexer is lagging).
+    /// - If a like is still in-flight (slot held but not yet confirmed) and
+    ///   the local copy already shows the optimistic pending state, preserve
+    ///   it rather than letting a server response briefly clear the heart.
+    /// - Same handling for repost.
+    private func overlayPendingState(on serverPost: PostView) -> PostView {
+        var p = serverPost
+        let localLike = posts.first(where: { $0.post.uri == p.uri })?.post.viewer?.like
+        let localRepost = posts.first(where: { $0.post.uri == p.uri })?.post.viewer?.repost
+        if let confirmed = pendingLikeURIs[p.uri] {
+            if p.viewer?.like != nil {
+                pendingLikeURIs.removeValue(forKey: p.uri)
+            } else {
+                p = p.withLike(confirmed)
+            }
+        } else if likeInFlight.contains(p.uri),
+                  p.viewer?.like == nil,
+                  let localLike {
+            // Local already shows liked (optimistic pending) — keep it.
+            p = p.withLike(localLike)
+        }
+        if let confirmed = pendingRepostURIs[p.uri] {
+            if p.viewer?.repost != nil {
+                pendingRepostURIs.removeValue(forKey: p.uri)
+            } else {
+                p = p.withRepost(confirmed)
+            }
+        } else if repostInFlight.contains(p.uri),
+                  p.viewer?.repost == nil,
+                  let localRepost {
+            p = p.withRepost(localRepost)
+        }
+        return p
     }
 
     // MARK: - Toggles
@@ -359,17 +426,23 @@ public final class FeedStore: FeedStoring {
                 lexicon: "com.atproto.repo.createRecord", body: req
             )
             logger.debug("like succeeded, likeURI=\(resp.uri.rawValue, privacy: .public)")
-            // Store the confirmed URI so that if a feed refresh fires before the server
-            // has indexed this like, the refresh can re-apply it rather than reverting.
+            // Store the confirmed URI so that any subsequent feed refresh or
+            // freshenedPost can re-apply it rather than reverting while the
+            // AT Protocol indexer catches up. Issue #0053. Cleared by the
+            // next fetch/freshenedPost that observes the server returning
+            // the like in viewer state, OR after a safety timeout below.
             pendingLikeURIs[post.uri] = resp.uri
             updatePost(uri: post.uri) { $0.withLike(resp.uri) }
+            // Schedule a safety-net cleanup so the entry doesn't linger
+            // forever if no further fetch ever happens.
+            schedulePendingLikeCleanup(uri: post.uri, confirmed: resp.uri)
         } catch {
             logger.error("like failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
+            // The create failed — clear any confirmed URI in case a previous
+            // attempt left one behind, and revert the optimistic update.
+            pendingLikeURIs.removeValue(forKey: post.uri)
             updatePost(uri: post.uri) { $0.withLike(nil) }
         }
-        // Clear the confirmed URI now that the operation is settled — the next feed refresh
-        // will include the server's authoritative viewer state.
-        pendingLikeURIs.removeValue(forKey: post.uri)
     }
 
     /// Delete the like record. Caller must already hold `likeInFlight` for this URI.
@@ -380,11 +453,15 @@ public final class FeedStore: FeedStoring {
         guard let likeURI = livePost.viewer?.like else {
             logger.debug("unlike skipped — server reports no active like for \(post.uri.rawValue, privacy: .public)")
             // Make sure local state matches server.
+            pendingLikeURIs.removeValue(forKey: post.uri)
             updatePost(uri: post.uri) { $0.withLike(nil) }
             return
         }
         guard let did = await loadCurrentDID(),
               let rkey = likeURI.rkey else { return }
+        // Drop any cached confirmed-like entry; we are explicitly removing the
+        // like and don't want a deferred cleanup to re-apply it. Issue #0053.
+        pendingLikeURIs.removeValue(forKey: post.uri)
         updatePost(uri: post.uri) { $0.withLike(nil) }
         do {
             let req = DeleteRecordRequest(repo: did.rawValue, collection: "app.bsky.feed.like", rkey: rkey)
@@ -418,13 +495,16 @@ public final class FeedStore: FeedStoring {
                 lexicon: "com.atproto.repo.createRecord", body: req
             )
             logger.debug("repost succeeded, repostURI=\(resp.uri.rawValue, privacy: .public)")
+            // Hold the confirmed URI so subsequent fetches/freshenedPost can
+            // re-apply it while the indexer catches up. Issue #0053.
             pendingRepostURIs[post.uri] = resp.uri
             updatePost(uri: post.uri) { $0.withRepost(resp.uri) }
+            schedulePendingRepostCleanup(uri: post.uri, confirmed: resp.uri)
         } catch {
             logger.error("repost failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
+            pendingRepostURIs.removeValue(forKey: post.uri)
             updatePost(uri: post.uri) { $0.withRepost(nil) }
         }
-        pendingRepostURIs.removeValue(forKey: post.uri)
     }
 
     /// Delete the repost record. Caller must already hold `repostInFlight` for this URI.
@@ -434,11 +514,15 @@ public final class FeedStore: FeedStoring {
         let livePost = await freshenedPost(for: post.uri) ?? post
         guard let repostURI = livePost.viewer?.repost else {
             logger.debug("unrepost skipped — server reports no active repost for \(post.uri.rawValue, privacy: .public)")
+            pendingRepostURIs.removeValue(forKey: post.uri)
             updatePost(uri: post.uri) { $0.withRepost(nil) }
             return
         }
         guard let did = await loadCurrentDID(),
               let rkey = repostURI.rkey else { return }
+        // Drop any cached confirmed-repost entry; we are explicitly removing
+        // the repost. Issue #0053.
+        pendingRepostURIs.removeValue(forKey: post.uri)
         updatePost(uri: post.uri) { $0.withRepost(nil) }
         do {
             let req = DeleteRecordRequest(repo: did.rawValue, collection: "app.bsky.feed.repost", rkey: rkey)
@@ -504,5 +588,30 @@ public final class FeedStore: FeedStoring {
         guard let idx = posts.firstIndex(where: { $0.post.uri == uri }) else { return }
         let old = posts[idx]
         posts[idx] = FeedViewPost(post: transform(old.post), reply: old.reply, reason: old.reason)
+    }
+
+    /// Safety-net cleanup for `pendingLikeURIs[uri]`. The indexer normally
+    /// catches up within a few seconds; after the cleanup window we drop the
+    /// entry only if it still matches the URI we wrote (i.e. nothing else has
+    /// replaced it in the meantime, e.g. a quick unlike). Issue #0053.
+    private func schedulePendingLikeCleanup(uri: ATURI, confirmed: ATURI) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(pendingURICleanupWindow))
+            guard let self else { return }
+            if self.pendingLikeURIs[uri] == confirmed {
+                self.pendingLikeURIs.removeValue(forKey: uri)
+            }
+        }
+    }
+
+    /// Same as `schedulePendingLikeCleanup` for repost.
+    private func schedulePendingRepostCleanup(uri: ATURI, confirmed: ATURI) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(pendingURICleanupWindow))
+            guard let self else { return }
+            if self.pendingRepostURIs[uri] == confirmed {
+                self.pendingRepostURIs.removeValue(forKey: uri)
+            }
+        }
     }
 }
