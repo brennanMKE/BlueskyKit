@@ -126,6 +126,7 @@ public actor ATProtoClient: NetworkClient {
         }
         var req = URLRequest(url: components.url!)
         req.setValue("Bearer \(stored.accessJwt)", forHTTPHeaderField: "Authorization")
+        applyProxyHeader(&req, lexicon: lexicon)
         return req
     }
 
@@ -140,6 +141,7 @@ public actor ATProtoClient: NetworkClient {
         req.setValue("Bearer \(stored.accessJwt)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try encoder.encode(body)
+        applyProxyHeader(&req, lexicon: lexicon)
         return req
     }
 
@@ -155,7 +157,21 @@ public actor ATProtoClient: NetworkClient {
         req.setValue("Bearer \(stored.accessJwt)", forHTTPHeaderField: "Authorization")
         req.setValue(mimeType, forHTTPHeaderField: "Content-Type")
         req.httpBody = data
+        applyProxyHeader(&req, lexicon: lexicon)
         return req
+    }
+
+    /// Adds the `atproto-proxy` header for lexicons served by a separate AT Protocol service.
+    ///
+    /// `chat.bsky.*` lexicons are served by the chat proxy at `did:web:api.bsky.chat#bsky_chat`,
+    /// not by the user's PDS. The PDS forwards proxied requests to the appropriate service
+    /// based on this header. Without it the PDS responds with `MethodNotImplemented`.
+    ///
+    /// Mirrors `DM_SERVICE_HEADERS` in the React Native reference (`src/lib/constants.ts`).
+    private nonisolated func applyProxyHeader(_ req: inout URLRequest, lexicon: String) {
+        if lexicon.hasPrefix("chat.bsky.") {
+            req.setValue("did:web:api.bsky.chat#bsky_chat", forHTTPHeaderField: "atproto-proxy")
+        }
     }
 
     // MARK: - Network primitives
