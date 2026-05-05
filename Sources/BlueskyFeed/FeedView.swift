@@ -78,13 +78,9 @@ public struct FeedView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            FeedSwitcherView(selection: $selection)
-            Divider()
-            feedList
-        }
-        .navigationTitle("Home")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            HStack(spacing: 0) {
+                FeedSwitcherView(selection: $selection)
+                Spacer(minLength: 0)
                 Menu {
                     Toggle("Hide Replies", isOn: $filter.hideReplies)
                     Toggle("Hide Reposts", isOn: $filter.hideReposts)
@@ -93,10 +89,19 @@ public struct FeedView: View {
                           ? "line.3.horizontal.decrease.circle.fill"
                           : "line.3.horizontal.decrease.circle")
                         .symbolRenderingMode(.hierarchical)
+                        .font(.title3)
+                        .frame(width: 32, height: 32)
                 }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .padding(.trailing, 12)
                 .help("Filter Feed")
             }
+            Divider()
+            feedList
         }
+        .navigationTitle("Home")
         .adaptiveBlueskyTheme()
         .sheet(isPresented: Binding(
             get: { replyTarget != nil },
