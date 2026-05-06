@@ -1,10 +1,13 @@
 import Foundation
 import Observation
+import OSLog
 import BlueskyCore
 import BlueskyKit
 #if os(iOS)
 import PhotosUI
 #endif
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstools.Bluesky", category: "ComposerViewModel")
 
 @Observable
 public final class ComposerViewModel {
@@ -177,7 +180,18 @@ public final class ComposerViewModel {
 
 #if os(iOS)
     public func attachVideo(_ item: PhotosPickerItem) async {
-        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+        let data: Data?
+        do {
+            data = try await item.loadTransferable(type: Data.self)
+        } catch {
+            logger.error("attachVideo: loadTransferable failed: \(error.localizedDescription, privacy: .public)")
+            store.setError("Could not load video: \(error.localizedDescription)")
+            return
+        }
+        guard let data else {
+            store.setError("Could not load the selected video.")
+            return
+        }
         let mimeType = item.supportedContentTypes.first?.preferredMIMEType ?? "video/mp4"
         attachedVideo = VideoAttachment(data: data, mimeType: mimeType)
     }
@@ -190,7 +204,16 @@ public final class ComposerViewModel {
     // MARK: - Link card
 
     private func detectURL() {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return }
+        // NSDataDetector init only fails for invalid type masks; the static .link mask
+        // is valid by construction. If this ever fires it's a programmer error.
+        let detector: NSDataDetector
+        do {
+            detector = try NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        } catch {
+            logger.fault("NSDataDetector init failed unexpectedly: \(error.localizedDescription, privacy: .public)")
+            assertionFailure("NSDataDetector init failed: \(error)")
+            return
+        }
         let range = NSRange(text.startIndex..., in: text)
         let matches = detector.matches(in: text, options: [], range: range)
         let found = matches.first?.url

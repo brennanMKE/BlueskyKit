@@ -86,18 +86,32 @@ public final class FindContactsStore: FindContactsStoring {
             return nil
         }
 
-        let phoneNumbers = await Task.detached(priority: .userInitiated) {
+        let enumerationResult: Result<[String], Error> = await Task.detached(priority: .userInitiated) {
             let s = CNContactStore()
             let keys = [CNContactPhoneNumbersKey as CNKeyDescriptor]
             let request = CNContactFetchRequest(keysToFetch: keys)
             var numbers: [String] = []
-            try? s.enumerateContacts(with: request) { contact, _ in
-                for ph in contact.phoneNumbers {
-                    numbers.append(ph.value.stringValue)
+            do {
+                try s.enumerateContacts(with: request) { contact, _ in
+                    for ph in contact.phoneNumbers {
+                        numbers.append(ph.value.stringValue)
+                    }
                 }
+                return .success(numbers)
+            } catch {
+                return .failure(error)
             }
-            return numbers
         }.value
+
+        let phoneNumbers: [String]
+        switch enumerationResult {
+        case .success(let numbers):
+            phoneNumbers = numbers
+        case .failure(let error):
+            logger.error("enumerateContacts failed: \(error, privacy: .public)")
+            errorMessage = "Could not read contacts: \(error.localizedDescription)"
+            return nil
+        }
 
         guard !phoneNumbers.isEmpty else {
             errorMessage = "No phone numbers found in your contacts."
@@ -125,7 +139,15 @@ public final class FindContactsStore: FindContactsStoring {
     }
 
     public func follow(profile: ProfileBasic) async {
-        guard let currentDID = try? await accountStore.loadCurrentDID() else { return }
+        let currentDID: DID?
+        do {
+            currentDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("follow: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            return
+        }
+        guard let currentDID else { return }
         followedDIDs.insert(profile.did.rawValue)
         do {
             let _: CreateRecordResponse = try await network.post(

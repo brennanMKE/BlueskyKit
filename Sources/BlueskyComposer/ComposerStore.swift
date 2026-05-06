@@ -28,6 +28,7 @@ public protocol ComposerStoring: AnyObject, Observable, Sendable {
     ) async -> [ComposerImageAttachment]
     func searchMentions(_ prefix: String)
     func clearError()
+    func setError(_ message: String)
 }
 
 // MARK: - VideoAttachment
@@ -95,7 +96,15 @@ public final class ComposerStore: ComposerStoring {
         mentionDIDs: [String: DID]
     ) async -> [ComposerImageAttachment] {
         guard !isPosting else { return images }
-        guard let viewerDID = try? await accountStore.loadCurrentDID() else {
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("post: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            errorMessage = "Could not access your account: \(error.localizedDescription)"
+            return images
+        }
+        guard let viewerDID else {
             errorMessage = "Not signed in"
             return images
         }
@@ -147,13 +156,17 @@ public final class ComposerStore: ComposerStoring {
                 // If we have OpenGraph metadata, try to upload the thumbnail blob.
                 var thumb: BlobRef?
                 if let imageURL = linkMetadata?.imageURL {
-                    if let (data, mime) = try? await fetchImageData(imageURL) {
+                    do {
+                        let (data, mime) = try await fetchImageData(imageURL)
                         let resp: UploadBlobResponse = try await network.upload(
                             lexicon: "com.atproto.repo.uploadBlob",
                             data: data,
                             mimeType: mime
                         )
                         thumb = resp.blob
+                    } catch {
+                        // Thumbnail upload is best-effort; the post still goes out without it.
+                        logger.debug("link card thumbnail fetch/upload failed: \(error.localizedDescription, privacy: .public)")
                     }
                 }
                 embed = .external(EmbedExternal(
@@ -237,6 +250,10 @@ public final class ComposerStore: ComposerStoring {
 
     public func clearError() {
         errorMessage = nil
+    }
+
+    public func setError(_ message: String) {
+        errorMessage = message
     }
 
     // MARK: - Helpers

@@ -183,7 +183,15 @@ public final class ProfileStore: ProfileStoring {
 
     public func follow() async {
         guard let profile else { return }
-        guard let viewerDID = try? await accountStore.loadCurrentDID() else { return }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("follow: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            return
+        }
+        guard let viewerDID else { return }
         let original = self.profile
         let pendingURI = ATURI(rawValue: "pending:follow")
         self.profile = profile
@@ -217,7 +225,15 @@ public final class ProfileStore: ProfileStoring {
         guard let profile,
               let followURI = profile.viewer?.following,
               let rkey = followURI.rkey else { return }
-        guard let viewerDID = try? await accountStore.loadCurrentDID() else { return }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("unfollow: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            return
+        }
+        guard let viewerDID else { return }
         let original = self.profile
         self.profile = profile
             .adjustingFollowersCount(by: -1)
@@ -240,7 +256,15 @@ public final class ProfileStore: ProfileStoring {
 
     public func block() async {
         guard let profile else { return }
-        guard let viewerDID = try? await accountStore.loadCurrentDID() else { return }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("block: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            return
+        }
+        guard let viewerDID else { return }
         let original = self.profile
         let pendingURI = ATURI(rawValue: "pending:block")
         self.profile = profile.withViewer { v in ProfileViewerState(
@@ -272,7 +296,15 @@ public final class ProfileStore: ProfileStoring {
         guard let profile,
               let blockURI = profile.viewer?.blocking,
               let rkey = blockURI.rkey else { return }
-        guard let viewerDID = try? await accountStore.loadCurrentDID() else { return }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("unblock: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            return
+        }
+        guard let viewerDID else { return }
         let original = self.profile
         self.profile = profile.withViewer { v in ProfileViewerState(
             muted: v?.muted, mutedByList: v?.mutedByList,
@@ -328,7 +360,7 @@ public final class ProfileStore: ProfileStoring {
     // MARK: - Edit profile
 
     public func updateProfile(displayName: String?, description: String?) async throws {
-        guard let viewerDID = try? await accountStore.loadCurrentDID() else { return }
+        guard let viewerDID = try await accountStore.loadCurrentDID() else { return }
         let req = PutRecordRequest(
             repo: viewerDID.rawValue,
             collection: "app.bsky.actor.profile",

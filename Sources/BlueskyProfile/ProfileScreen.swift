@@ -1,7 +1,10 @@
 import SwiftUI
+import OSLog
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
+
+private let profileScreenLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstools.Bluesky", category: "ProfileScreen")
 
 /// Full-page profile view: banner + avatar header, tab strip, post feed.
 public struct ProfileScreen: View {
@@ -15,6 +18,7 @@ public struct ProfileScreen: View {
     @State private var selectedTab: ProfileTab = .posts
     @State private var showEditProfile = false
     @State private var threadURI: ATURI?
+    @State private var updateProfileErrorMessage: String?
 
     public init(
         actorDID: DID,
@@ -73,10 +77,29 @@ public struct ProfileScreen: View {
                     displayName: profile.displayName ?? "",
                     description: profile.description ?? "",
                     onSave: { name, desc in
-                        Task { try? await viewModel.updateProfile(displayName: name, description: desc) }
+                        Task {
+                            do {
+                                try await viewModel.updateProfile(displayName: name, description: desc)
+                            } catch {
+                                profileScreenLogger.error("updateProfile failed: \(error.localizedDescription, privacy: .public)")
+                                await MainActor.run {
+                                    updateProfileErrorMessage = error.localizedDescription
+                                }
+                            }
+                        }
                     }
                 )
             }
+        }
+        .alert("Could not update profile",
+               isPresented: Binding(
+                    get: { updateProfileErrorMessage != nil },
+                    set: { if !$0 { updateProfileErrorMessage = nil } }
+               )
+        ) {
+            Button("OK") { updateProfileErrorMessage = nil }
+        } message: {
+            Text(updateProfileErrorMessage ?? "")
         }
     }
 

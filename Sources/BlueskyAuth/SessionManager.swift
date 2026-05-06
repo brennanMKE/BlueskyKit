@@ -129,8 +129,14 @@ public final class SessionManager: SessionManaging {
 
     public func logout(did: DID) async throws {
         if let stored = try await accountStore.load(did: did) {
-            // Best-effort server-side session deletion; ignore errors
-            try? await callDeleteSession(stored: stored)
+            // Best-effort server-side session deletion. Failure here does not block
+            // local logout: we still clear tokens below. Log at debug level so the
+            // discarded error is observable.
+            do {
+                try await callDeleteSession(stored: stored)
+            } catch {
+                logger.debug("server-side deleteSession failed (continuing local logout): \(error.localizedDescription, privacy: .public)")
+            }
             // Clear tokens; keep the Account entry for quick re-login
             let cleared = StoredAccount(account: stored.account, accessJwt: "", refreshJwt: "")
             try await accountStore.save(cleared)
@@ -223,9 +229,17 @@ public final class SessionManager: SessionManaging {
         let rem = b64.count % 4
         if rem != 0 { b64 += String(repeating: "=", count: 4 - rem) }
 
-        guard let data = Data(base64Encoded: b64),
-              let claims = try? JSONDecoder().decode(JWTClaims.self, from: data),
-              let exp = claims.exp else { return true }
+        guard let data = Data(base64Encoded: b64) else { return true }
+        let claims: JWTClaims
+        do {
+            claims = try JSONDecoder().decode(JWTClaims.self, from: data)
+        } catch {
+            // Treat as expired so a refresh is triggered. Log at debug level so a
+            // chronically malformed JWT becomes observable rather than silent.
+            logger.debug("JWT claims decode failed: \(error.localizedDescription, privacy: .public)")
+            return true
+        }
+        guard let exp = claims.exp else { return true }
 
         return Date(timeIntervalSince1970: TimeInterval(exp)) <= Date().addingTimeInterval(60)
     }

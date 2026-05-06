@@ -39,8 +39,13 @@ public final class SavedFeedsStore: SavedFeedsStoring {
     }
 
     public func load() async {
-        if let cached = try? await cache.fetch([SavedFeed].self, for: "savedFeeds") {
-            feeds = cached.value
+        do {
+            if let cached = try await cache.fetch([SavedFeed].self, for: "savedFeeds") {
+                feeds = cached.value
+            }
+        } catch {
+            // Cache read failure is not fatal; the network fetch below will repopulate.
+            logger.debug("savedFeeds cache fetch failed: \(error.localizedDescription, privacy: .public)")
         }
         isLoading = true
         defer { isLoading = false }
@@ -49,7 +54,11 @@ public final class SavedFeedsStore: SavedFeedsStoring {
                 lexicon: "app.bsky.actor.getPreferences", params: [:]
             )
             feeds = prefs.savedFeeds
-            try? await cache.store(feeds, for: "savedFeeds", ttl: cacheTTL)
+            do {
+                try await cache.store(feeds, for: "savedFeeds", ttl: cacheTTL)
+            } catch {
+                logger.warning("savedFeeds cache store failed: \(error.localizedDescription, privacy: .public)")
+            }
         } catch {
             logger.error("savedFeeds load error: \(error, privacy: .public)")
             self.error = error.localizedDescription
@@ -64,7 +73,11 @@ public final class SavedFeedsStore: SavedFeedsStoring {
                 lexicon: "app.bsky.actor.putPreferences",
                 body: PutPreferencesRequest(savedFeeds: feeds)
             )
-            try? await cache.store(feeds, for: "savedFeeds", ttl: cacheTTL)
+            do {
+                try await cache.store(feeds, for: "savedFeeds", ttl: cacheTTL)
+            } catch {
+                logger.warning("savedFeeds cache store failed (post-save): \(error.localizedDescription, privacy: .public)")
+            }
         } catch {
             self.error = error.localizedDescription
         }

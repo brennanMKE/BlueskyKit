@@ -89,7 +89,15 @@ public final class ListsStore: ListsStoring {
     // MARK: - Create list
 
     public func createList(name: String, description: String?, purpose: String = "app.bsky.graph.defs#curatelist") async {
-        guard let viewerDID = try? await accountStore.loadCurrentDID() else { return }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("createList: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            self.error = error.localizedDescription
+            return
+        }
+        guard let viewerDID else { return }
         do {
             let record = ListRecord(name: name, description: description, purpose: purpose)
             let req = CreateRecordRequest(
@@ -109,8 +117,17 @@ public final class ListsStore: ListsStoring {
     // MARK: - Delete list
 
     public func deleteList(uri: ATURI) async {
-        guard let rkey = uri.rkey,
-              let viewerDID = try? await accountStore.loadCurrentDID() else { return }
+        guard let rkey = uri.rkey else { return }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("deleteList: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            self.error = error.localizedDescription
+            return
+        }
+        guard let viewerDID else { return }
+        let removed = lists.first { $0.uri == uri }
         lists.removeAll { $0.uri == uri }
         do {
             let _: EmptyResponse = try await network.post(
@@ -118,6 +135,8 @@ public final class ListsStore: ListsStoring {
                 body: DeleteRecordRequest(repo: viewerDID.rawValue, collection: "app.bsky.graph.list", rkey: rkey)
             )
         } catch {
+            // Restore the list so the UI doesn't lie about its absence.
+            if let removed { lists.insert(removed, at: 0) }
             self.error = error.localizedDescription
         }
     }
@@ -151,7 +170,15 @@ public final class ListsStore: ListsStoring {
     // MARK: - Starter packs
 
     public func createStarterPack(name: String, description: String?, listURI: ATURI) async {
-        guard let viewerDID = try? await accountStore.loadCurrentDID() else { return }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("createStarterPack: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            self.error = error.localizedDescription
+            return
+        }
+        guard let viewerDID else { return }
         let record = StarterPackRecord(name: name, description: description, list: listURI)
         let req = CreateRecordRequest(
             repo: viewerDID.rawValue,
@@ -182,8 +209,15 @@ public final class ListsStore: ListsStoring {
     }
 
     public func followAll(pack: StarterPackView) async {
-        guard let viewerDID = try? await accountStore.loadCurrentDID(),
-              let members = pack.listItemsSample else { return }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("followAll: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            self.error = error.localizedDescription
+            return
+        }
+        guard let viewerDID, let members = pack.listItemsSample else { return }
         for item in members {
             do {
                 let _: CreateRecordResponse = try await network.post(

@@ -581,7 +581,13 @@ public final class FeedStore: FeedStoring {
     // MARK: - Helpers
 
     private func loadCurrentDID() async -> DID? {
-        try? await accountStore.loadCurrentDID()
+        do {
+            return try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("loadCurrentDID failed: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            return nil
+        }
     }
 
     private func updatePost(uri: ATURI, transform: (PostView) -> PostView) {

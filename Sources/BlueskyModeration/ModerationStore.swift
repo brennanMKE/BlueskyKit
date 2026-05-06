@@ -138,7 +138,15 @@ public final class ModerationStore: ModerationStoring {
     // MARK: - Moderation lists
 
     public func loadModLists() async {
-        guard let viewerDID = try? await accountStore.loadCurrentDID() else { return }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("loadModLists: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            return
+        }
+        guard let viewerDID else { return }
         isLoading = true
         defer { isLoading = false }
         errorMessage = nil
@@ -156,8 +164,16 @@ public final class ModerationStore: ModerationStoring {
     }
 
     public func loadMoreModLists() async {
-        guard hasMoreModLists, let cursor = modListsCursor,
-              let viewerDID = try? await accountStore.loadCurrentDID() else { return }
+        guard hasMoreModLists, let cursor = modListsCursor else { return }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("loadMoreModLists: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            return
+        }
+        guard let viewerDID else { return }
         do {
             let resp: GetListsResponse = try await network.get(
                 lexicon: "app.bsky.graph.getLists",
@@ -206,8 +222,16 @@ public final class ModerationStore: ModerationStoring {
 
     public func unblock(profile: ProfileView) async {
         guard let blockURI = profile.viewer?.blocking,
-              let rkey = blockURI.rkey,
-              let viewerDID = try? await accountStore.loadCurrentDID() else { return }
+              let rkey = blockURI.rkey else { return }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("unblock: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            return
+        }
+        guard let viewerDID else { return }
         let removed = profile
         blocks.removeAll { $0.did == profile.did }
         do {

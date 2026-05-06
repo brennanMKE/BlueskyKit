@@ -1,7 +1,10 @@
 import Foundation
 import Observation
+import OSLog
 import BlueskyCore
 import BlueskyKit
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstools.Bluesky", category: "SettingsViewModel")
 
 // MARK: - Keys
 
@@ -71,35 +74,59 @@ public final class SettingsViewModel {
 
     // MARK: - Load / save
 
+    /// Read a value from the preferences store, falling back to `defaultValue` and
+    /// logging any non-`nil` (corruption, type-mismatch) failure so it is observable.
+    private func loadValue<T: Codable & Sendable>(_ type: T.Type, key: String, default defaultValue: T) -> T {
+        do {
+            if let stored = try preferences.get(type, for: key) {
+                return stored
+            }
+            return defaultValue
+        } catch {
+            logger.warning("Failed to load preference \(key, privacy: .public): \(error.localizedDescription, privacy: .public). Using default.")
+            return defaultValue
+        }
+    }
+
+    /// Write a value to the preferences store, logging any failure so silent persistence
+    /// loss is observable.
+    private func saveValue<T: Codable & Sendable>(_ value: T, key: String) {
+        do {
+            try preferences.set(value, for: key)
+        } catch {
+            logger.error("Failed to save preference \(key, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     public func load() {
-        fontSize = (try? preferences.get(Double.self, for: PrefKey.fontSize)) ?? 16
-        autoplayVideo = (try? preferences.get(Bool.self, for: PrefKey.autoplayVideo)) ?? true
-        externalEmbeds = (try? preferences.get(Bool.self, for: PrefKey.externalEmbeds)) ?? true
-        altTextRequired = (try? preferences.get(Bool.self, for: PrefKey.altTextRequired)) ?? false
-        reduceMotion = (try? preferences.get(Bool.self, for: PrefKey.reduceMotion)) ?? false
-        openLinksInApp = (try? preferences.get(Bool.self, for: PrefKey.openLinksInApp)) ?? true
-        postLanguages = (try? preferences.get([String].self, for: PrefKey.postLanguages)) ?? ["en"]
-        notifyLikes = (try? preferences.get(Bool.self, for: PrefKey.notifyLikes)) ?? true
-        notifyReposts = (try? preferences.get(Bool.self, for: PrefKey.notifyReposts)) ?? true
-        notifyFollows = (try? preferences.get(Bool.self, for: PrefKey.notifyFollows)) ?? true
-        notifyMentions = (try? preferences.get(Bool.self, for: PrefKey.notifyMentions)) ?? true
-        notifyReplies = (try? preferences.get(Bool.self, for: PrefKey.notifyReplies)) ?? true
-        notifyQuotes = (try? preferences.get(Bool.self, for: PrefKey.notifyQuotes)) ?? true
+        fontSize = loadValue(Double.self, key: PrefKey.fontSize, default: 16)
+        autoplayVideo = loadValue(Bool.self, key: PrefKey.autoplayVideo, default: true)
+        externalEmbeds = loadValue(Bool.self, key: PrefKey.externalEmbeds, default: true)
+        altTextRequired = loadValue(Bool.self, key: PrefKey.altTextRequired, default: false)
+        reduceMotion = loadValue(Bool.self, key: PrefKey.reduceMotion, default: false)
+        openLinksInApp = loadValue(Bool.self, key: PrefKey.openLinksInApp, default: true)
+        postLanguages = loadValue([String].self, key: PrefKey.postLanguages, default: ["en"])
+        notifyLikes = loadValue(Bool.self, key: PrefKey.notifyLikes, default: true)
+        notifyReposts = loadValue(Bool.self, key: PrefKey.notifyReposts, default: true)
+        notifyFollows = loadValue(Bool.self, key: PrefKey.notifyFollows, default: true)
+        notifyMentions = loadValue(Bool.self, key: PrefKey.notifyMentions, default: true)
+        notifyReplies = loadValue(Bool.self, key: PrefKey.notifyReplies, default: true)
+        notifyQuotes = loadValue(Bool.self, key: PrefKey.notifyQuotes, default: true)
     }
 
     public func save() {
-        try? preferences.set(fontSize, for: PrefKey.fontSize)
-        try? preferences.set(autoplayVideo, for: PrefKey.autoplayVideo)
-        try? preferences.set(externalEmbeds, for: PrefKey.externalEmbeds)
-        try? preferences.set(altTextRequired, for: PrefKey.altTextRequired)
-        try? preferences.set(reduceMotion, for: PrefKey.reduceMotion)
-        try? preferences.set(openLinksInApp, for: PrefKey.openLinksInApp)
-        try? preferences.set(postLanguages, for: PrefKey.postLanguages)
-        try? preferences.set(notifyLikes, for: PrefKey.notifyLikes)
-        try? preferences.set(notifyReposts, for: PrefKey.notifyReposts)
-        try? preferences.set(notifyFollows, for: PrefKey.notifyFollows)
-        try? preferences.set(notifyMentions, for: PrefKey.notifyMentions)
-        try? preferences.set(notifyReplies, for: PrefKey.notifyReplies)
-        try? preferences.set(notifyQuotes, for: PrefKey.notifyQuotes)
+        saveValue(fontSize, key: PrefKey.fontSize)
+        saveValue(autoplayVideo, key: PrefKey.autoplayVideo)
+        saveValue(externalEmbeds, key: PrefKey.externalEmbeds)
+        saveValue(altTextRequired, key: PrefKey.altTextRequired)
+        saveValue(reduceMotion, key: PrefKey.reduceMotion)
+        saveValue(openLinksInApp, key: PrefKey.openLinksInApp)
+        saveValue(postLanguages, key: PrefKey.postLanguages)
+        saveValue(notifyLikes, key: PrefKey.notifyLikes)
+        saveValue(notifyReposts, key: PrefKey.notifyReposts)
+        saveValue(notifyFollows, key: PrefKey.notifyFollows)
+        saveValue(notifyMentions, key: PrefKey.notifyMentions)
+        saveValue(notifyReplies, key: PrefKey.notifyReplies)
+        saveValue(notifyQuotes, key: PrefKey.notifyQuotes)
     }
 }

@@ -1,7 +1,10 @@
 import SwiftUI
+import OSLog
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
+
+private let starterPackCreateSheetLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstools.Bluesky", category: "StarterPackCreateSheet")
 
 private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
     nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
@@ -167,8 +170,12 @@ private struct ListPickerView: View {
             }
         }
         .task {
-            if let did = try? await viewModel.currentDID() {
-                await viewModel.loadLists(actorDID: did)
+            do {
+                if let did = try await viewModel.currentDID() {
+                    await viewModel.loadLists(actorDID: did)
+                }
+            } catch {
+                starterPackCreateSheetLogger.error("currentDID failed: \(error.localizedDescription, privacy: .public)")
             }
         }
     }

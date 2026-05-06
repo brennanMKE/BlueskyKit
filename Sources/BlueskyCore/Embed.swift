@@ -1,4 +1,7 @@
 import Foundation
+import OSLog
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstools.Bluesky", category: "Embed")
 
 // MARK: - Shared helpers
 
@@ -142,16 +145,20 @@ public indirect enum Embed: Codable, Sendable {
             self = .external(external)
         case "app.bsky.embed.record":
             // Some stored records (feed generators, lists, etc.) omit uri/cid.
-            if let record = try? c.decode(EmbedRecordRef.self, forKey: .record) {
+            do {
+                let record = try c.decode(EmbedRecordRef.self, forKey: .record)
                 self = .record(record)
-            } else {
+            } catch {
+                logger.error("Failed to decode app.bsky.embed.record EmbedRecordRef: \(error.localizedDescription, privacy: .public)")
                 self = .unknown(type)
             }
         case "app.bsky.embed.recordWithMedia":
-            if let record = try? c.decode(EmbedRecordRef.self, forKey: .record) {
+            do {
+                let record = try c.decode(EmbedRecordRef.self, forKey: .record)
                 let media = try c.decode(Embed.self, forKey: .media)
                 self = .recordWithMedia(record: record, media: media)
-            } else {
+            } catch {
+                logger.error("Failed to decode app.bsky.embed.recordWithMedia: \(error.localizedDescription, privacy: .public)")
                 self = .unknown(type)
             }
         case "app.bsky.embed.video":
@@ -248,7 +255,13 @@ public enum EmbedRecordContent: Codable, Sendable {
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        let type = (try? c.decode(String.self, forKey: .type)) ?? "unknown"
+        let type: String
+        do {
+            type = try c.decode(String.self, forKey: .type)
+        } catch {
+            logger.error("Failed to decode $type for EmbedRecordContent: \(error.localizedDescription, privacy: .public)")
+            type = "unknown"
+        }
         switch type {
         case "app.bsky.embed.record#viewRecord":
             let record = try EmbedViewRecord(from: decoder)

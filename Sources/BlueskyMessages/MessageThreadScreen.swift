@@ -1,8 +1,11 @@
 import SwiftUI
+import OSLog
 import PhotosUI
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
+
+private let messageThreadScreenLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstools.Bluesky", category: "MessageThreadScreen")
 
 private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
     nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
@@ -20,6 +23,7 @@ public struct MessageThreadScreen: View {
     @State private var viewModel: MessageThreadViewModel
     @State private var draftText: String = ""
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var imageLoadErrorMessage: String?
 
     public init(convo: ConvoView, network: any NetworkClient, viewerDID: DID? = nil) {
         self.convo = convo
@@ -41,6 +45,16 @@ public struct MessageThreadScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task { await viewModel.load() }
+        .alert("Could not send image",
+               isPresented: Binding(
+                    get: { imageLoadErrorMessage != nil },
+                    set: { if !$0 { imageLoadErrorMessage = nil } }
+               )
+        ) {
+            Button("OK") { imageLoadErrorMessage = nil }
+        } message: {
+            Text(imageLoadErrorMessage ?? "")
+        }
     }
 
     // MARK: - Message scroll view
@@ -116,7 +130,20 @@ public struct MessageThreadScreen: View {
     // MARK: - Image sending
 
     private func sendImage(_ item: PhotosPickerItem) async {
-        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+        let data: Data?
+        do {
+            data = try await item.loadTransferable(type: Data.self)
+        } catch {
+            messageThreadScreenLogger.error("loadTransferable image failed: \(error.localizedDescription, privacy: .public)")
+            imageLoadErrorMessage = "Could not load the selected photo: \(error.localizedDescription)"
+            selectedPhoto = nil
+            return
+        }
+        guard let data else {
+            imageLoadErrorMessage = "Could not load the selected photo."
+            selectedPhoto = nil
+            return
+        }
         let mimeType = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
         await viewModel.sendImageAttachment(data: data, mimeType: mimeType)
         selectedPhoto = nil
