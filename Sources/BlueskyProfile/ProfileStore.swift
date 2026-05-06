@@ -166,7 +166,15 @@ public final class ProfileStore: ProfileStoring {
         if let cursor { params["cursor"] = cursor }
         switch tab {
         case .posts:
-            params["filter"] = "posts_no_replies"
+            // Match the RN reference exactly (#0087): the Posts tab uses the
+            // `posts_and_author_threads` filter with `includePins=true`. The
+            // PDS surfaces the actor's pinned post (if any) as the first item
+            // in the response with `reason` of type
+            // `app.bsky.feed.defs#reasonPin`. The same post may appear again
+            // later in chronological order — we render both copies, no
+            // de-duplication, matching RN.
+            params["filter"] = "posts_and_author_threads"
+            params["includePins"] = "true"
             return try await network.get(lexicon: "app.bsky.feed.getAuthorFeed", params: params)
         case .replies:
             params["filter"] = "posts_with_replies"

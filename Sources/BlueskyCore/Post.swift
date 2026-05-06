@@ -168,10 +168,25 @@ public struct ReplyContext: Codable, Sendable {
     }
 }
 
-/// The reason a post appears in a feed (currently only repost).
+/// The reason a post appears in a feed.
+///
+/// Two known variants:
+///   * `reasonRepost` — the post was reposted by some actor.
+///   * `reasonPin`    — the post is the actor's pinned post on their profile feed.
+///
+/// `reasonPin` is what surfaces the pinned post at the top of the Posts tab on
+/// a profile (see #0087). The AT Proto lexicon defines it at
+/// `app.bsky.feed.defs#reasonPin` and it is currently empty (no fields), but
+/// the discriminator is enough: when present, the feed item is the pinned one.
+/// `getAuthorFeed` only includes pinned items when the request carries
+/// `includePins=true`, which RN sets only for the `posts_and_author_threads`
+/// filter (the Posts tab).
 public enum FeedReason: Codable, Sendable {
     /// The post was reposted by `by` at `indexedAt`.
     case repost(by: ProfileBasic, indexedAt: Date)
+    /// The post is the actor's pinned post (only surfaces when the request
+    /// passed `includePins=true`).
+    case pin
     case unknown(String)
 
     private enum CodingKeys: String, CodingKey {
@@ -187,6 +202,8 @@ public enum FeedReason: Codable, Sendable {
             let by = try c.decode(ProfileBasic.self, forKey: .by)
             let indexedAt = try c.decode(Date.self, forKey: .indexedAt)
             self = .repost(by: by, indexedAt: indexedAt)
+        case "app.bsky.feed.defs#reasonPin":
+            self = .pin
         default:
             self = .unknown(type)
         }
@@ -199,6 +216,8 @@ public enum FeedReason: Codable, Sendable {
             try c.encode("app.bsky.feed.defs#reasonRepost", forKey: .type)
             try c.encode(by, forKey: .by)
             try c.encode(indexedAt, forKey: .indexedAt)
+        case .pin:
+            try c.encode("app.bsky.feed.defs#reasonPin", forKey: .type)
         case .unknown(let t):
             try c.encode(t, forKey: .type)
         }

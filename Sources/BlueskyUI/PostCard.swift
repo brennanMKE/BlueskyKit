@@ -43,8 +43,15 @@ public struct PostCard: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let reason = item.reason, case .repost(let by, _) = reason {
-                repostBanner(by: by)
+            if let reason = item.reason {
+                switch reason {
+                case .repost(let by, _):
+                    repostBanner(by: by)
+                case .pin:
+                    pinnedBanner
+                case .unknown:
+                    EmptyView()
+                }
             }
             HStack(alignment: .top, spacing: Spacing.sm) {
                 avatarColumn
@@ -260,6 +267,23 @@ public struct PostCard: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(theme.colors.textTertiary)
             Text("Reposted by \(profile.displayName ?? profile.handle.rawValue)")
+                .font(Typography.footnote)
+                .foregroundStyle(theme.colors.textTertiary)
+        }
+        .padding(.horizontal, Spacing.md + 44 + Spacing.sm)
+        .padding(.top, Spacing.xs)
+    }
+
+    /// "📌 Pinned" banner for the actor's pinned post on their Posts tab
+    /// (#0087). Rendered above the byline in the same horizontal slot as the
+    /// repost banner so the two never collide (the AT Proto feed never
+    /// returns both reasons on the same item).
+    private var pinnedBanner: some View {
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: "pin.fill")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.colors.textTertiary)
+            Text("Pinned")
                 .font(Typography.footnote)
                 .foregroundStyle(theme.colors.textTertiary)
         }
