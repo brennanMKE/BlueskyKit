@@ -8,6 +8,11 @@ public struct NotificationsScreen: View {
 
     private let network: any NetworkClient
     public var onUnreadCountChange: ((Int) -> Void)?
+    /// Tap callback for any actor avatar / name in the row (#0080). Mirrors
+    /// the `onAuthorTap` callback already used by `FeedView`/`ThreadView` —
+    /// the parent (`MainTabView`) sets `feedProfileDID` to push a
+    /// `ProfileScreen`. `nil` simply disables the tap.
+    public var onAuthorTap: ((ProfileBasic) -> Void)?
 
     @State private var viewModel: NotificationsViewModel
     @State private var threadURI: ATURI?
@@ -18,10 +23,12 @@ public struct NotificationsScreen: View {
 
     public init(
         network: any NetworkClient,
-        onUnreadCountChange: ((Int) -> Void)? = nil
+        onUnreadCountChange: ((Int) -> Void)? = nil,
+        onAuthorTap: ((ProfileBasic) -> Void)? = nil
     ) {
         self.network = network
         self.onUnreadCountChange = onUnreadCountChange
+        self.onAuthorTap = onAuthorTap
         _viewModel = State(wrappedValue: NotificationsViewModel(network: network))
     }
 
@@ -82,7 +89,8 @@ public struct NotificationsScreen: View {
                 GroupedNotificationRow(
                     group: group,
                     postCache: viewModel.postCache,
-                    onTap: { uri in threadURI = uri }
+                    onTap: { uri in threadURI = uri },
+                    onAuthorTap: { profile in onAuthorTap?(profile) }
                 )
                 .listRowInsets(EdgeInsets())
                 .listRowSeparator(.hidden)
@@ -190,20 +198,31 @@ private struct GroupedNotificationRow: View {
     /// row re-renders when the cache resolves its URI — no manual diffing.
     let postCache: NotificationPostCache
     let onTap: (ATURI) -> Void
+    /// Tap callback for any actor avatar (in the stack) or any actor row
+    /// (in the expanded list) — wires through to the screen's
+    /// `onAuthorTap` so the parent can push `ProfileScreen` (#0080).
+    let onAuthorTap: (ProfileBasic) -> Void
+
+    /// Maximum number of actor avatars rendered in the collapsed stack;
+    /// excess actors collapse behind a chevron-down expand button (#0080).
+    private static let collapsedAvatarLimit = 5
+
+    /// Drives the chevron-down → list expansion (#0080). Local to the row
+    /// so each group expands independently; resets when the row is recycled.
+    @State private var isExpanded: Bool = false
 
     var body: some View {
-        Button {
-            // Tap target prefers the previewed post (the actor's reply or
-            // the viewer's own post that was liked), falling back to the
-            // older `reasonSubject` so non-post reasons still navigate.
-            if let target = group.previewPostURI ?? group.reasonSubject {
-                onTap(target)
-            }
-        } label: {
+        // Outer container is a plain VStack rather than a `Button` because
+        // the row now contains *multiple* tap targets (the post body, each
+        // avatar, the expand chevron, each expanded actor row). Wrapping
+        // everything in a single Button would consume the inner taps. The
+        // body area itself is given a `contentShape` + `onTapGesture` so
+        // tapping the post region still navigates to the thread.
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 reasonIcon
                 VStack(alignment: .leading, spacing: 4) {
-                    actorAvatarStack
+                    actorAvatarRow
                     HStack(spacing: 4) {
                         Text(actorSummary)
                             .font(.subheadline).fontWeight(.semibold)
@@ -224,11 +243,26 @@ private struct GroupedNotificationRow: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
+            // Expanded actor list — slides down below the row when the
+            // chevron is tapped. Uses a `clipped` outer to hide the
+            // overflow during the height animation.
+            if isExpanded {
+                expandedActorList
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            // Tap target prefers the previewed post (the actor's reply or
+            // the viewer's own post that was liked), falling back to the
+            // older `reasonSubject` so non-post reasons still navigate.
+            if let target = group.previewPostURI ?? group.reasonSubject {
+                onTap(target)
+            }
+        }
+        .animation(.smooth, value: isExpanded)
     }
 
     // MARK: - Inline post preview
@@ -341,22 +375,96 @@ private struct GroupedNotificationRow: View {
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
-    // Up to 3 overlapping avatars.
-    private var actorAvatarStack: some View {
-        let visible = Array(group.actors.prefix(3))
+    /// Avatar row: up to `collapsedAvatarLimit` overlapping avatars, each
+    /// independently tappable, with a chevron-down expand button on the
+    /// trailing edge when there are more actors than fit in the stack
+    /// (#0080). Avatars overlap by ~30% (negative `HStack` spacing) and
+    /// each carries a 1.5pt background-colored ring so the overlap reads
+    /// as discrete circles in both light and dark mode.
+    private var actorAvatarRow: some View {
+        let visible = Array(group.actors.prefix(Self.collapsedAvatarLimit))
+        let hasOverflow = group.actors.count > Self.collapsedAvatarLimit
+        // -8 against a 28pt avatar = ~28% overlap on the leading edge of
+        // each subsequent avatar, matching the RN reference.
         return HStack(spacing: -8) {
             ForEach(Array(visible.enumerated()), id: \.offset) { _, actor in
-                AvatarView(
-                    url: actor.avatar,
-                    handle: actor.handle.rawValue,
-                    size: 28
-                )
-                .overlay(
-                    Circle()
-                        .stroke(Color.uiCompatibleSystemBackground, lineWidth: 1.5)
-                )
+                Button {
+                    onAuthorTap(actor)
+                } label: {
+                    AvatarView(
+                        url: actor.avatar,
+                        handle: actor.handle.rawValue,
+                        size: 28
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(Color.uiCompatibleSystemBackground, lineWidth: 1.5)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(actor.displayName ?? "@\(actor.handle.rawValue)")
+            }
+            if hasOverflow {
+                Button {
+                    isExpanded.toggle()
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(
+                            Circle().fill(Color.secondary.opacity(0.12))
+                        )
+                        .overlay(
+                            Circle()
+                                .stroke(Color.uiCompatibleSystemBackground, lineWidth: 1.5)
+                        )
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                        .animation(.smooth, value: isExpanded)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 4)
+                .accessibilityLabel(isExpanded ? "Collapse actor list" : "Expand actor list")
             }
         }
+    }
+
+    /// Vertically-stacked list of every actor in the group with full
+    /// names — shown when the chevron is expanded (#0080). Each entry is
+    /// tappable and routes back through `onAuthorTap`.
+    private var expandedActorList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(group.actors.enumerated()), id: \.offset) { _, actor in
+                Button {
+                    onAuthorTap(actor)
+                } label: {
+                    HStack(spacing: 10) {
+                        AvatarView(
+                            url: actor.avatar,
+                            handle: actor.handle.rawValue,
+                            size: 28
+                        )
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(actor.displayName ?? actor.handle.rawValue)
+                                .font(.subheadline).fontWeight(.semibold)
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Text("@\(actor.handle.rawValue)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        // Indent to align under the avatar stack (reasonIcon = 24pt
+        // wide + 12pt HStack spacing in the parent row).
+        .padding(.leading, 36)
+        .padding(.top, 8)
     }
 
     private var reasonIcon: some View {
@@ -387,7 +495,11 @@ private struct GroupedNotificationRow: View {
         }
     }
 
-    /// "Alice", "Alice and Bob", "Alice, Bob, and 3 others"
+    /// "Alice", "Alice and 1 other", "Alice and 4 others" — matches the
+    /// RN reference (#0080). Multi-actor groups always read as
+    /// "{first} and N others" rather than enumerating multiple names so
+    /// the row stays compact; the full list is one tap away on the
+    /// expand chevron.
     private var actorSummary: String {
         let actors = group.actors
         let name: (ProfileBasic) -> String = { a in
@@ -396,10 +508,9 @@ private struct GroupedNotificationRow: View {
         switch actors.count {
         case 0:  return ""
         case 1:  return name(actors[0])
-        case 2:  return "\(name(actors[0])) and \(name(actors[1]))"
         default:
-            let extra = actors.count - 2
-            return "\(name(actors[0])), \(name(actors[1])), and \(extra) other\(extra == 1 ? "" : "s")"
+            let extra = actors.count - 1
+            return "\(name(actors[0])) and \(extra) other\(extra == 1 ? "" : "s")"
         }
     }
 
