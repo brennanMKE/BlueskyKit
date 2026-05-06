@@ -147,17 +147,12 @@ public struct PostCard: View {
     }
 
     private var postBody: some View {
-        RichTextView(
+        // Extracted to `PostBodyView` (#0079) so non-feed surfaces — notification
+        // rows in particular — can reuse the same font, color, and facet handling.
+        PostBodyView(
             text: item.post.record.text,
             facets: item.post.record.facets,
-            foregroundColor: theme.colors.textPrimary,
-            linkColor: theme.colors.link,
-            onLinkTap: { url in
-                if url.scheme == "bluesky", url.host == "hashtag",
-                   let tag = url.pathComponents.last, !tag.isEmpty {
-                    actions?.onHashtagTap?(tag)
-                }
-            }
+            onHashtagTap: { tag in actions?.onHashtagTap?(tag) }
         )
     }
 

@@ -79,9 +79,11 @@ public struct NotificationsScreen: View {
         let groups = viewModel.groupedNotifications
         return List {
             ForEach(groups) { group in
-                GroupedNotificationRow(group: group, onTap: { uri in
-                    threadURI = uri
-                })
+                GroupedNotificationRow(
+                    group: group,
+                    postCache: viewModel.postCache,
+                    onTap: { uri in threadURI = uri }
+                )
                 .listRowInsets(EdgeInsets())
                 .listRowSeparator(.hidden)
                 .onAppear {
@@ -183,12 +185,19 @@ private struct NotificationsFilterStrip: View {
 
 private struct GroupedNotificationRow: View {
     let group: GroupedNotification
+    /// Provides the resolved `PostView` (or loading state) for the row's
+    /// `previewPostURI`. Reading from `@Observable` cache here means each
+    /// row re-renders when the cache resolves its URI — no manual diffing.
+    let postCache: NotificationPostCache
     let onTap: (ATURI) -> Void
 
     var body: some View {
         Button {
-            if let subject = group.reasonSubject {
-                onTap(subject)
+            // Tap target prefers the previewed post (the actor's reply or
+            // the viewer's own post that was liked), falling back to the
+            // older `reasonSubject` so non-post reasons still navigate.
+            if let target = group.previewPostURI ?? group.reasonSubject {
+                onTap(target)
             }
         } label: {
             HStack(alignment: .top, spacing: 12) {
@@ -208,6 +217,7 @@ private struct GroupedNotificationRow: View {
                     Text(reasonText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                    postPreview
                 }
                 Spacer()
                 Text(group.indexedAt, style: .relative)
@@ -219,6 +229,116 @@ private struct GroupedNotificationRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Inline post preview
+
+    /// Inline post-content excerpt rendered below the reason text on
+    /// post-related rows (#0079). Skipped entirely for `follow`/`verified`
+    /// and other reasons that don't have a `previewPostURI`.
+    @ViewBuilder
+    private var postPreview: some View {
+        if let uri = group.previewPostURI {
+            if let post = postCache.post(for: uri) {
+                VStack(alignment: .leading, spacing: 6) {
+                    PostBodyView(
+                        text: post.record.text,
+                        facets: post.record.facets,
+                        lineLimit: 4
+                    )
+                    compactLinkCard(for: post.embed)
+                }
+                .padding(.top, 4)
+            } else if postCache.isLoading(uri: uri) {
+                postPreviewSkeleton
+                    .padding(.top, 4)
+            } else if postCache.isMissing(uri: uri) {
+                // Server returned no entry (deleted/blocked); render
+                // nothing rather than a perpetual placeholder.
+                EmptyView()
+            } else {
+                // Not yet hydrated and not in flight (e.g. cache miss
+                // before the screen's first hydrate pass completed). A
+                // light skeleton is still the right thing to show.
+                postPreviewSkeleton
+                    .padding(.top, 4)
+            }
+        }
+    }
+
+    /// Two grayed bars approximating ~2 lines of body text while the
+    /// post-fetch is in flight. Deliberately lightweight — keep rows dense.
+    private var postPreviewSkeleton: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.secondary.opacity(0.15))
+                .frame(maxWidth: .infinity)
+                .frame(height: 10)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.secondary.opacity(0.15))
+                .frame(maxWidth: 220)
+                .frame(height: 10)
+        }
+    }
+
+    /// Compact inline link-card variant for external embeds. Skipped for
+    /// image/video/quote embeds — they make rows too tall, and the issue
+    /// scope explicitly says to keep notifications dense. Returns the
+    /// shortest meaningful card: a single-line title + a single-line URL.
+    private func compactLinkCard(for embed: BlueskyCore.EmbedView?) -> AnyView {
+        // Resolve the external embed if there is one — including the media
+        // half of a `recordWithMedia` composite. Returns `AnyView` because
+        // the function is recursive and `some View` would self-infer.
+        let external: EmbedExternalView?
+        switch embed {
+        case .external(let ext):
+            external = ext
+        case .recordWithMedia(_, let media):
+            // recordWithMedia composites a quote + media; surface the
+            // external half when present, otherwise no inline card.
+            if case .external(let ext) = media {
+                external = ext
+            } else {
+                external = nil
+            }
+        default:
+            external = nil
+        }
+        guard let ext = external else { return AnyView(EmptyView()) }
+
+        return AnyView(
+            HStack(spacing: 6) {
+                Image(systemName: "link")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 0) {
+                    if !ext.title.isEmpty {
+                        Text(ext.title)
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    }
+                    Text(displayHost(for: ext.uri) ?? ext.uri)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
+            )
+        )
+    }
+
+    /// `https://example.com/foo` → `example.com`. Falls back to nil when the
+    /// URI doesn't parse, in which case the caller renders the raw URI.
+    private func displayHost(for uri: String) -> String? {
+        guard let url = URL(string: uri), let host = url.host else { return nil }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
     // Up to 3 overlapping avatars.
