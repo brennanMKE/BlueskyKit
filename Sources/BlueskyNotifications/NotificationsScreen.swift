@@ -212,6 +212,23 @@ private struct GroupedNotificationRow: View {
     @State private var isExpanded: Bool = false
 
     var body: some View {
+        // Branch on reason at the top so each layout stays simple (#0081).
+        // Reply rows get a distinct shape (responder avatar leading, a
+        // "↳ Replied to you" indicator, then the reply body) — RN drops the
+        // bell + avatar-stack chrome on this variant. Quote and mention
+        // remain on the default grouped layout: RN renders all three as a
+        // full Post card, but the simplified "Replied to you" affordance
+        // only reads correctly for replies, so we don't generalize it.
+        if group.reason == "reply" {
+            replyRow
+        } else {
+            defaultGroupedRow
+        }
+    }
+
+    // MARK: - Default grouped row (likes, reposts, follows, mentions, quotes, …)
+
+    private var defaultGroupedRow: some View {
         // Outer container is a plain VStack rather than a `Button` because
         // the row now contains *multiple* tap targets (the post body, each
         // avatar, the expand chevron, each expanded actor row). Wrapping
@@ -263,6 +280,84 @@ private struct GroupedNotificationRow: View {
             }
         }
         .animation(.smooth, value: isExpanded)
+    }
+
+    // MARK: - Reply row (#0081)
+
+    /// Reply-only variant: full-size responder avatar at the leading edge,
+    /// a "↳ Replied to you" indicator, then the actor identity and the
+    /// inline reply body. Drops the bell icon and avatar stack — RN only
+    /// shows those on the grouped variants. Reply groups are always
+    /// single-actor after #0079's grouping change (each reply is keyed by
+    /// its own notification `uri`), so there's no stack to render anyway.
+    private var replyRow: some View {
+        let actor = group.actors.first
+        return HStack(alignment: .top, spacing: 12) {
+            // Leading: full-size avatar (~40pt) at the row's left edge.
+            // Tappable so it routes to the actor's profile, mirroring the
+            // avatar-stack behavior on the default layout.
+            if let actor {
+                Button {
+                    onAuthorTap(actor)
+                } label: {
+                    AvatarView(
+                        url: actor.avatar,
+                        handle: actor.handle.rawValue,
+                        size: 40
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(actor.displayName ?? "@\(actor.handle.rawValue)")
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                // First line: small "↳ Replied to you" indicator. Uses the
+                // literal arrow glyph (rather than an SF Symbol) so the row
+                // matches the RN reference exactly — caption2, secondary.
+                HStack(spacing: 4) {
+                    Text("↳ Replied to you")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if !group.isRead {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 6, height: 6)
+                    }
+                }
+                // Second line: responder name, handle, timestamp.
+                if let actor {
+                    HStack(spacing: 4) {
+                        Text(actor.displayName ?? actor.handle.rawValue)
+                            .font(.subheadline).fontWeight(.semibold)
+                            .lineLimit(1)
+                        Text("@\(actor.handle.rawValue)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .layoutPriority(-1)
+                        Text("·")
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                        Text(group.indexedAt, style: .relative)
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+                // Body: the reply post text (rendered inline per #0079).
+                postPreview
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            // For replies, `previewPostURI` is the actor's reply URI; the
+            // existing tap handler routes it to the thread (per #0062).
+            if let target = group.previewPostURI ?? group.reasonSubject {
+                onTap(target)
+            }
+        }
     }
 
     // MARK: - Inline post preview
