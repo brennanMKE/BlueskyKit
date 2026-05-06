@@ -70,6 +70,21 @@ public struct GetFeedGeneratorsResponse: Codable, Sendable {
     }
 }
 
+/// Response shape for `app.bsky.feed.getFeedGenerator` (singular). The
+/// lexicon also returns `isOnline` and `isValid`; consumers that only need
+/// the view metadata can ignore those fields.
+public struct GetFeedGeneratorResponse: Codable, Sendable {
+    public let view: GeneratorView
+    public let isOnline: Bool?
+    public let isValid: Bool?
+
+    public init(view: GeneratorView, isOnline: Bool? = nil, isValid: Bool? = nil) {
+        self.view = view
+        self.isOnline = isOnline
+        self.isValid = isValid
+    }
+}
+
 public struct GetActorFeedsResponse: Codable, Sendable {
     public let feeds: [GeneratorView]
     public let cursor: Cursor?
