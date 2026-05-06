@@ -46,6 +46,13 @@ public struct BlueskyTopBar<Leading: View, Center: View, Trailing: View>: View {
         }
         .frame(height: BlueskyTopBar.height)
         .padding(.horizontal, 4)
+        // Fix #0088: extend the bar's background behind the top safe area so
+        // the iOS status bar sits over the chrome's color rather than over a
+        // black band. The bar's *content* (the HStack above) keeps its 44pt
+        // height inside the safe area; only the background fill bleeds up.
+        // `ignoresSafeArea(edges: .top)` is a no-op when the view isn't at
+        // the screen's top edge, so this is safe to leave on regardless of
+        // where the bar is mounted.
         .background(
             theme.colors.background
                 .overlay(alignment: .bottom) {
@@ -53,6 +60,7 @@ public struct BlueskyTopBar<Leading: View, Center: View, Trailing: View>: View {
                         .fill(theme.colors.border)
                         .frame(height: 0.5)
                 }
+                .ignoresSafeArea(edges: .top)
         )
     }
 

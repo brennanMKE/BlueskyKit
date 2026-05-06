@@ -65,6 +65,15 @@ public struct ProfileScreen: View {
                 }
             }
         }
+        #if os(iOS)
+        // Fix #0088: extend the ScrollView behind the top safe area so the
+        // banner (first child of `LazyVStack`) renders flush under the
+        // status bar. `ProfileHeaderView.bannerSection` already applies
+        // `.ignoresSafeArea(edges: .top)`, but a constraining parent
+        // (`MainTabView`'s NavigationStack on iOS compact) was preventing
+        // it from reaching the screen edge.
+        .ignoresSafeArea(edges: .top)
+        #endif
         .refreshable {
             await viewModel.loadProfile()
             await loadCurrentTab(selectedTab)
