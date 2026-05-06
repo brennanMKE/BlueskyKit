@@ -38,9 +38,19 @@ public final class NotificationsViewModel {
     public var errorMessage: String? { store.errorMessage }
     public var unreadCount: Int { store.unreadCount }
 
+    /// Active filter — drives which slice of notifications is presented.
+    /// Defaults to `.all` on cold-start; UI may flip to `.mentions` for the
+    /// Mentions tab. Persisted only within the session — not across launches.
+    public var filter: NotificationFilter {
+        get { store.filter }
+        set { store.setFilter(newValue) }
+    }
+
     // MARK: Grouped notifications
 
-    /// Notifications collapsed by `(reason, reasonSubject)`.
+    /// Notifications collapsed by `(reason, reasonSubject)`, scoped to the
+    /// active filter — only entries whose `reason` is included by
+    /// `store.filter.keepReasons` participate.
     ///
     /// For `"follow"` notifications — which have no `reasonSubject` — each actor gets its
     /// own group keyed by their DID so follows are never merged across different actors.
@@ -96,4 +106,8 @@ public final class NotificationsViewModel {
     public func refresh() async { await store.refresh() }
     public func markSeen() async { await store.markSeen() }
     public func fetchUnreadCount() async { await store.fetchUnreadCount() }
+
+    public func setFilter(_ filter: NotificationFilter) {
+        store.setFilter(filter)
+    }
 }

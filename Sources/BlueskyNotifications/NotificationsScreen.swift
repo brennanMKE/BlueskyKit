@@ -11,6 +11,10 @@ public struct NotificationsScreen: View {
 
     @State private var viewModel: NotificationsViewModel
     @State private var threadURI: ATURI?
+    /// Active segmented-tab filter. Mirrors `viewModel.filter` so the
+    /// Picker has a Binding it can drive directly. Cold-starts at `.all`
+    /// and is intentionally not persisted across launches (issue #0078).
+    @State private var activeFilter: NotificationFilter = .all
 
     public init(
         network: any NetworkClient,
@@ -22,14 +26,19 @@ public struct NotificationsScreen: View {
     }
 
     public var body: some View {
-        Group {
-            if viewModel.notifications.isEmpty && viewModel.isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if viewModel.notifications.isEmpty, let msg = viewModel.errorMessage {
-                errorView(msg)
-            } else {
-                notificationList
+        VStack(spacing: 0) {
+            NotificationsFilterStrip(selection: $activeFilter)
+            Group {
+                if viewModel.notifications.isEmpty && viewModel.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if viewModel.notifications.isEmpty, let msg = viewModel.errorMessage {
+                    errorView(msg)
+                } else if viewModel.notifications.isEmpty {
+                    emptyStateView
+                } else {
+                    notificationList
+                }
             }
         }
         #if os(macOS)
@@ -45,6 +54,11 @@ public struct NotificationsScreen: View {
         .task {
             await viewModel.loadInitial()
             await viewModel.markSeen()
+        }
+        .onChange(of: activeFilter) { _, newValue in
+            // Filter switching is a synchronous flip on the store — both
+            // tabs share the same underlying data array, so no refetch.
+            viewModel.setFilter(newValue)
         }
         .onChange(of: viewModel.unreadCount) { _, count in
             onUnreadCountChange?(count)
@@ -85,7 +99,20 @@ public struct NotificationsScreen: View {
         .refreshable { await viewModel.refresh() }
     }
 
-    // MARK: - Error
+    // MARK: - Empty / Error
+
+    private var emptyStateView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: activeFilter == .mentions ? "at" : "bell")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary)
+            Text(activeFilter == .mentions ? "No mentions yet" : "No notifications yet")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 
     private func errorView(_ message: String) -> some View {
         VStack(spacing: 12) {
@@ -101,6 +128,54 @@ public struct NotificationsScreen: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Filter strip
+
+/// Two-segment selector — All / Mentions — matching the React Native
+/// reference styling (#0078). Uses a brand-color 2pt underline for the
+/// selected segment instead of the iOS-default segmented control look,
+/// for visual parity with the Home feed tab strip introduced in #0074.
+private struct NotificationsFilterStrip: View {
+
+    @Environment(\.blueskyTheme) private var theme
+    @Binding var selection: NotificationFilter
+
+    var body: some View {
+        HStack(spacing: 0) {
+            segmentButton(.all, label: "All")
+            segmentButton(.mentions, label: "Mentions")
+            Spacer(minLength: 0)
+        }
+        .frame(height: 44)
+        .background(theme.colors.background)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(theme.colors.border)
+                .frame(height: 0.5)
+        }
+    }
+
+    private func segmentButton(_ value: NotificationFilter, label: String) -> some View {
+        let isSelected = selection == value
+        return Button {
+            selection = value
+        } label: {
+            VStack(spacing: 0) {
+                Text(label)
+                    .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .fixedSize(horizontal: true, vertical: false)
+                Rectangle()
+                    .fill(isSelected ? Color.accentColor : Color.clear)
+                    .frame(height: 2)
+            }
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 }
 
