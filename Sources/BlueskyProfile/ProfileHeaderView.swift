@@ -103,11 +103,15 @@ public struct ProfileHeaderView: View {
         .frame(maxWidth: .infinity)
         .frame(height: bannerHeight)
         .clipped()
-        #if os(iOS)
-        // Run the banner flush under the status bar (#0083). The rest of the
-        // header keeps its safe-area inset; only the banner ignores it.
-        .ignoresSafeArea(edges: .top)
-        #endif
+        // Note (#0089): the banner used to apply `.ignoresSafeArea(edges: .top)`
+        // here on iOS so it would bleed under the status bar (#0083). Since
+        // #0088, the outer `ScrollView` in `ProfileScreen` already extends
+        // behind the top safe area, so a second `ignoresSafeArea` on this
+        // child caused a layout conflict that shifted the rest of the header
+        // (avatar, name, bio, stats, known-followers chip) ~16pt off the
+        // leading edge — every line lost its first character. The bleed-up
+        // is now owned solely by the ScrollView; the banner is positioned
+        // by its parent like any other child of the LazyVStack.
     }
 
     private var bannerHeight: CGFloat {
