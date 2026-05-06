@@ -39,7 +39,16 @@ public struct SearchScreen: View {
             Divider()
             content
         }
+        // #0090: on iOS the slim `BlueskyTopBar` mounted by `MainTabView`
+        // (`iosSearchTopBar`) replaces the giant `.large` "Search" headline,
+        // so suppress the system nav bar's display mode to inline. macOS
+        // keeps its `.navigationTitle("Search")` because the sidebar +
+        // toolbar layout still expects it.
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #else
         .navigationTitle("Search")
+        #endif
         .task { await viewModel.loadSuggestions() }
         .navigationDestination(item: $selectedHashtag) { hashtag in
             HashtagView(hashtag: hashtag, network: network)
