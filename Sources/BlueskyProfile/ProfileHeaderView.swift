@@ -14,6 +14,13 @@ public struct ProfileHeaderView: View {
     let onMute: () -> Void
     let onUnmute: () -> Void
     let onEditProfile: () -> Void
+    /// Optional own-profile menu actions surfaced via the in-screen ellipsis
+    /// (iOS only — see #0083). When `nil` the menu falls back to no-op or omits
+    /// the entry. macOS routes these through the toolbar instead.
+    let onSettings: (() -> Void)?
+    let onSaved: (() -> Void)?
+    let onMyLists: (() -> Void)?
+    let onModeration: (() -> Void)?
 
     public init(
         profile: ProfileDetailed?,
@@ -25,7 +32,11 @@ public struct ProfileHeaderView: View {
         onUnblock: @escaping () -> Void,
         onMute: @escaping () -> Void,
         onUnmute: @escaping () -> Void,
-        onEditProfile: @escaping () -> Void
+        onEditProfile: @escaping () -> Void,
+        onSettings: (() -> Void)? = nil,
+        onSaved: (() -> Void)? = nil,
+        onMyLists: (() -> Void)? = nil,
+        onModeration: (() -> Void)? = nil
     ) {
         self.profile = profile
         self.isOwnProfile = isOwnProfile
@@ -37,6 +48,10 @@ public struct ProfileHeaderView: View {
         self.onMute = onMute
         self.onUnmute = onUnmute
         self.onEditProfile = onEditProfile
+        self.onSettings = onSettings
+        self.onSaved = onSaved
+        self.onMyLists = onMyLists
+        self.onModeration = onModeration
     }
 
     @Environment(\.blueskyTheme) private var theme
@@ -44,7 +59,11 @@ public struct ProfileHeaderView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             bannerSection
+            #if os(iOS)
+            iosAvatarAndActions
+            #else
             avatarAndActions
+            #endif
             nameSection
             if let desc = profile?.description, !desc.isEmpty {
                 Text(desc)
@@ -78,15 +97,30 @@ public struct ProfileHeaderView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 130)
+        .frame(height: bannerHeight)
         .clipped()
+        #if os(iOS)
+        // Run the banner flush under the status bar (#0083). The rest of the
+        // header keeps its safe-area inset; only the banner ignores it.
+        .ignoresSafeArea(edges: .top)
+        #endif
+    }
+
+    private var bannerHeight: CGFloat {
+        #if os(iOS)
+        // Slightly taller on iOS to absorb the status-bar inset that we now
+        // bleed into. macOS keeps the historical 130pt height.
+        return 150
+        #else
+        return 130
+        #endif
     }
 
     private var bannerPlaceholder: some View {
         Rectangle().fill(Color.secondary.opacity(0.2))
     }
 
-    // MARK: - Avatar + action buttons
+    // MARK: - Avatar + action buttons (macOS layout)
 
     private var avatarAndActions: some View {
         HStack(alignment: .bottom) {
@@ -144,6 +178,71 @@ public struct ProfileHeaderView: View {
                 .background(Color.secondary.opacity(0.15), in: Circle())
         }
     }
+
+    // MARK: - Avatar + action buttons (iOS layout, #0083)
+
+    #if os(iOS)
+    /// iOS layout per #0083: banner is edge-to-edge above; the avatar overlaps
+    /// the banner bottom-left without a ring; the Edit Profile pill and
+    /// blue-dotted ellipsis sit in their own right-aligned row at the same
+    /// vertical band as the avatar overlap.
+    private var iosAvatarAndActions: some View {
+        HStack(alignment: .top) {
+            AvatarView(url: profile?.avatar, handle: profile?.handle.rawValue ?? "", size: 84)
+                .offset(y: -42) // half-overlap: avatar size 84 / 2
+                .padding(.leading, 16)
+            Spacer()
+            iosActionRow
+                .padding(.trailing, 16)
+                .padding(.top, 12)
+        }
+        // Pull the next section up so we don't double-count the avatar's
+        // negative offset as empty space.
+        .padding(.bottom, -42)
+    }
+
+    @ViewBuilder
+    private var iosActionRow: some View {
+        if isOwnProfile {
+            HStack(spacing: 8) {
+                Button("Edit Profile", action: onEditProfile)
+                    .buttonStyle(.bordered)
+                    .clipShape(Capsule())
+                ownProfileEllipsisMenu
+            }
+        } else if let viewer = profile?.viewer {
+            HStack(spacing: 8) {
+                followButton(viewer: viewer)
+                moreMenu(viewer: viewer)
+                    .overlay(alignment: .topTrailing) { blueDotIndicator }
+            }
+        }
+    }
+
+    private var ownProfileEllipsisMenu: some View {
+        Menu {
+            if let onSettings { Button("Settings", systemImage: "gear", action: onSettings) }
+            if let onSaved { Button("Saved", systemImage: "bookmark", action: onSaved) }
+            if let onMyLists { Button("My Lists", systemImage: "list.bullet", action: onMyLists) }
+            if let onModeration { Button("Moderation", systemImage: "shield", action: onModeration) }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 36, height: 36)
+                .background(Color.secondary.opacity(0.15), in: Circle())
+                .overlay(alignment: .topTrailing) { blueDotIndicator }
+        }
+    }
+
+    /// 6pt blue indicator dot for "unviewed menu items" — currently always
+    /// shown as a placeholder (see #0083 gotcha). Wire to a real signal
+    /// before declaring the indicator behavior final.
+    private var blueDotIndicator: some View {
+        Circle()
+            .fill(Color.accentColor)
+            .frame(width: 6, height: 6)
+            .offset(x: -2, y: 2)
+    }
+    #endif
 
     // MARK: - Name + handle
 

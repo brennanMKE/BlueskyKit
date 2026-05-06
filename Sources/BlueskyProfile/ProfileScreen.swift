@@ -12,6 +12,13 @@ public struct ProfileScreen: View {
     private let network: any NetworkClient
     private let accountStore: any AccountStore
     private let viewerDID: DID?
+    /// Optional own-profile menu actions surfaced via the in-screen ellipsis
+    /// next to "Edit Profile" on iOS (#0083). On macOS the toolbar Menu in
+    /// `MainTabView` keeps owning these.
+    private let onSettings: (() -> Void)?
+    private let onSaved: (() -> Void)?
+    private let onMyLists: (() -> Void)?
+    private let onModeration: (() -> Void)?
 
     @Environment(\.blueskyTheme) private var theme
     @State private var viewModel: ProfileViewModel
@@ -24,11 +31,19 @@ public struct ProfileScreen: View {
         actorDID: DID,
         network: any NetworkClient,
         accountStore: any AccountStore,
-        viewerDID: DID? = nil
+        viewerDID: DID? = nil,
+        onSettings: (() -> Void)? = nil,
+        onSaved: (() -> Void)? = nil,
+        onMyLists: (() -> Void)? = nil,
+        onModeration: (() -> Void)? = nil
     ) {
         self.network = network
         self.accountStore = accountStore
         self.viewerDID = viewerDID
+        self.onSettings = onSettings
+        self.onSaved = onSaved
+        self.onMyLists = onMyLists
+        self.onModeration = onModeration
         _viewModel = State(wrappedValue: ProfileViewModel(
             network: network,
             accountStore: accountStore,
@@ -55,7 +70,15 @@ public struct ProfileScreen: View {
             await loadCurrentTab(selectedTab)
         }
         .adaptiveBlueskyTheme()
+        #if os(iOS)
+        // #0083: drop the giant "brennan.sstools.co" headline. RN renders
+        // nothing above the banner, so hide the navigation bar entirely on
+        // iOS. macOS keeps its window title via `.navigationTitle` below.
+        // Inline-on-scroll polish was skipped — the banner stays unannounced.
+        .toolbar(.hidden, for: .navigationBar)
+        #else
         .navigationTitle(viewModel.profile?.handle.rawValue ?? "Profile")
+        #endif
         .task {
             await viewModel.loadProfile()
             await loadCurrentTab(selectedTab)
@@ -116,7 +139,11 @@ public struct ProfileScreen: View {
             onUnblock:     { Task { await viewModel.unblock() } },
             onMute:        { Task { await viewModel.mute() } },
             onUnmute:      { Task { await viewModel.unmute() } },
-            onEditProfile: { showEditProfile = true }
+            onEditProfile: { showEditProfile = true },
+            onSettings:    onSettings,
+            onSaved:       onSaved,
+            onMyLists:     onMyLists,
+            onModeration:  onModeration
         )
     }
 
