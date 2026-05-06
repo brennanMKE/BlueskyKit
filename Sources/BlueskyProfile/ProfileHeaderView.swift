@@ -66,7 +66,11 @@ public struct ProfileHeaderView: View {
             #endif
             nameSection
             if let desc = profile?.description, !desc.isEmpty {
-                Text(desc)
+                // #0084: detect URLs in the description and render them with
+                // the protocol prefix stripped (`brennan.sstools.co` instead
+                // of `https://brennan.sstools.co`) while keeping the link
+                // tappable to the full URL.
+                Text(profileDescriptionAttributed(desc))
                     .font(.subheadline)
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -290,11 +294,15 @@ public struct ProfileHeaderView: View {
 
     // MARK: - Stats
 
+    /// Stats row per #0084:
+    ///  - **Followers first**, then following, then posts (RN order).
+    ///  - **Lowercase labels** ("followers", "following", "posts").
+    ///  - Counts pass through `CompactNumberFormatter` so 1,424 reads as "1.4K".
     private var statsRow: some View {
         HStack(spacing: 20) {
-            statView(count: profile?.followsCount ?? 0, label: "Following")
-            statView(count: profile?.followersCount ?? 0, label: "Followers")
-            statView(count: profile?.postsCount ?? 0, label: "Posts")
+            statView(count: profile?.followersCount ?? 0, label: "followers")
+            statView(count: profile?.followsCount ?? 0, label: "following")
+            statView(count: profile?.postsCount ?? 0, label: "posts")
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -302,10 +310,57 @@ public struct ProfileHeaderView: View {
 
     private func statView(count: Int, label: String) -> some View {
         HStack(spacing: 4) {
-            Text("\(count)").fontWeight(.semibold)
+            Text(CompactNumberFormatter.string(from: count)).fontWeight(.semibold)
             Text(label).foregroundStyle(.secondary)
         }
         .font(.subheadline)
+    }
+
+    // MARK: - Description rendering
+
+    /// Build an `AttributedString` for the profile description that detects
+    /// http/https URLs and replaces their *display text* with the
+    /// protocol-stripped form via `URL.displayString` while keeping the link
+    /// pointed at the original URL for tap handling. Non-URL text is left
+    /// untouched. (See #0084 item 4.)
+    private func profileDescriptionAttributed(_ raw: String) -> AttributedString {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return AttributedString(raw)
+        }
+
+        let nsRaw = raw as NSString
+        let fullRange = NSRange(location: 0, length: nsRaw.length)
+        let matches = detector.matches(in: raw, options: [], range: fullRange)
+
+        var result = AttributedString()
+        var cursor = 0
+
+        for match in matches {
+            // Append untouched text before the match.
+            if match.range.location > cursor {
+                let prefixRange = NSRange(location: cursor, length: match.range.location - cursor)
+                result += AttributedString(nsRaw.substring(with: prefixRange))
+            }
+
+            let originalText = nsRaw.substring(with: match.range)
+            let url = match.url ?? URL(string: originalText)
+            let display = url?.displayString ?? originalText.urlDisplayString
+
+            var run = AttributedString(display)
+            run.foregroundColor = theme.colors.link
+            run.link = url
+            result += run
+
+            cursor = match.range.location + match.range.length
+        }
+
+        // Trailing text after the last URL.
+        if cursor < nsRaw.length {
+            let tailRange = NSRange(location: cursor, length: nsRaw.length - cursor)
+            result += AttributedString(nsRaw.substring(with: tailRange))
+        }
+
+        return result
     }
 }
 
