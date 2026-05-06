@@ -76,7 +76,11 @@ public struct ProfileHeaderView: View {
                     .padding(.top, 8)
             }
             statsRow
-            if !knownFollowers.isEmpty {
+            // #0085: never render the known-followers chip on the viewer's own
+            // profile. The chip's framing ("Followed by @x, @y, and others you
+            // follow") only makes sense on someone else's profile — RN
+            // suppresses it via `!isMe` in `ProfileHeaderStandard.tsx`.
+            if !isOwnProfile, !knownFollowers.isEmpty {
                 knownFollowersChip
             }
             Divider().padding(.top, 12)
