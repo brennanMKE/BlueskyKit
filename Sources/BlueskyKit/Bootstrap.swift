@@ -13,7 +13,9 @@ import Observation
 ///         accounts: KeychainAccountStore(),
 ///         preferences: UserDefaultsPreferencesStore(),
 ///         network: ATProtoClient(...),
-///         cache: SwiftDataCacheStore(appGroupIdentifier: "group.app.bsky")
+///         cache: SwiftDataCacheStore(appGroupIdentifier: "group.app.bsky"),
+///         bookmarks: BookmarkStore(),
+///         pathMonitor: NWPathMonitorAdapter()
 ///     )
 ///
 ///     var body: some Scene {
@@ -30,6 +32,7 @@ public final class BlueskyEnvironment {
     public let network: any NetworkClient
     public let cache: any CacheStore
     public let bookmarks: any BookmarkStoring
+    public let pathMonitor: any NetworkPathMonitoring
 
     public init(
         session: any SessionManaging,
@@ -37,7 +40,8 @@ public final class BlueskyEnvironment {
         preferences: any PreferencesStore,
         network: any NetworkClient,
         cache: any CacheStore,
-        bookmarks: any BookmarkStoring
+        bookmarks: any BookmarkStoring,
+        pathMonitor: any NetworkPathMonitoring
     ) {
         self.session = session
         self.accounts = accounts
@@ -45,5 +49,6 @@ public final class BlueskyEnvironment {
         self.network = network
         self.cache = cache
         self.bookmarks = bookmarks
+        self.pathMonitor = pathMonitor
     }
 }

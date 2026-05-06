@@ -11,6 +11,7 @@ public actor ATProtoClient: NetworkClient {
 
     private let accountStore: any AccountStore
     private let session: URLSession
+    private let pathMonitor: (any NetworkPathMonitoring)?
 
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -23,9 +24,14 @@ public actor ATProtoClient: NetworkClient {
         return d
     }()
 
-    public init(accountStore: any AccountStore, session: URLSession = .shared) {
+    public init(
+        accountStore: any AccountStore,
+        session: URLSession = .shared,
+        pathMonitor: (any NetworkPathMonitoring)? = nil
+    ) {
         self.accountStore = accountStore
         self.session = session
+        self.pathMonitor = pathMonitor
     }
 
     // MARK: - NetworkClient
@@ -177,6 +183,9 @@ public actor ATProtoClient: NetworkClient {
     // MARK: - Network primitives
 
     private func rawSend(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        if let monitor = pathMonitor, !monitor.isViable {
+            throw ATError.noNetwork
+        }
         do {
             return try await session.data(for: request)
         } catch let urlError as URLError {
