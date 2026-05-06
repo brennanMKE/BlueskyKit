@@ -3,11 +3,27 @@ import BlueskyCore
 import BlueskyKit
 import BlueskyUI
 
+/// Screen that lists the signed-in account's saved (bookmarked) posts.
+///
+/// Visual parity target: the bsky.app web "Saved" view — full post cards in a
+/// scrollable feed, pull-to-refresh, infinite scroll, and tap to open the
+/// thread or the author's profile. Optimistic removal happens via
+/// `BookmarksStore.delete`.
 public struct BookmarksScreen: View {
     private let store: any BookmarksStoring
+    private let onPostTap: ((PostView) -> Void)?
+    private let onAuthorTap: ((ProfileBasic) -> Void)?
 
-    public init(store: any BookmarksStoring) {
+    @Environment(\.blueskyTheme) private var theme
+
+    public init(
+        store: any BookmarksStoring,
+        onPostTap: ((PostView) -> Void)? = nil,
+        onAuthorTap: ((ProfileBasic) -> Void)? = nil
+    ) {
         self.store = store
+        self.onPostTap = onPostTap
+        self.onAuthorTap = onAuthorTap
     }
 
     public var body: some View {
@@ -16,16 +32,12 @@ public struct BookmarksScreen: View {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if store.bookmarks.isEmpty {
-                ContentUnavailableView(
-                    "No Bookmarks",
-                    systemImage: "bookmark",
-                    description: Text("Posts you bookmark will appear here.")
-                )
+                emptyState
             } else {
                 bookmarkList
             }
         }
-        .navigationTitle("Bookmarks")
+        .navigationTitle("Saved")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -40,35 +52,57 @@ public struct BookmarksScreen: View {
         }
     }
 
+    // MARK: - Empty state
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "bookmark")
+                .font(.system(size: 40))
+                .foregroundStyle(theme.colors.textSecondary)
+            Text("Nothing saved yet")
+                .font(.headline)
+                .foregroundStyle(theme.colors.textSecondary)
+            Text("Posts you bookmark will appear here.")
+                .font(.subheadline)
+                .foregroundStyle(theme.colors.textSecondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - List
+
     private var bookmarkList: some View {
-        List {
-            ForEach(store.bookmarks, id: \.uri) { bookmark in
-                PostCard(
-                    item: FeedViewPost(post: bookmark.item, reply: nil, reason: nil),
-                    actions: actions(for: bookmark)
-                )
-                .listRowInsets(EdgeInsets())
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-                .onAppear {
-                    if bookmark.uri == store.bookmarks.last?.uri {
-                        Task { await store.loadMore() }
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(store.bookmarks, id: \.uri) { bookmark in
+                    PostCard(
+                        item: FeedViewPost(post: bookmark.item, reply: nil, reason: nil),
+                        actions: actions(for: bookmark)
+                    )
+                    .onAppear {
+                        if bookmark.uri == store.bookmarks.last?.uri {
+                            Task { await store.loadMore() }
+                        }
                     }
+                    Divider()
+                }
+                if store.isLoadingMore {
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                        .padding()
                 }
             }
-            if store.isLoadingMore {
-                HStack { Spacer(); ProgressView(); Spacer() }
-                    .listRowSeparator(.hidden)
-            }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
+        .refreshable { await store.loadInitial() }
     }
 
     // MARK: - Helpers
 
     private func actions(for bookmark: BookmarkView) -> PostCard.Actions {
         var a = PostCard.Actions()
+        a.onTap = onPostTap
+        a.onAuthorTap = onAuthorTap
         a.isBookmarked = true
         a.onBookmark = { _ in
             Task { await store.delete(bookmarkURI: bookmark.uri) }
