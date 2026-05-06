@@ -476,6 +476,14 @@ public struct MyFeedsScreen: View {
             await savedFeedsViewModel.save()
             if !Task.isCancelled {
                 hasUnsavedChanges = false
+                // Let listeners (the Home `FeedView` tab strip in #0074)
+                // know the pinned-feed set has changed so they can re-load
+                // from `app.bsky.actor.getPreferences` without forcing the
+                // user to re-enter the screen.
+                NotificationCenter.default.post(
+                    name: .savedFeedsChanged,
+                    object: nil
+                )
             }
         }
     }

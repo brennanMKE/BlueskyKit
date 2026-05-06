@@ -10,6 +10,19 @@ nonisolated private let logger = Logger(
     category: "FeedView"
 )
 
+// MARK: - SavedFeedsChanged notification
+
+/// Posted by `MyFeedsScreen` whenever the user's saved-feed list is mutated
+/// and persisted (pin/unpin, add suggested, reorder, …). `FeedView` listens
+/// so the Home tab strip can re-pick up the latest pinned set without forcing
+/// the user to re-enter the screen. The object is `nil` because the strip
+/// reloads from `SavedFeedsStore` on receipt.
+public extension Foundation.Notification.Name {
+    static let savedFeedsChanged = Foundation.Notification.Name(
+        "co.sstools.bluesky.savedFeedsChanged"
+    )
+}
+
 // MARK: - FeedViewModelCache
 
 /// Reference-type wrapper around the per-selection `FeedViewModel` dictionary.
@@ -31,7 +44,14 @@ final class FeedViewModelCache {
 
 // MARK: - FeedView
 
-/// The home feed view — feed switcher at top, infinite-scroll post list below.
+/// The home feed view — scrollable tab strip at the top, swipeable per-tab
+/// timelines below.
+///
+/// The strip lists four built-in tabs (Following · Mentions · Discover ·
+/// Popular With Friends) followed by every feed the user has pinned in
+/// preferences. Pinned-feed list comes from the same `SavedFeedsStore` the
+/// My Feeds screen uses (#0073) and refreshes whenever the screen posts
+/// `Notification.Name.savedFeedsChanged` after a successful `putPreferences`.
 public struct FeedView: View {
 
     private let network: any NetworkClient
@@ -62,7 +82,17 @@ public struct FeedView: View {
         self.onAuthorTap = onAuthorTap
     }
 
-    @State private var selection: FeedSelection = .timeline
+    /// ID of the active tab in `tabs`. Driving the pager off an `id` rather
+    /// than an integer index lets us insert / remove pinned feeds without
+    /// jolting the active selection — if the user is on Discover and adds a
+    /// new pinned feed, the index would shift but the ID does not.
+    @State private var selectedTabID: String = HomeFeedTab.following.id
+
+    /// Pinned-feed metadata. Loaded once on appear and refreshed whenever
+    /// `MyFeedsScreen` posts `savedFeedsChanged`, so the strip mirrors the
+    /// user's saved-feed set live (#0074 acceptance).
+    @State private var savedFeedsStore: SavedFeedsStore?
+
     /// Wrapped in a reference-type box so that SwiftUI preserves the same
     /// dictionary even when `FeedView` is reconstructed by its parent (e.g.
     /// during auth-state re-renders in `MainTabView`).  A plain
@@ -76,30 +106,43 @@ public struct FeedView: View {
     @State private var repostTargetVM: FeedViewModel? = nil
     @State private var quoteTarget: PostView? = nil
 
+    /// Built-in tabs plus the user's pinned feeds, in the order they should
+    /// appear in the strip (built-ins first, pinned in their saved order).
+    private var tabs: [HomeFeedTab] {
+        let pinned = (savedFeedsStore?.feeds ?? [])
+            .filter { $0.pinned && $0.type == "feed" }
+            // Skip any pinned feed whose URI matches a built-in — keeps the
+            // strip tidy when the user has pinned (e.g.) Discover from the
+            // suggested list.
+            .filter { saved in
+                !HomeFeedTab.builtIns.contains(where: {
+                    if case .feed(let uri) = $0.selection { return uri == saved.value }
+                    return false
+                })
+            }
+            .map { saved -> HomeFeedTab in
+                HomeFeedTab.pinned(
+                    displayName: pinnedFeedDisplayName(saved),
+                    uri: saved.value
+                )
+            }
+        return HomeFeedTab.builtIns + pinned
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                FeedSwitcherView(selection: $selection)
-                Spacer(minLength: 0)
-                Menu {
-                    Toggle("Hide Replies", isOn: $filter.hideReplies)
-                    Toggle("Hide Reposts", isOn: $filter.hideReposts)
-                } label: {
-                    Image(systemName: filter.isActive
-                          ? "line.3.horizontal.decrease.circle.fill"
-                          : "line.3.horizontal.decrease.circle")
-                        .symbolRenderingMode(.hierarchical)
-                        .font(.title3)
-                        .frame(width: 32, height: 32)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .padding(.trailing, 12)
-                .help("Filter Feed")
-            }
+            FeedSwitcherView(
+                tabs: tabs,
+                selectedID: $selectedTabID
+            )
             Divider()
-            feedList
+            // TODO #0017: the hide-replies / hide-reposts filter controls
+            // previously lived in a dropdown next to the tab strip. They are
+            // dropped from this position to match the RN reference (the strip
+            // is now the only thing on this row). When the filter feature is
+            // re-introduced it should move under each tab's per-feed
+            // ellipsis / overflow menu rather than the global header.
+            pager
         }
         #if os(macOS)
         .navigationTitle("Home")
@@ -111,6 +154,19 @@ public struct FeedView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .adaptiveBlueskyTheme()
+        .task {
+            // Lazy-create the saved-feeds store so we share `cache` from init
+            // without forcing every preview to provide one.
+            if savedFeedsStore == nil {
+                savedFeedsStore = SavedFeedsStore(network: network, cache: cache)
+            }
+            await savedFeedsStore?.load()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .savedFeedsChanged)
+        ) { _ in
+            Task { await savedFeedsStore?.load() }
+        }
         .sheet(isPresented: Binding(
             get: { replyTarget != nil },
             set: { if !$0 { replyTarget = nil } }
@@ -159,14 +215,55 @@ public struct FeedView: View {
         }
     }
 
-    private var feedList: some View {
-        Group {
-            if let vm = vmCache[selection] {
+    // MARK: - Pager
+
+    /// Swipeable per-tab timeline pager.
+    ///
+    /// On iOS we use `TabView` with `.page` style so the user can swipe
+    /// horizontally between adjacent tabs and the system handles the gesture
+    /// + animation. macOS `TabView` doesn't support page-style swiping, so
+    /// we fall back to a `ZStack` with the active tab on top — every tab's
+    /// container stays alive so per-tab scroll position is preserved across
+    /// switches, matching the iOS pager's behavior. Feed-switching on macOS
+    /// is via the tab strip only.
+    @ViewBuilder
+    private var pager: some View {
+        #if os(iOS)
+        TabView(selection: $selectedTabID) {
+            ForEach(tabs) { tab in
+                feedListContainer(for: tab)
+                    .tag(tab.id)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .ignoresSafeArea(edges: .bottom)
+        #else
+        ZStack {
+            ForEach(tabs) { tab in
+                feedListContainer(for: tab)
+                    .opacity(tab.id == selectedTabID ? 1 : 0)
+                    .allowsHitTesting(tab.id == selectedTabID)
+                    .accessibilityHidden(tab.id != selectedTabID)
+            }
+        }
+        #endif
+    }
+
+    /// Builds the per-tab container — same loading / error / list states as the
+    /// previous single-feed implementation, but lazy-instantiates the
+    /// `FeedViewModel` for the tab's `FeedSelection` on first appearance and
+    /// keeps it cached across tab switches so scroll position is retained.
+    private func feedListContainer(for tab: HomeFeedTab) -> some View {
+        let vm = vmCache[tab.selection]
+        return Group {
+            if let vm {
                 if vm.posts.isEmpty && vm.isLoading {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if vm.posts.isEmpty, let msg = vm.errorMessage {
                     errorView(msg, vm: vm)
+                } else if vm.posts.isEmpty {
+                    emptyView(for: tab)
                 } else {
                     list(vm: vm)
                 }
@@ -175,39 +272,43 @@ public struct FeedView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: selection) {
-            logger.debug("task fired, selection=\(String(describing: selection), privacy: .public)")
-            if vmCache[selection] == nil {
-                if selection == .timeline {
+        .task(id: tab.id) {
+            logger.debug("task fired, tab=\(tab.id, privacy: .public)")
+            if vmCache[tab.selection] == nil {
+                if tab.selection == .timeline {
                     // Use the store created and started in boot() — no loadInitial needed here
                     // because it is already in-flight on a plain Task that SwiftUI cannot cancel.
                     logger.debug("attaching pre-built timeline store from boot()")
-                    let vm = FeedViewModel(store: bootTimelineStore, selection: .timeline)
-                    vm.filter = filter
-                    vmCache[.timeline] = vm
+                    let viewModel = FeedViewModel(store: bootTimelineStore, selection: .timeline)
+                    viewModel.filter = filter
+                    vmCache[.timeline] = viewModel
                 } else {
-                    logger.debug("creating FeedViewModel for \(String(describing: selection), privacy: .public)")
-                    let vm = FeedViewModel(
+                    logger.debug("creating FeedViewModel for tab=\(tab.id, privacy: .public)")
+                    let viewModel = FeedViewModel(
                         network: network,
                         accountStore: accountStore,
                         cache: cache,
-                        selection: selection
+                        selection: tab.selection
                     )
-                    vm.filter = filter
-                    vmCache[selection] = vm
-                    logger.debug("calling loadInitial")
-                    await vmCache[selection]?.loadInitial()
-                    let postCount = vmCache[selection]?.posts.count ?? -1
-                    let errorMsg = vmCache[selection]?.errorMessage ?? "nil"
-                    logger.debug("loadInitial returned, posts=\(postCount, privacy: .public), error=\(errorMsg, privacy: .public)")
+                    viewModel.filter = filter
+                    vmCache[tab.selection] = viewModel
+                    await vmCache[tab.selection]?.loadInitial()
                 }
             } else {
-                logger.debug("reusing existing FeedViewModel for \(String(describing: selection), privacy: .public)")
+                logger.debug("reusing existing FeedViewModel for tab=\(tab.id, privacy: .public)")
             }
         }
         .onChange(of: filter) { _, newFilter in
-            vmCache[selection]?.filter = newFilter
+            vmCache[tab.selection]?.filter = newFilter
         }
+    }
+
+    /// Render-time fallback name for a pinned feed when we don't have its
+    /// resolved `GeneratorView` metadata. Falls back to the rkey portion of
+    /// the AT-URI so the strip never shows an empty label, even before the
+    /// `My Feeds` screen has resolved metadata.
+    private func pinnedFeedDisplayName(_ feed: SavedFeed) -> String {
+        feed.value.components(separatedBy: "/").last ?? feed.value
     }
 
     /// Notification name posted by the iOS custom tab bar when the user taps
@@ -251,6 +352,12 @@ public struct FeedView: View {
             }
             .refreshable { await vm.refresh() }
             .onReceive(NotificationCenter.default.publisher(for: Self.scrollToTopNotification)) { _ in
+                // Only the active tab should respond to a scroll-to-top tap;
+                // off-screen tabs in the pager would otherwise all scroll
+                // simultaneously which is invisible but wasteful.
+                guard tabs.first(where: { $0.id == selectedTabID })?.selection == vm.selection else {
+                    return
+                }
                 withAnimation { proxy.scrollTo(Self.scrollToTopAnchor, anchor: .top) }
             }
         }
@@ -267,6 +374,20 @@ public struct FeedView: View {
                 .multilineTextAlignment(.center)
             Button("Retry") { Task { await vm.refresh() } }
                 .buttonStyle(.borderedProminent)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func emptyView(for tab: HomeFeedTab) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "tray")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary)
+            Text("No posts in \(tab.label) yet")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -45,7 +45,7 @@ public final class FeedViewModel {
     }
 
     private let store: any FeedStoring
-    private let selection: FeedSelection
+    public let selection: FeedSelection
 
     public init(
         network: any NetworkClient,
