@@ -158,16 +158,24 @@ public struct ProfileScreen: View {
 
     // MARK: - Tab strip
 
+    /// Profile tab strip per #0086:
+    ///  - Seven tabs in RN order: Posts · Replies · Media · Videos · Likes · Feeds · Lists.
+    ///  - Inline rendering with no surrounding pill capsule.
+    ///  - 2pt brand-color underline on the selected tab via `UnderlineTabStrip`
+    ///    (shared visual treatment with the Home feed strip from #0074).
+    ///  - Horizontally scrollable since seven tabs don't fit on iPhone widths.
     private var tabStrip: some View {
-        Picker("", selection: $selectedTab) {
-            ForEach(ProfileTab.allCases) { tab in
-                Text(tab.title).tag(tab)
-            }
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(theme.colors.background)
+        UnderlineTabStrip(
+            tabs: ProfileTab.allCases.map { UnderlineTab(id: $0.rawValue, label: $0.title) },
+            selectedID: Binding(
+                get: { selectedTab.rawValue },
+                set: { newID in
+                    if let tab = ProfileTab(rawValue: newID) {
+                        selectedTab = tab
+                    }
+                }
+            )
+        )
     }
 
     // MARK: - Tab loading
@@ -205,7 +213,7 @@ public struct ProfileScreen: View {
                 .frame(maxWidth: .infinity)
                 .padding(40)
         } else if posts.isEmpty {
-            Text("No posts")
+            Text(emptyMessage(for: selectedTab))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
@@ -262,6 +270,19 @@ public struct ProfileScreen: View {
         var a = PostCard.Actions()
         a.onTap = { post in threadURI = post.uri }
         return a
+    }
+
+    /// Tab-specific empty-state copy. The strings stay short and friendly to
+    /// match the existing "No posts" / "No feeds" / "No lists" voice.
+    private func emptyMessage(for tab: ProfileTab) -> String {
+        switch tab {
+        case .posts:   "No posts"
+        case .replies: "No replies"
+        case .media:   "No media"
+        case .videos:  "No videos yet"
+        case .likes:   "No likes"
+        case .feeds, .lists: ""
+        }
     }
 }
 

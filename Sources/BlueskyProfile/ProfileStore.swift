@@ -9,13 +9,16 @@ private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstoo
 // MARK: - ProfileTab
 
 public enum ProfileTab: String, CaseIterable, Identifiable {
-    case posts, replies, media, likes, feeds, lists
+    // Tab order matches the React Native reference (#0086):
+    // Posts · Replies · Media · Videos · Likes · Feeds · Lists.
+    case posts, replies, media, videos, likes, feeds, lists
     public var id: String { rawValue }
     public var title: String {
         switch self {
         case .posts:   "Posts"
         case .replies: "Replies"
         case .media:   "Media"
+        case .videos:  "Videos"
         case .likes:   "Likes"
         case .feeds:   "Feeds"
         case .lists:   "Lists"
@@ -170,6 +173,14 @@ public final class ProfileStore: ProfileStoring {
             return try await network.get(lexicon: "app.bsky.feed.getAuthorFeed", params: params)
         case .media:
             params["filter"] = "posts_with_media"
+            return try await network.get(lexicon: "app.bsky.feed.getAuthorFeed", params: params)
+        case .videos:
+            // #0086: server-side `posts_with_video` filter, matching the React
+            // Native reference (`state/queries/post-feed.ts` whitelists the
+            // value, and `Profile.tsx` builds the videos feed as
+            // `author|<did>|posts_with_video`). Falls back gracefully if the
+            // PDS doesn't recognize it — the request just returns nothing.
+            params["filter"] = "posts_with_video"
             return try await network.get(lexicon: "app.bsky.feed.getAuthorFeed", params: params)
         case .likes:
             return try await network.get(lexicon: "app.bsky.feed.getActorLikes", params: params)

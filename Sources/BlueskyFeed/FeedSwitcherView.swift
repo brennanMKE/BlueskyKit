@@ -96,9 +96,11 @@ public struct HomeFeedTab: Identifiable, Equatable, Sendable {
 /// auto-scrolls to keep the active tab visible whenever the selection
 /// changes — used both when the user taps a tab and when the underlying
 /// feed pager swipes between adjacent tabs (#0074).
+///
+/// Delegates the visual treatment to `UnderlineTabStrip` (BlueskyUI) so
+/// Home (#0074) and Profile (#0086) share the same underline component.
 public struct FeedSwitcherView: View {
 
-    @Environment(\.blueskyTheme) private var theme
     @Binding private var selectedID: String
     private let tabs: [HomeFeedTab]
     private let onTap: ((HomeFeedTab) -> Void)?
@@ -114,53 +116,15 @@ public struct FeedSwitcherView: View {
     }
 
     public var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 0) {
-                    ForEach(tabs) { tab in
-                        tabButton(tab)
-                            .id(tab.id)
-                    }
-                }
-                .padding(.horizontal, 12)
-            }
-            .frame(height: 44)
-            .background(theme.colors.background)
-            .onChange(of: selectedID) { _, newID in
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    proxy.scrollTo(newID, anchor: .center)
+        UnderlineTabStrip(
+            tabs: tabs.map { UnderlineTab(id: $0.id, label: $0.label) },
+            selectedID: $selectedID,
+            onTap: { underlineTab in
+                if let tab = tabs.first(where: { $0.id == underlineTab.id }) {
+                    onTap?(tab)
                 }
             }
-            .onAppear {
-                // Land the strip with the active tab already in view so the
-                // first frame doesn't show a left-aligned strip that snaps
-                // mid-render. Using no animation here matches the system
-                // navigation feel — the strip is just "in the right place".
-                proxy.scrollTo(selectedID, anchor: .center)
-            }
-        }
-    }
-
-    private func tabButton(_ tab: HomeFeedTab) -> some View {
-        let isSelected = selectedID == tab.id
-        return Button {
-            selectedID = tab.id
-            onTap?(tab)
-        } label: {
-            VStack(spacing: 0) {
-                Text(tab.label)
-                    .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? .primary : .secondary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .fixedSize(horizontal: true, vertical: false)
-                Rectangle()
-                    .fill(isSelected ? Color.accentColor : Color.clear)
-                    .frame(height: 2)
-            }
-        }
-        .buttonStyle(.plain)
-        .animation(.easeInOut(duration: 0.15), value: isSelected)
+        )
     }
 }
 
