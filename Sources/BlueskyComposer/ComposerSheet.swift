@@ -4,11 +4,28 @@ import BlueskyKit
 import BlueskyUI
 #if os(iOS)
 import PhotosUI
+import UIKit
 #endif
 #if os(macOS)
 import AppKit
 import UniformTypeIdentifiers
 #endif
+
+/// How the composer should pre-prime an attachment picker on appear.
+///
+/// - `none`: open with no picker — normal compose flow.
+/// - `camera`: open the iOS camera capture flow (`UIImagePickerController` with
+///   `.camera` source) once the sheet is on screen. iOS only — `.photoLibrary`
+///   is the only meaningful choice on macOS.
+/// - `photoLibrary`: open the iOS Photos picker (`PHPickerViewController`) once
+///   the sheet is on screen.
+///
+/// Defaults to `.none`; existing call sites are unaffected.
+public enum ComposerInitialAttachmentSource: Sendable, Equatable {
+    case none
+    case camera
+    case photoLibrary
+}
 
 /// Post composer sheet: text input, character counter, reply context, quote post, image attachments,
 /// video picker, link card preview, thread composer, and draft persistence.
@@ -18,7 +35,14 @@ public struct ComposerSheet: View {
     @State private var viewModel: ComposerViewModel
     #if os(iOS)
     @State private var selectedVideo: PhotosPickerItem?
+    @State private var showCameraPicker = false
+    @State private var showPhotoLibraryPicker = false
+    /// Tracks whether the initial-attachment-source picker has already been
+    /// triggered, so re-renders (e.g. keyboard insets, orientation changes)
+    /// don't re-present a picker the user just dismissed.
+    @State private var didTriggerInitialAttachment = false
     #endif
+    private let initialAttachmentSource: ComposerInitialAttachmentSource
 
     public init(
         network: any NetworkClient,
@@ -26,7 +50,8 @@ public struct ComposerSheet: View {
         replyTo: PostRef? = nil,
         replyToView: PostView? = nil,
         quotedPost: PostRef? = nil,
-        quotedPostView: PostView? = nil
+        quotedPostView: PostView? = nil,
+        initialAttachmentSource: ComposerInitialAttachmentSource = .none
     ) {
         _viewModel = State(wrappedValue: ComposerViewModel(
             network: network,
@@ -36,6 +61,7 @@ public struct ComposerSheet: View {
             quotedPost: quotedPost,
             quotedPostView: quotedPostView
         ))
+        self.initialAttachmentSource = initialAttachmentSource
     }
 
     public var body: some View {
@@ -104,6 +130,39 @@ public struct ComposerSheet: View {
             Task {
                 await viewModel.attachVideo(item)
                 selectedVideo = nil
+            }
+        }
+        .onAppear {
+            // Trigger the requested initial-attachment picker exactly once,
+            // after the sheet's first appearance. The next runloop tick lets
+            // the host sheet finish its presentation animation before we layer
+            // a second picker on top, avoiding the dreaded "attempt to
+            // present … which is already presenting" warning.
+            guard !didTriggerInitialAttachment else { return }
+            didTriggerInitialAttachment = true
+            switch initialAttachmentSource {
+            case .none:
+                break
+            case .camera:
+                guard UIImagePickerController.isSourceTypeAvailable(.camera) else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    showCameraPicker = true
+                }
+            case .photoLibrary:
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    showPhotoLibraryPicker = true
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showCameraPicker) {
+            CameraImagePicker { data, mimeType in
+                viewModel.addImage(data: data, mimeType: mimeType)
+            }
+            .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showPhotoLibraryPicker) {
+            PHPickerRepresentable { data, mimeType in
+                viewModel.addImage(data: data, mimeType: mimeType)
             }
         }
         #endif
@@ -607,6 +666,49 @@ private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
     )
     .preferredColorScheme(.dark)
 }
+
+// MARK: - iOS camera image picker
+
+#if os(iOS)
+/// `UIImagePickerController` wrapper used when the composer is primed with
+/// `ComposerInitialAttachmentSource.camera`. The system PhotosPicker / PHPicker
+/// don't expose a camera capture path; `UIImagePickerController` is still the
+/// supported way to capture from the camera into a SwiftUI app.
+struct CameraImagePicker: UIViewControllerRepresentable {
+    let onPick: (Data, String) -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let vc = UIImagePickerController()
+        vc.sourceType = .camera
+        vc.cameraCaptureMode = .photo
+        vc.delegate = context.coordinator
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onPick: (Data, String) -> Void
+        init(onPick: @escaping (Data, String) -> Void) { self.onPick = onPick }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            picker.dismiss(animated: true)
+            guard let image = info[.originalImage] as? UIImage,
+                  let data = image.jpegData(compressionQuality: 0.85) else { return }
+            onPick(data, "image/jpeg")
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            picker.dismiss(animated: true)
+        }
+    }
+}
+#endif
 
 // MARK: - iOS image picker button
 

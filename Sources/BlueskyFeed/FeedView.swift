@@ -58,6 +58,12 @@ public struct FeedView: View {
     private let accountStore: any AccountStore
     private let cache: any CacheStore
     private let bookmarks: (any BookmarkStoring)?
+    /// Whether the iOS inline "What's up?" composer prompt should be rendered
+    /// as the first row of each tab's feed list (#0075). True by default since
+    /// `FeedView` is currently only used for the Home tab; pass `false` if the
+    /// view ever gets reused on a non-Home surface (profile feed, search
+    /// results, etc.) where the prompt would be out of place.
+    private let showsInlineComposerPrompt: Bool
     var onPostTap: ((PostView) -> Void)?
     var onAuthorTap: ((ProfileBasic) -> Void)?
 
@@ -71,6 +77,7 @@ public struct FeedView: View {
         accountStore: any AccountStore,
         cache: any CacheStore,
         bookmarks: (any BookmarkStoring)? = nil,
+        showsInlineComposerPrompt: Bool = true,
         onPostTap: ((PostView) -> Void)? = nil,
         onAuthorTap: ((ProfileBasic) -> Void)? = nil
     ) {
@@ -78,6 +85,7 @@ public struct FeedView: View {
         self.accountStore = accountStore
         self.cache = cache
         self.bookmarks = bookmarks
+        self.showsInlineComposerPrompt = showsInlineComposerPrompt
         self.onPostTap = onPostTap
         self.onAuthorTap = onAuthorTap
     }
@@ -105,6 +113,21 @@ public struct FeedView: View {
     @State private var repostMenuTarget: PostView? = nil
     @State private var repostTargetVM: FeedViewModel? = nil
     @State private var quoteTarget: PostView? = nil
+
+    // MARK: - Inline composer prompt state (#0075, iOS only)
+
+    /// Avatar URL of the signed-in viewer, fetched lazily via `getProfile`
+    /// because `Account.avatarURL` is currently always nil after login (see
+    /// #0071 — same workaround). Falls back to the initials placeholder
+    /// rendered by `AvatarView` while the network call is in flight.
+    @State private var viewerAvatarURL: URL?
+    /// Handle of the signed-in viewer, used as the initials seed for the
+    /// avatar placeholder.
+    @State private var viewerHandle: String = ""
+    /// Drives the inline "What's up?" composer sheet.
+    @State private var showInlineComposer = false
+    /// Optional pre-primed picker the inline composer should open on appear.
+    @State private var inlineComposerSource: ComposerInitialAttachmentSource = .none
 
     /// Built-in tabs plus the user's pinned feeds, in the order they should
     /// appear in the strip (built-ins first, pinned in their saved order).
@@ -161,6 +184,11 @@ public struct FeedView: View {
                 savedFeedsStore = SavedFeedsStore(network: network, cache: cache)
             }
             await savedFeedsStore?.load()
+            #if os(iOS)
+            if showsInlineComposerPrompt {
+                await refreshViewerProfile()
+            }
+            #endif
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .savedFeedsChanged)
@@ -193,6 +221,15 @@ public struct FeedView: View {
                 )
             }
         }
+        #if os(iOS)
+        .sheet(isPresented: $showInlineComposer) {
+            ComposerSheet(
+                network: network,
+                accountStore: accountStore,
+                initialAttachmentSource: inlineComposerSource
+            )
+        }
+        #endif
         .confirmationDialog("", isPresented: Binding(
             get: { repostMenuTarget != nil },
             set: { if !$0 { repostMenuTarget = nil; repostTargetVM = nil } }
@@ -336,6 +373,27 @@ public struct FeedView: View {
                     Color.clear
                         .frame(height: 0)
                         .id(Self.scrollToTopAnchor)
+                    #if os(iOS)
+                    if showsInlineComposerPrompt {
+                        InlineComposerPrompt(
+                            avatarURL: viewerAvatarURL,
+                            handle: viewerHandle,
+                            onTap: {
+                                inlineComposerSource = .none
+                                showInlineComposer = true
+                            },
+                            onCamera: {
+                                inlineComposerSource = .camera
+                                showInlineComposer = true
+                            },
+                            onPhotoLibrary: {
+                                inlineComposerSource = .photoLibrary
+                                showInlineComposer = true
+                            }
+                        )
+                        Divider()
+                    }
+                    #endif
                     ForEach(displayed, id: \.post.uri) { item in
                         PostCard(item: item, actions: actions(for: item, vm: vm))
                             .onAppear {
@@ -423,6 +481,37 @@ public struct FeedView: View {
         a.onBookmark = { post in Task { await vm.bookmark(post: post) } }
         return a
     }
+
+    #if os(iOS)
+    /// Lazily hydrates `viewerAvatarURL` and `viewerHandle` for the inline
+    /// composer prompt by hitting `app.bsky.actor.getProfile` for the active
+    /// account's DID. Mirrors the workaround added in #0071 for the iOS tab
+    /// bar's Profile-tab avatar — `Account.avatarURL` is currently always
+    /// `nil` after login, so we fetch the profile detail directly. Failures
+    /// are silent; the prompt simply renders the initials placeholder.
+    private func refreshViewerProfile() async {
+        do {
+            guard let did = try await accountStore.loadCurrentDID() else { return }
+            guard let stored = try await accountStore.load(did: did) else { return }
+            // Seed the handle synchronously so the avatar's initials
+            // placeholder shows the right letter even before getProfile
+            // returns.
+            await MainActor.run { viewerHandle = stored.account.handle.rawValue }
+            let profile: ProfileDetailed = try await network.get(
+                lexicon: "app.bsky.actor.getProfile",
+                params: ["actor": did.rawValue]
+            )
+            await MainActor.run {
+                viewerAvatarURL = profile.avatar
+                if !profile.handle.rawValue.isEmpty {
+                    viewerHandle = profile.handle.rawValue
+                }
+            }
+        } catch {
+            logger.debug("inline-composer viewer profile fetch failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+    #endif
 }
 
 // MARK: - Preview helpers
