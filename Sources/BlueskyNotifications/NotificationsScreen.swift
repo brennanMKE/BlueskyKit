@@ -32,7 +32,16 @@ public struct NotificationsScreen: View {
                 notificationList
             }
         }
+        #if os(macOS)
         .navigationTitle("Notifications")
+        #else
+        // iOS top chrome is owned by the parent — `MainTabView` mounts a
+        // slim `BlueskyTopBar` above this view on iPhone; using inline
+        // display mode here suppresses the giant "Notifications" headline
+        // the system nav bar would otherwise draw, while iPad regular
+        // keeps the system nav bar (also inline).
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .task {
             await viewModel.loadInitial()
             await viewModel.markSeen()
