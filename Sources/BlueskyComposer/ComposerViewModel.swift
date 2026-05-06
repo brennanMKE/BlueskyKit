@@ -4,6 +4,7 @@ import OSLog
 import BlueskyCore
 import BlueskyKit
 #if os(iOS)
+import SwiftUI
 import PhotosUI
 #endif
 
