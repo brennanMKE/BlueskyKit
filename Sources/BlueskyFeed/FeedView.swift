@@ -101,7 +101,15 @@ public struct FeedView: View {
             Divider()
             feedList
         }
+        #if os(macOS)
         .navigationTitle("Home")
+        #else
+        // iOS top chrome is owned by the parent — `MainTabView` wraps the
+        // compact iPhone layout in a `BlueskyTopBar` and hides the system
+        // navigation bar; iPad regular keeps the nav bar but uses inline
+        // display mode so we don't get the giant "Home" headline.
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .adaptiveBlueskyTheme()
         .sheet(isPresented: Binding(
             get: { replyTarget != nil },
