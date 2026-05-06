@@ -140,7 +140,7 @@ public struct PostCard: View {
             .contentShape(Rectangle())
             .onTapGesture { actions?.onAuthorTap?(item.post.author) }
             Spacer(minLength: 0)
-            Text(relativeTimestamp(item.post.indexedAt))
+            Text(RelativeTimeFormatter.string(from: item.post.indexedAt))
                 .font(Typography.footnote)
                 .foregroundStyle(theme.colors.textTertiary)
         }
@@ -287,16 +287,6 @@ public struct PostCard: View {
             .help(helpText)
         }
         .buttonStyle(.plain)
-    }
-
-    private func relativeTimestamp(_ date: Date) -> String {
-        let secs = Int(Date.now.timeIntervalSince(date))
-        if secs < 60  { return "\(secs)s" }
-        if secs < 3600 { return "\(secs / 60)m" }
-        if secs < 86400 { return "\(secs / 3600)h" }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        return formatter.string(from: date)
     }
 
 }

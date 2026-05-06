@@ -203,6 +203,10 @@ private struct GroupedNotificationRow: View {
     /// `onAuthorTap` so the parent can push `ProfileScreen` (#0080).
     let onAuthorTap: (ProfileBasic) -> Void
 
+    /// Theme palette — used for the brand-color filled bell on unread
+    /// rows (#0082).
+    @Environment(\.blueskyTheme) private var theme
+
     /// Maximum number of actor avatars rendered in the collapsed stack;
     /// excess actors collapse behind a chevron-down expand button (#0080).
     private static let collapsedAvatarLimit = 5
@@ -256,7 +260,7 @@ private struct GroupedNotificationRow: View {
                     postPreview
                 }
                 Spacer()
-                Text(group.indexedAt, style: .relative)
+                Text(RelativeTimeFormatter.string(from: group.indexedAt))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -337,7 +341,7 @@ private struct GroupedNotificationRow: View {
                         Text("·")
                             .font(.subheadline)
                             .foregroundStyle(.tertiary)
-                        Text(group.indexedAt, style: .relative)
+                        Text(RelativeTimeFormatter.string(from: group.indexedAt))
                             .font(.subheadline)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
@@ -577,7 +581,10 @@ private struct GroupedNotificationRow: View {
         case "mention": return "at"
         case "reply":   return "bubble.left.fill"
         case "quote":   return "quote.bubble.fill"
-        default:        return "bell.fill"
+        // Catch-all bell — flips between filled (unread) and outlined
+        // (seen) per #0082, mirroring the RN reference. Reason-specific
+        // icons above stay as-is; their colors already convey meaning.
+        default:        return group.isRead ? "bell" : "bell.fill"
         }
     }
 
@@ -586,7 +593,9 @@ private struct GroupedNotificationRow: View {
         case "like":    return .pink
         case "repost":  return .green
         case "follow":  return .blue
-        default:        return .secondary
+        // Brand-blue when unread, secondary grey when seen (#0082).
+        // Other reason icons keep their fixed colors above.
+        default:        return group.isRead ? .secondary : theme.colors.link
         }
     }
 
