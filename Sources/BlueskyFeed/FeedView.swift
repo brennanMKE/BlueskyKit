@@ -202,25 +202,50 @@ public struct FeedView: View {
         }
     }
 
+    /// Notification name posted by the iOS custom tab bar when the user taps
+    /// the Home tab while already on Home. Defined here as a literal string
+    /// because `BlueskyFeed` cannot import the app target where the
+    /// canonical name is declared (`PushRouter.swift`). Keep both names in
+    /// sync — they are both opaque identifiers, so the strings must match.
+    private static let scrollToTopNotification =
+        Foundation.Notification.Name("co.sstools.bluesky.scrollFeedToTop")
+
+    /// Stable scroll anchor for the first post in the feed. Used by
+    /// `ScrollViewReader.scrollTo` to implement RN's "tap Home to jump to
+    /// the top" behavior — the system `TabView`'s implicit scroll-to-top
+    /// is unavailable now that iOS uses a custom tab bar.
+    private static let scrollToTopAnchor = "feed.top"
+
     private func list(vm: FeedViewModel) -> some View {
         let displayed = vm.filteredPosts
-        return ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(displayed, id: \.post.uri) { item in
-                    PostCard(item: item, actions: actions(for: item, vm: vm))
-                        .onAppear {
-                            if item.post.uri == vm.posts.last?.post.uri {
-                                Task { await vm.loadMore() }
+        return ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    // Invisible anchor at the top of the list so the
+                    // scroll-to-top notification can target a stable id
+                    // even when the feed is empty mid-refresh.
+                    Color.clear
+                        .frame(height: 0)
+                        .id(Self.scrollToTopAnchor)
+                    ForEach(displayed, id: \.post.uri) { item in
+                        PostCard(item: item, actions: actions(for: item, vm: vm))
+                            .onAppear {
+                                if item.post.uri == vm.posts.last?.post.uri {
+                                    Task { await vm.loadMore() }
+                                }
                             }
-                        }
-                    Divider()
-                }
-                if vm.isLoading {
-                    HStack { Spacer(); ProgressView(); Spacer() }.padding()
+                        Divider()
+                    }
+                    if vm.isLoading {
+                        HStack { Spacer(); ProgressView(); Spacer() }.padding()
+                    }
                 }
             }
+            .refreshable { await vm.refresh() }
+            .onReceive(NotificationCenter.default.publisher(for: Self.scrollToTopNotification)) { _ in
+                withAnimation { proxy.scrollTo(Self.scrollToTopAnchor, anchor: .top) }
+            }
         }
-        .refreshable { await vm.refresh() }
     }
 
     private func errorView(_ message: String, vm: FeedViewModel) -> some View {
