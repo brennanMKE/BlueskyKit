@@ -56,7 +56,7 @@ public struct PostCard: View {
                         authorHeader
                         postBody
                         if let embed = item.post.embed {
-                            PostEmbedView(embed: embed)
+                            embedView(for: embed)
                         }
                     }
                     .contentShape(Rectangle())
@@ -72,6 +72,39 @@ public struct PostCard: View {
         .background(theme.colors.background)
     }
 
+    /// Render a post embed, with image embeds extended toward the card edge.
+    ///
+    /// Image embeds (single-image and grid) get a negative leading inset that
+    /// cancels out the avatar column (`Spacing.md` outer + 44 avatar +
+    /// `Spacing.sm` gap = 64) and a negative trailing inset that cancels the
+    /// outer `Spacing.md` (= 12), then a small `Spacing.xs` (= 4) of breathing
+    /// room on each side. Non-image embeds (link cards, quote posts, video)
+    /// stay aligned with the body text.
+    @ViewBuilder
+    private func embedView(for embed: BlueskyCore.EmbedView) -> some View {
+        if isImageOnlyEmbed(embed) {
+            // Card-edge image embed — RN parity (#0076).
+            // leading offset: -(avatar 44 + sm gap 8) + xs (4) = -48
+            // trailing offset: 0 (we want the image to extend to the right card edge,
+            // canceled by negative trailing padding equal to outer md)
+            PostEmbedView(embed: embed)
+                .padding(.leading, -(44 + Spacing.sm) + Spacing.xs)
+                .padding(.trailing, -Spacing.md + Spacing.xs)
+        } else {
+            PostEmbedView(embed: embed)
+        }
+    }
+
+    /// `true` for embeds where we want the card-edge image treatment:
+    /// `images` and `recordWithMedia(images, …)` (the media half is what
+    /// actually renders edge-to-edge; the quote half stays inset).
+    private func isImageOnlyEmbed(_ embed: BlueskyCore.EmbedView) -> Bool {
+        switch embed {
+        case .images: return true
+        default:      return false
+        }
+    }
+
     // MARK: - Subviews
 
     private var avatarColumn: some View {
@@ -85,16 +118,19 @@ public struct PostCard: View {
 
     private var authorHeader: some View {
         HStack(spacing: Spacing._2xs) {
-            // Display name + handle form a single tappable region that
-            // navigates to the author's profile (issue #0046). The
-            // surrounding content tap (which opens the thread) still fires
-            // when the user taps elsewhere on the row.
+            // Display name + verified badge + handle form a single tappable
+            // region that navigates to the author's profile (issue #0046).
+            // The surrounding content tap (which opens the thread) still
+            // fires when the user taps elsewhere on the row.
             HStack(spacing: Spacing._2xs) {
                 if let displayName = item.post.author.displayName, !displayName.isEmpty {
                     Text(displayName)
                         .font(Typography.headline)
                         .foregroundStyle(theme.colors.textPrimary)
                         .lineLimit(1)
+                }
+                if let badge = VerifiedBadge.forProfile(item.post.author) {
+                    badge
                 }
                 Text("@\(item.post.author.handle.rawValue)")
                     .font(Typography.bodySmall)
@@ -130,6 +166,7 @@ public struct PostCard: View {
         let isLiked = post.viewer?.like != nil
         let isReposted = post.viewer?.repost != nil
 
+        // Order matches RN (#0076): comment · repost · like · bookmark · share · ellipsis.
         return HStack(spacing: Spacing.xl) {
             actionButton(
                 icon: "bubble.left",
@@ -152,6 +189,13 @@ public struct PostCard: View {
                 helpText: "Like"
             ) { actions?.onLike?(post) }
 
+            actionButton(
+                icon: actions?.isBookmarked == true ? "bookmark.fill" : "bookmark",
+                count: nil,
+                color: actions?.isBookmarked == true ? theme.colors.link : theme.colors.textTertiary,
+                helpText: actions?.isBookmarked == true ? "Remove Bookmark" : "Bookmark"
+            ) { actions?.onBookmark?(post) }
+
             if let url = shareURL(for: post) {
                 ShareLink(item: url) {
                     HStack(spacing: Spacing._2xs) {
@@ -163,13 +207,6 @@ public struct PostCard: View {
                 }
                 .buttonStyle(.plain)
             }
-
-            actionButton(
-                icon: actions?.isBookmarked == true ? "bookmark.fill" : "bookmark",
-                count: nil,
-                color: actions?.isBookmarked == true ? theme.colors.link : theme.colors.textTertiary,
-                helpText: actions?.isBookmarked == true ? "Remove Bookmark" : "Bookmark"
-            ) { actions?.onBookmark?(post) }
 
             Menu {
                 Button {
@@ -247,7 +284,7 @@ public struct PostCard: View {
                 Image(systemName: icon)
                     .font(.system(size: 16))
                 if let count, count > 0 {
-                    Text(abbreviate(count))
+                    Text(CompactNumberFormatter.string(from: count))
                         .font(Typography.footnote)
                 }
             }
@@ -267,11 +304,6 @@ public struct PostCard: View {
         return formatter.string(from: date)
     }
 
-    private func abbreviate(_ n: Int) -> String {
-        if n < 1000  { return "\(n)" }
-        if n < 10000 { return String(format: "%.1fK", Double(n) / 1000) }
-        return "\(n / 1000)K"
-    }
 }
 
 #Preview("PostCard - Light") {
@@ -279,7 +311,8 @@ public struct PostCard: View {
         did: DID(rawValue: "did:plc:alice"),
         handle: Handle(rawValue: "alice.bsky.social"),
         displayName: "Alice",
-        avatar: nil
+        avatar: nil,
+        verification: VerificationState(verifiedStatus: "valid", trustedVerifierStatus: "none")
     )
     let record = PostRecord(
         text: "Hello Bluesky! Check out #bluesky — the open social network.",
@@ -315,7 +348,8 @@ public struct PostCard: View {
         did: DID(rawValue: "did:plc:alice"),
         handle: Handle(rawValue: "alice.bsky.social"),
         displayName: "Alice",
-        avatar: nil
+        avatar: nil,
+        verification: VerificationState(verifiedStatus: "valid", trustedVerifierStatus: "none")
     )
     let record = PostRecord(
         text: "Hello Bluesky! Check out #bluesky — the open social network.",

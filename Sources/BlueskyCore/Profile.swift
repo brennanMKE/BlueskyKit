@@ -37,6 +37,54 @@ public struct Label: Codable, Hashable, Sendable {
     }
 }
 
+// MARK: - Verification (app.bsky.actor.defs#verificationState)
+
+/// Bluesky's user-verification status, surfaced inline on every actor view.
+///
+/// AT Proto encodes this as `app.bsky.actor.defs#verificationState`. The two
+/// status fields use the enumeration `valid | invalid | none`. We keep the raw
+/// strings as `String` (not an enum) to stay forward-compatible with new
+/// statuses that may appear server-side.
+public struct VerificationState: Codable, Hashable, Sendable {
+    /// `"valid"` when the account is currently verified by at least one
+    /// trusted verifier; `"invalid"` if a previously valid verification has
+    /// been revoked; `"none"` (or absent) otherwise.
+    public let verifiedStatus: String
+    /// `"valid"` when the account itself is a trusted verifier;
+    /// `"none"` otherwise.
+    public let trustedVerifierStatus: String
+
+    public init(verifiedStatus: String, trustedVerifierStatus: String) {
+        self.verifiedStatus = verifiedStatus
+        self.trustedVerifierStatus = trustedVerifierStatus
+    }
+
+    /// `true` when the badge should render — verifiedStatus or
+    /// trustedVerifierStatus is `"valid"`. Mirrors RN's
+    /// `useSimpleVerificationState` (excluding the user's hide-badges pref,
+    /// which is applied at the call site).
+    public var isVerified: Bool {
+        verifiedStatus == "valid" || trustedVerifierStatus == "valid"
+    }
+
+    /// `true` when this account is itself a trusted verifier (drives the
+    /// scalloped-edge variant of the badge — not yet rendered, but exposed
+    /// here so callers can branch later).
+    public var isVerifier: Bool {
+        trustedVerifierStatus == "valid" || trustedVerifierStatus == "invalid"
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case verifiedStatus, trustedVerifierStatus
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        verifiedStatus = try c.decodeIfPresent(String.self, forKey: .verifiedStatus) ?? "none"
+        trustedVerifierStatus = try c.decodeIfPresent(String.self, forKey: .trustedVerifierStatus) ?? "none"
+    }
+}
+
 // MARK: - Profile types (app.bsky.actor.defs)
 
 /// Minimal actor view used inside post/notification payloads.
@@ -47,23 +95,28 @@ public struct ProfileBasic: Codable, Hashable, Sendable {
     /// CDN URL for the avatar image.
     public let avatar: URL?
     public let labels: [Label]
+    /// Verification state (`app.bsky.actor.defs#verificationState`).
+    /// `nil` when the server omits the field — treat as unverified.
+    public let verification: VerificationState?
 
     public init(
         did: DID,
         handle: Handle,
         displayName: String?,
         avatar: URL?,
-        labels: [Label] = []
+        labels: [Label] = [],
+        verification: VerificationState? = nil
     ) {
         self.did = did
         self.handle = handle
         self.displayName = displayName
         self.avatar = avatar
         self.labels = labels
+        self.verification = verification
     }
 
     private enum CodingKeys: String, CodingKey {
-        case did, handle, displayName, avatar, labels
+        case did, handle, displayName, avatar, labels, verification
     }
 
     public init(from decoder: any Decoder) throws {
@@ -73,6 +126,7 @@ public struct ProfileBasic: Codable, Hashable, Sendable {
         displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
         avatar = try decodeURL(c, forKey: .avatar)
         labels = try c.decodeIfPresent([Label].self, forKey: .labels) ?? []
+        verification = try c.decodeIfPresent(VerificationState.self, forKey: .verification)
     }
 }
 
@@ -86,6 +140,7 @@ public struct ProfileView: Codable, Hashable, Sendable {
     public let labels: [Label]
     public let indexedAt: Date?
     public let viewer: ProfileViewerState?
+    public let verification: VerificationState?
 
     public init(
         did: DID,
@@ -95,7 +150,8 @@ public struct ProfileView: Codable, Hashable, Sendable {
         avatar: URL?,
         labels: [Label] = [],
         indexedAt: Date?,
-        viewer: ProfileViewerState?
+        viewer: ProfileViewerState?,
+        verification: VerificationState? = nil
     ) {
         self.did = did
         self.handle = handle
@@ -105,10 +161,11 @@ public struct ProfileView: Codable, Hashable, Sendable {
         self.labels = labels
         self.indexedAt = indexedAt
         self.viewer = viewer
+        self.verification = verification
     }
 
     private enum CodingKeys: String, CodingKey {
-        case did, handle, displayName, description, avatar, labels, indexedAt, viewer
+        case did, handle, displayName, description, avatar, labels, indexedAt, viewer, verification
     }
 
     public init(from decoder: any Decoder) throws {
@@ -121,6 +178,7 @@ public struct ProfileView: Codable, Hashable, Sendable {
         labels = try c.decodeIfPresent([Label].self, forKey: .labels) ?? []
         indexedAt = try c.decodeIfPresent(Date.self, forKey: .indexedAt)
         viewer = try c.decodeIfPresent(ProfileViewerState.self, forKey: .viewer)
+        verification = try c.decodeIfPresent(VerificationState.self, forKey: .verification)
     }
 }
 
@@ -139,6 +197,7 @@ public struct ProfileDetailed: Codable, Sendable {
     public let createdAt: Date?
     public let indexedAt: Date?
     public let viewer: ProfileViewerState?
+    public let verification: VerificationState?
 
     public init(
         did: DID,
@@ -153,7 +212,8 @@ public struct ProfileDetailed: Codable, Sendable {
         labels: [Label] = [],
         createdAt: Date?,
         indexedAt: Date?,
-        viewer: ProfileViewerState?
+        viewer: ProfileViewerState?,
+        verification: VerificationState? = nil
     ) {
         self.did = did
         self.handle = handle
@@ -168,12 +228,13 @@ public struct ProfileDetailed: Codable, Sendable {
         self.createdAt = createdAt
         self.indexedAt = indexedAt
         self.viewer = viewer
+        self.verification = verification
     }
 
     private enum CodingKeys: String, CodingKey {
         case did, handle, displayName, description, avatar, banner
         case followersCount, followsCount, postsCount
-        case labels, createdAt, indexedAt, viewer
+        case labels, createdAt, indexedAt, viewer, verification
     }
 
     public init(from decoder: any Decoder) throws {
@@ -191,6 +252,7 @@ public struct ProfileDetailed: Codable, Sendable {
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
         indexedAt = try c.decodeIfPresent(Date.self, forKey: .indexedAt)
         viewer = try c.decodeIfPresent(ProfileViewerState.self, forKey: .viewer)
+        verification = try c.decodeIfPresent(VerificationState.self, forKey: .verification)
     }
 }
 
