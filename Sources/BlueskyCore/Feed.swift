@@ -197,6 +197,69 @@ public struct ProfileRecord: Codable, Sendable {
     }
 }
 
+// MARK: - Notification declaration record (app.bsky.notification.declaration)
+
+/// Activity-privacy visibility values used by the
+/// `app.bsky.notification.declaration` record. Controls who is allowed to
+/// subscribe to be notified about a user's posts/replies.
+///
+/// RN reference:
+/// `Bluesky-ReactNative/src/screens/Settings/ActivityPrivacySettings.tsx` —
+/// the radio group there writes one of `followers | mutuals | none`.
+/// (`AppBskyNotificationDeclaration.Record["allowSubscriptions"]` from the
+/// `@atproto/api` package.)
+public enum AllowSubscriptions: String, Codable, Sendable, Hashable, CaseIterable {
+    /// Anyone who follows the user can subscribe to their activity.
+    case followers
+    /// Only mutuals (followers the user also follows) can subscribe.
+    case mutuals
+    /// No one can subscribe.
+    case none
+}
+
+/// In-repo `app.bsky.notification.declaration` record. Stored at
+/// `repo=<did>, collection=app.bsky.notification.declaration, rkey=self`.
+///
+/// Today this record only carries `allowSubscriptions` — the activity-privacy
+/// visibility setting written by the Activity Privacy settings screen.
+/// Encoded with an explicit `$type` discriminator (the appview rejects writes
+/// that omit it). On decode, `$type` is optional because some `getRecord`
+/// payloads omit it on the embedded value.
+public struct NotificationDeclarationRecord: Codable, Sendable {
+    private let type: String
+    public let allowSubscriptions: AllowSubscriptions
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "$type", allowSubscriptions
+    }
+
+    public init(allowSubscriptions: AllowSubscriptions) {
+        self.type = "app.bsky.notification.declaration"
+        self.allowSubscriptions = allowSubscriptions
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decodeIfPresent(String.self, forKey: .type)
+            ?? "app.bsky.notification.declaration"
+        // Tolerate an unknown / future value by falling back to RN's default
+        // (`followers`). Mirrors `useNotificationDeclarationQuery`'s
+        // "Could not locate record" branch which also returns `followers`.
+        if let raw = try c.decodeIfPresent(String.self, forKey: .allowSubscriptions),
+           let parsed = AllowSubscriptions(rawValue: raw) {
+            allowSubscriptions = parsed
+        } else {
+            allowSubscriptions = .followers
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type, forKey: .type)
+        try c.encode(allowSubscriptions, forKey: .allowSubscriptions)
+    }
+}
+
 // MARK: - Like record (app.bsky.feed.like)
 
 public struct LikeRecord: Encodable, Sendable {

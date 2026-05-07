@@ -33,8 +33,11 @@ private let pwiLabelValue = "!no-unauthenticated"
 ///   row with current state ("Not enabled") and open a sheet that explains
 ///   the email-verification flow and points the user at bsky.app to manage
 ///   it. See gotchas in #0114.
-/// - **Forward-references:** Activity privacy (#0122) and Interaction
-///   settings (#0138) are linked but currently open placeholder destinations.
+/// - **Forward-references:** Interaction settings (#0138) is linked but
+///   currently opens a placeholder destination.
+/// - **Functional via dedicated screen:** Activity privacy (#0122) navigates
+///   to `ActivityPrivacySettingsScreen`, which writes
+///   `app.bsky.notification.declaration`.
 struct PrivacySettingsScreen: View {
 
     private let network: any NetworkClient
@@ -107,18 +110,15 @@ struct PrivacySettingsScreen: View {
             // MARK: Activity privacy
 
             Section {
-                Button {
-                    presentingSheet = .activityPrivacyPlaceholder
+                NavigationLink {
+                    ActivityPrivacySettingsScreen(
+                        network: network,
+                        accountStore: accountStore,
+                        currentAccount: initialAccount
+                    )
                 } label: {
-                    HStack {
-                        Label("Allow others to be notified of your posts", systemImage: "bell.badge")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
+                    Label("Allow others to be notified of your posts", systemImage: "bell.badge")
                 }
-                .buttonStyle(.plain)
             } header: {
                 Text("Activity privacy")
             }
@@ -160,12 +160,6 @@ struct PrivacySettingsScreen: View {
                 TwoFactorReferralSheet(
                     bskyAppURL: externalSettingsURL,
                     isCurrentlyEnabled: model.isTwoFactorEnabled,
-                    dismiss: { presentingSheet = nil }
-                )
-            case .activityPrivacyPlaceholder:
-                PlaceholderSheet(
-                    title: "Activity privacy",
-                    message: "Activity privacy controls who can be notified about your posts (anyone who follows you, only mutuals, or no one). The full screen is coming in a later release — see issue #0122.",
                     dismiss: { presentingSheet = nil }
                 )
             case .interactionSettingsPlaceholder:
@@ -239,7 +233,6 @@ struct PrivacySettingsScreen: View {
 
 private enum SheetKind: Identifiable, Hashable {
     case twoFactor
-    case activityPrivacyPlaceholder
     case interactionSettingsPlaceholder
     var id: Self { self }
 }
