@@ -16,6 +16,9 @@ private enum PrefKey {
     static let reduceMotion = "settings.reduceMotion"
     static let openLinksInApp = "settings.openLinksInApp"
     static let postLanguages = "settings.postLanguages"
+
+    // Legacy single-toggle notification keys (kept for read-side migration; the
+    // hub now delegates to NotificationPreferencesStore for per-type prefs).
     static let notifyLikes = "settings.notifyLikes"
     static let notifyReposts = "settings.notifyReposts"
     static let notifyFollows = "settings.notifyFollows"
@@ -49,7 +52,14 @@ public final class SettingsViewModel {
 
     public var postLanguages: [String] = ["en"]
 
-    // MARK: - Notifications
+    // MARK: - Notifications (legacy single-toggle mirrors)
+    //
+    // The notification hub (see `NotificationSettingsScreen` and
+    // `NotificationTypeSettingsScreen`) reads/writes per-type preferences
+    // through `NotificationPreferencesStore`. These bools are kept on the view
+    // model for backwards compat with any callers still toggling a flat row,
+    // and so existing keys aren't orphaned during the transition. They mirror
+    // the per-type "push" channel value and are not authoritative.
 
     public var notifyLikes = true
     public var notifyReposts = true
@@ -64,7 +74,7 @@ public final class SettingsViewModel {
 
     // MARK: - Dependencies
 
-    private let preferences: any PreferencesStore
+    let preferences: any PreferencesStore
     let accountStore: any AccountStore
 
     public init(preferences: any PreferencesStore, accountStore: any AccountStore) {
