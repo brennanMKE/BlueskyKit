@@ -9,7 +9,12 @@ private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstoo
 // MARK: - Keys
 
 private enum PrefKey {
-    static let fontSize = "settings.fontSize"
+    // Appearance keys are owned by `AppearanceStore` (in BlueskyKit) — see
+    // that type for `appearance.colorMode` / `appearance.darkVariant` /
+    // `appearance.fontFamily` / `appearance.fontSize`. The legacy
+    // `settings.fontSize` (a continuous-slider Double) was retired when the
+    // discrete five-tier picker landed; the old key is no longer read or
+    // written.
     static let autoplayVideo = "settings.autoplayVideo"
     static let externalEmbeds = "settings.externalEmbeds"
     static let altTextRequired = "settings.altTextRequired"
@@ -32,10 +37,12 @@ public final class SettingsViewModel {
 
     // MARK: - Appearance
     //
-    // The app follows the system appearance (light/dark) on macOS — there is no
-    // in-app theme picker. Only typographic preferences live here.
-
-    public var fontSize: Double = 16
+    // Appearance preferences (color mode, dark variant, font family, font size
+    // tier) are owned by `AppearanceStore` so they can be shared with the
+    // SwiftUI app shell — the shell needs to read them at the root to apply
+    // `.preferredColorScheme(_:)` and select the active `BlueskyTheme` palette.
+    // The Settings appearance screen binds to that store directly via the
+    // SwiftUI environment, so no fields live on this view model.
 
     // MARK: - Content & media
 
@@ -109,7 +116,6 @@ public final class SettingsViewModel {
     }
 
     public func load() {
-        fontSize = loadValue(Double.self, key: PrefKey.fontSize, default: 16)
         autoplayVideo = loadValue(Bool.self, key: PrefKey.autoplayVideo, default: true)
         externalEmbeds = loadValue(Bool.self, key: PrefKey.externalEmbeds, default: true)
         altTextRequired = loadValue(Bool.self, key: PrefKey.altTextRequired, default: false)
@@ -125,7 +131,6 @@ public final class SettingsViewModel {
     }
 
     public func save() {
-        saveValue(fontSize, key: PrefKey.fontSize)
         saveValue(autoplayVideo, key: PrefKey.autoplayVideo)
         saveValue(externalEmbeds, key: PrefKey.externalEmbeds)
         saveValue(altTextRequired, key: PrefKey.altTextRequired)
