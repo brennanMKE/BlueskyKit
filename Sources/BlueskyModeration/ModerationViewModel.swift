@@ -14,6 +14,10 @@ public final class ModerationViewModel {
         set { store.adultContentEnabled = newValue }
     }
     public var contentLabels: [ContentLabelPref] { store.contentLabels }
+    public var subscribedLabelers: [LabelerView] { store.subscribedLabelers }
+    public var subscribedLabelerDIDs: [DID] { store.subscribedLabelerDIDs }
+    public var unavailableLabelerDIDs: [DID] { store.unavailableLabelerDIDs }
+    public var isLoadingLabelers: Bool { store.isLoadingLabelers }
     public var hasMoreMutes: Bool { store.hasMoreMutes }
     public var hasMoreBlocks: Bool { store.hasMoreBlocks }
     public var hasMoreModLists: Bool { store.hasMoreModLists }
@@ -33,6 +37,8 @@ public final class ModerationViewModel {
     public func loadModLists() async { await store.loadModLists() }
     public func loadMoreModLists() async { await store.loadMoreModLists() }
     public func loadPreferences() async { await store.loadPreferences() }
+    public func loadSubscribedLabelers() async { await store.loadSubscribedLabelers() }
+    public func removeUnavailableLabelers() async { await store.removeUnavailableLabelers() }
     public func unmute(did: DID) async { await store.unmute(did: did) }
     public func unblock(profile: ProfileView) async { await store.unblock(profile: profile) }
     public func muteList(_ listURI: ATURI) async { await store.muteList(listURI) }

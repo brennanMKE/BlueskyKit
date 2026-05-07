@@ -306,6 +306,13 @@ public struct GetPreferencesResponse: Decodable, Sendable {
     /// of muted words and tags. Used by the Moderation → Muted Words & Tags
     /// screen and by feed-side filtering once wired (see #0132).
     public let mutedWords: [MutedWord]
+    /// `app.bsky.actor.defs#labelersPref.labelers[].did` — DIDs of the
+    /// labeler services the viewer has subscribed to. Mirrors RN's
+    /// `preferences.moderationPrefs.labelers.map(l => l.did)`. The
+    /// Moderation hub's "Subscribed labelers" advanced section reads this
+    /// list, then feeds the DIDs into `app.bsky.labeler.getServices` to
+    /// resolve display names + availability (see #0133).
+    public let subscribedLabelerDIDs: [DID]
 
     private enum OuterKeys: String, CodingKey { case preferences }
 
@@ -323,6 +330,9 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             let actorTarget: String?
             let expiresAt: String?
         }
+        struct LabelerEntryHelper: Decodable {
+            let did: DID
+        }
         struct Item: Decodable {
             let type: String
             let enabled: Bool?
@@ -331,6 +341,7 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             let labelerDid: DID?
             let feedItems: [FeedItemHelper]?
             let mutedWordItems: [MutedWordHelper]?
+            let labelerEntries: [LabelerEntryHelper]?
             let birthDate: String?
             let sort: String?
             let prioritizeFollowedUsers: Bool?
@@ -346,6 +357,7 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             private enum CodingKeys: String, CodingKey {
                 case type = "$type", enabled, label, visibility, labelerDid, birthDate
                 case items
+                case labelers
                 case sort, prioritizeFollowedUsers
                 case feed, hideReplies, hideRepliesByUnfollowed, hideRepliesByLikeCount,
                      hideReposts, hideQuotePosts
@@ -380,6 +392,14 @@ public struct GetPreferencesResponse: Decodable, Sendable {
                 } else {
                     self.feedItems = nil
                     self.mutedWordItems = nil
+                }
+                // `labelersPref.labelers` is its own array; pull only when the
+                // `$type` matches so we don't accidentally trip on unrelated
+                // preference shapes.
+                if type == "app.bsky.actor.defs#labelersPref" {
+                    self.labelerEntries = try c.decodeIfPresent([LabelerEntryHelper].self, forKey: .labelers)
+                } else {
+                    self.labelerEntries = nil
                 }
             }
         }
@@ -472,6 +492,12 @@ public struct GetPreferencesResponse: Decodable, Sendable {
                     expiresAt: expires
                 )
             }
+            ?? []
+
+        self.subscribedLabelerDIDs = items
+            .first { $0.type == "app.bsky.actor.defs#labelersPref" }?
+            .labelerEntries?
+            .map { $0.did }
             ?? []
     }
 }
@@ -652,6 +678,28 @@ public struct PutPreferencesRequest: Encodable, Sendable {
     /// write the whole list back.
     public init(mutedWords: [MutedWord]) {
         self.preferences = [AnyEncodable(_MutedWordsPref(items: mutedWords))]
+    }
+
+    /// Writes a `labelersPref` carrying the supplied list of subscribed
+    /// labeler DIDs. Mirrors RN's `useRemoveLabelersMutation` /
+    /// `agent.removeLabeler` cleanup path: those helpers re-write the
+    /// entire `labelers` array, so the SwiftUI client does the same — load,
+    /// drop the unavailable entries, write the trimmed list back.
+    public init(subscribedLabelerDIDs: [DID]) {
+        self.preferences = [AnyEncodable(_LabelersPref(dids: subscribedLabelerDIDs))]
+    }
+
+    private struct _LabelersPref: Encodable, Sendable {
+        let dids: [DID]
+        private enum K: String, CodingKey { case type = "$type", labelers }
+        private struct Entry: Encodable, Sendable {
+            let did: DID
+        }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: K.self)
+            try c.encode("app.bsky.actor.defs#labelersPref", forKey: .type)
+            try c.encode(dids.map { Entry(did: $0) }, forKey: .labelers)
+        }
     }
 
     private struct _MutedWordsPref: Encodable, Sendable {

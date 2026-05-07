@@ -14,6 +14,10 @@ public protocol ModerationStoring: AnyObject, Observable, Sendable {
     var modLists: [ListView] { get }
     var adultContentEnabled: Bool { get set }
     var contentLabels: [ContentLabelPref] { get }
+    var subscribedLabelerDIDs: [DID] { get }
+    var subscribedLabelers: [LabelerView] { get }
+    var unavailableLabelerDIDs: [DID] { get }
+    var isLoadingLabelers: Bool { get }
     var hasMoreMutes: Bool { get }
     var hasMoreBlocks: Bool { get }
     var hasMoreModLists: Bool { get }
@@ -27,6 +31,8 @@ public protocol ModerationStoring: AnyObject, Observable, Sendable {
     func loadModLists() async
     func loadMoreModLists() async
     func loadPreferences() async
+    func loadSubscribedLabelers() async
+    func removeUnavailableLabelers() async
     func unmute(did: DID) async
     func unblock(profile: ProfileView) async
     func muteList(_ listURI: ATURI) async
@@ -46,6 +52,10 @@ public final class ModerationStore: ModerationStoring {
     public private(set) var modLists: [ListView] = []
     public var adultContentEnabled = false
     public private(set) var contentLabels: [ContentLabelPref] = []
+    public private(set) var subscribedLabelerDIDs: [DID] = []
+    public private(set) var subscribedLabelers: [LabelerView] = []
+    public private(set) var unavailableLabelerDIDs: [DID] = []
+    public private(set) var isLoadingLabelers = false
     public private(set) var hasMoreMutes = true
     public private(set) var hasMoreBlocks = true
     public private(set) var hasMoreModLists = true
@@ -197,7 +207,66 @@ public final class ModerationStore: ModerationStoring {
             )
             adultContentEnabled = resp.adultContentEnabled
             contentLabels = resp.contentLabels
+            subscribedLabelerDIDs = resp.subscribedLabelerDIDs
         } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Subscribed labelers
+
+    /// Resolves the user's `labelersPref` DIDs into full `LabelerView`s
+    /// (display name, avatar, like count) via `app.bsky.labeler.getServices`.
+    /// Mirrors RN's `useMyLabelersQuery` flow: read DIDs from preferences,
+    /// hand them to `getServices?dids=...`, then diff the returned set
+    /// against the requested set to flag unavailable services.
+    public func loadSubscribedLabelers() async {
+        isLoadingLabelers = true
+        defer { isLoadingLabelers = false }
+        do {
+            let prefs: GetPreferencesResponse = try await network.get(
+                lexicon: "app.bsky.actor.getPreferences",
+                params: [:]
+            )
+            subscribedLabelerDIDs = prefs.subscribedLabelerDIDs
+
+            guard !subscribedLabelerDIDs.isEmpty else {
+                subscribedLabelers = []
+                unavailableLabelerDIDs = []
+                return
+            }
+
+            // `dids` accepts repeated query params. Joined with comma is what
+            // RN's bsky-agent helper does too — the appview parses both forms.
+            let didsParam = subscribedLabelerDIDs.map { $0.rawValue }.joined(separator: ",")
+            let resp: GetLabelerServicesResponse = try await network.get(
+                lexicon: "app.bsky.labeler.getServices",
+                params: ["dids": didsParam, "detailed": "false"]
+            )
+            subscribedLabelers = resp.views
+            let returned = Set(resp.views.map { $0.creator.did })
+            unavailableLabelerDIDs = subscribedLabelerDIDs.filter { !returned.contains($0) }
+        } catch {
+            logger.error("loadSubscribedLabelers error: \(error, privacy: .public)")
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Drops `unavailableLabelerDIDs` from the user's `labelersPref` and
+    /// writes the trimmed list back via `putPreferences`. Mirrors RN's
+    /// `useRemoveLabelersMutation` cleanup path.
+    public func removeUnavailableLabelers() async {
+        guard !unavailableLabelerDIDs.isEmpty else { return }
+        let surviving = subscribedLabelerDIDs.filter { !unavailableLabelerDIDs.contains($0) }
+        do {
+            let _: EmptyResponse = try await network.post(
+                lexicon: "app.bsky.actor.putPreferences",
+                body: PutPreferencesRequest(subscribedLabelerDIDs: surviving)
+            )
+            subscribedLabelerDIDs = surviving
+            unavailableLabelerDIDs = []
+        } catch {
+            logger.error("removeUnavailableLabelers error: \(error, privacy: .public)")
             errorMessage = error.localizedDescription
         }
     }
