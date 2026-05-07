@@ -2,13 +2,13 @@ import SwiftUI
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
+import UniformTypeIdentifiers
 #if os(iOS)
 import PhotosUI
 import UIKit
 #endif
 #if os(macOS)
 import AppKit
-import UniformTypeIdentifiers
 #endif
 
 /// How the composer should pre-prime an attachment picker on appear.
@@ -57,6 +57,12 @@ public struct ComposerSheet: View {
     /// the user taps Cancel with non-empty composer state. Mirrors RN's
     /// `savePromptControl` in `DraftsButton.tsx`.
     @State private var showCancelPrompt = false
+    /// ID of the image currently being drag-reordered in the image grid.
+    /// Drives the lift/scale visual feedback and lets the drop delegate
+    /// distinguish the source from any cell it crosses. Cleared on drop or
+    /// drop-cancellation so a stale value can't leave the grid in a
+    /// "frozen" highlighted state.
+    @State private var draggedImageID: UUID?
     private let initialAttachmentSource: ComposerInitialAttachmentSource
 
     public init(
@@ -369,11 +375,27 @@ public struct ComposerSheet: View {
 
     // MARK: - Image grid
 
+    /// Renders the attached images as a 2-column reorderable grid.
+    ///
+    /// **Reorder paths.** Two parallel affordances exist for parity with RN's
+    /// `Gallery.tsx`, which supports drag and exposes per-image actions:
+    ///
+    ///   - **Drag-and-drop** — each cell is an `.onDrag` source carrying its
+    ///     UUID string, and each cell is also an `.onDrop` target via
+    ///     `ImageReorderDropDelegate`. The delegate swaps the dragged cell
+    ///     into the hovered cell's slot in real time. The dragged cell scales
+    ///     up slightly (`scaleEffect`) for visual feedback.
+    ///   - **Context menu / move buttons** — every cell exposes "Move left"
+    ///     and "Move right" actions in its context menu. This is the
+    ///     accessibility path called out in issue #0102 and matches RN's
+    ///     "explicit affordance" guidance.
     @ViewBuilder
     private var imageGrid: some View {
         if !viewModel.images.isEmpty {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                 ForEach(viewModel.images) { attachment in
+                    let cellIndex = viewModel.images.firstIndex(where: { $0.id == attachment.id }) ?? 0
+                    let isDragged = draggedImageID == attachment.id
                     ImageAttachmentCell(
                         attachment: attachment,
                         altText: Binding(
@@ -384,11 +406,39 @@ public struct ComposerSheet: View {
                                 }
                             }
                         ),
-                        onRemove: { viewModel.removeImage(id: attachment.id) }
+                        onRemove: { viewModel.removeImage(id: attachment.id) },
+                        canMoveLeft: cellIndex > 0,
+                        canMoveRight: cellIndex < viewModel.images.count - 1,
+                        onMoveLeft: { viewModel.moveImageEarlier(id: attachment.id) },
+                        onMoveRight: { viewModel.moveImageLater(id: attachment.id) }
+                    )
+                    .scaleEffect(isDragged ? 1.05 : 1.0)
+                    .opacity(draggedImageID != nil && !isDragged ? 0.7 : 1.0)
+                    .animation(.easeInOut(duration: 0.15), value: draggedImageID)
+                    .onDrag {
+                        draggedImageID = attachment.id
+                        // Carry the UUID as plain text — the delegate matches
+                        // by id rather than relying on the provider payload,
+                        // but we still need a non-empty provider so `.onDrag`
+                        // actually starts a drag session on macOS and iOS.
+                        return NSItemProvider(object: attachment.id.uuidString as NSString)
+                    }
+                    .onDrop(
+                        of: [UTType.text],
+                        delegate: ImageReorderDropDelegate(
+                            targetID: attachment.id,
+                            draggedID: $draggedImageID,
+                            viewModel: viewModel
+                        )
                     )
                 }
             }
             .padding(.top, 8)
+            // Catch-all drop target so a drag that ends outside any cell
+            // still clears `draggedImageID`. Without this, cancelling a
+            // drag in empty space would leave the source cell visually
+            // "lifted" (scaled + others dimmed) until the next drag.
+            .onDrop(of: [UTType.text], delegate: ImageReorderCancelDelegate(draggedID: $draggedImageID))
         }
     }
 
@@ -857,6 +907,17 @@ private struct ImageAttachmentCell: View {
     let attachment: ComposerImageAttachment
     @Binding var altText: String
     let onRemove: () -> Void
+    /// `true` when the cell is not already first in the grid. Drives the
+    /// "Move left" enable state in the context menu so users get a visible
+    /// no-op cue rather than a button that silently does nothing.
+    var canMoveLeft: Bool = false
+    /// `true` when the cell is not already last in the grid.
+    var canMoveRight: Bool = false
+    /// Move-earlier action wired to `ComposerViewModel.moveImageEarlier`.
+    /// Provided as a closure so the cell stays purely presentational.
+    var onMoveLeft: () -> Void = {}
+    /// Move-later action wired to `ComposerViewModel.moveImageLater`.
+    var onMoveRight: () -> Void = {}
     @State private var showAltInput = false
 
     var body: some View {
@@ -878,6 +939,38 @@ private struct ImageAttachmentCell: View {
             .buttonStyle(.plain)
         }
         .onTapGesture { showAltInput = true }
+        // Per-image actions exposed as a context menu. RN's `Gallery` shows
+        // pen/x icons inline; we keep those (remove via the X button above,
+        // edit-alt via tap) and add reorder here so the cell stays compact.
+        // The button-based reorder path is the accessibility-friendly
+        // counterpart to drag-and-drop, called out in issue #0102.
+        .contextMenu {
+            Button {
+                onMoveLeft()
+            } label: {
+                Label("Move Left", systemImage: "arrow.left")
+            }
+            .disabled(!canMoveLeft)
+
+            Button {
+                onMoveRight()
+            } label: {
+                Label("Move Right", systemImage: "arrow.right")
+            }
+            .disabled(!canMoveRight)
+
+            Button {
+                showAltInput = true
+            } label: {
+                Label("Edit Alt Text", systemImage: "text.alignleft")
+            }
+
+            Divider()
+
+            Button(role: .destructive, action: onRemove) {
+                Label("Remove", systemImage: "trash")
+            }
+        }
         .popover(isPresented: $showAltInput) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Alt text").font(.headline)
@@ -890,6 +983,72 @@ private struct ImageAttachmentCell: View {
             }
             .padding()
         }
+    }
+}
+
+// MARK: - Image reorder drop delegate
+
+/// Drop delegate for the composer image grid. Each grid cell is both an
+/// `.onDrag` source (carrying its UUID string in an `NSItemProvider`) and an
+/// `.onDrop` target wired to one of these delegates. When the dragged cell
+/// crosses a different cell, `dropEntered` swaps positions in the view
+/// model immediately — the user sees the rearrangement live, mirroring the
+/// drag-to-reorder UX of RN's `Gallery.tsx`. We rely on `@Binding` to the
+/// composer's `draggedImageID` rather than the provider payload because
+/// reading the provider asynchronously would defer the swap until after the
+/// hover ended, defeating the live preview.
+private struct ImageReorderDropDelegate: DropDelegate {
+    let targetID: UUID
+    @Binding var draggedID: UUID?
+    let viewModel: ComposerViewModel
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedID, draggedID != targetID else { return }
+        guard let from = viewModel.images.firstIndex(where: { $0.id == draggedID }),
+              let to = viewModel.images.firstIndex(where: { $0.id == targetID }) else { return }
+        guard from != to else { return }
+        // SwiftUI's `move(fromOffsets:toOffset:)` expects a `toOffset` that
+        // sits *between* two elements, with the convention that an offset
+        // greater than `from` means "after the destination". Translate our
+        // simple "swap into this cell's slot" semantics into that form.
+        let destination = to > from ? to + 1 : to
+        viewModel.moveImage(from: from, to: destination)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        // The actual reordering already happened in `dropEntered`. Clear
+        // the drag indicator so the source cell returns to its normal scale.
+        draggedID = nil
+        return true
+    }
+
+    func dropExited(info: DropInfo) {
+        // No-op: we want the previewed reorder to persist if the user drops
+        // anywhere on the grid. Cancellation is handled when the system
+        // calls `performDrop` with no provider payload — `draggedID` is
+        // still cleared there.
+    }
+}
+
+/// Catch-all drop delegate attached to the grid container. Any drop that
+/// reaches the grid but doesn't land on a cell flows here and clears the
+/// drag-in-progress state so the source cell's lift effect resets. Returning
+/// `true` tells SwiftUI we accepted the drop (it's a no-op move; the live
+/// reorder during `dropEntered` already settled the order in the view model).
+private struct ImageReorderCancelDelegate: DropDelegate {
+    @Binding var draggedID: UUID?
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedID = nil
+        return true
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
     }
 }
 

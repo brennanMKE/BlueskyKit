@@ -316,6 +316,40 @@ public final class ComposerViewModel {
         images.removeAll { $0.id == id }
     }
 
+    /// Reorder the attached images by moving the entry currently at
+    /// `sourceIndex` to be positioned in front of `destinationIndex`. Mirrors
+    /// SwiftUI's `Array.move(fromOffsets:toOffset:)` semantics so callers can
+    /// pass an `IndexSet`-style destination directly. Used by the composer
+    /// image grid's drag-to-reorder and the per-cell "Move left/right"
+    /// accessibility affordances. RN's `Gallery` allows reordering by
+    /// dispatching `embed_update_image` actions on the image array — we
+    /// achieve the same effect by mutating the array in place.
+    public func moveImage(from sourceIndex: Int, to destinationIndex: Int) {
+        guard sourceIndex >= 0, sourceIndex < images.count else { return }
+        var clamped = max(0, min(destinationIndex, images.count))
+        // SwiftUI move semantics: a destination greater than source means
+        // "insert after"; the API expects the post-removal index, so
+        // adjust for the removed element below.
+        if clamped > sourceIndex { clamped -= 1 }
+        guard clamped != sourceIndex else { return }
+        let item = images.remove(at: sourceIndex)
+        images.insert(item, at: clamped)
+    }
+
+    /// Convenience used by the image cell context menu to move the cell one
+    /// slot earlier in the grid. No-op when already first.
+    public func moveImageEarlier(id: UUID) {
+        guard let idx = images.firstIndex(where: { $0.id == id }), idx > 0 else { return }
+        images.swapAt(idx, idx - 1)
+    }
+
+    /// Convenience used by the image cell context menu to move the cell one
+    /// slot later in the grid. No-op when already last.
+    public func moveImageLater(id: UUID) {
+        guard let idx = images.firstIndex(where: { $0.id == id }), idx < images.count - 1 else { return }
+        images.swapAt(idx, idx + 1)
+    }
+
     // MARK: - Video attachment
 
 #if os(iOS)
