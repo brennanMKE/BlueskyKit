@@ -41,10 +41,15 @@ struct ContentSettingsScreen: View {
             Section {
                 Toggle("Autoplay Videos", isOn: $viewModel.autoplayVideo)
                 Toggle("Load External Embeds", isOn: $viewModel.externalEmbeds)
+                NavigationLink {
+                    ExternalMediaPreferencesScreen(preferences: viewModel.preferences)
+                } label: {
+                    Label("External media", systemImage: "play.rectangle.on.rectangle")
+                }
             } header: {
                 Text("Media")
             } footer: {
-                Text("External embeds include link cards and media from third-party sites. Disabling reduces data usage and improves privacy.")
+                Text("External embeds include link cards and media from third-party sites. Disabling the master toggle hides them all; the per-source list controls which inline players are enabled.")
             }
 
             if let network {
