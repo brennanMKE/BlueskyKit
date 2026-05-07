@@ -105,9 +105,15 @@ private struct RequestConvoRow: View {
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .lineLimit(1)
-                if let msg = convo.lastMessage {
+                if let msg = convo.lastMessage?.messageView {
                     Text(msg.text.isEmpty ? "(image)" : msg.text)
                         .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else if convo.lastMessage?.deletedView != nil {
+                    Text("Message deleted")
+                        .font(.subheadline)
+                        .italic()
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }

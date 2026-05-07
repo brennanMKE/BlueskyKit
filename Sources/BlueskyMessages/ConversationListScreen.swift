@@ -161,27 +161,44 @@ private struct ConvoRow: View {
     let viewerDID: DID?
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             avatarStack
             VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(convoName).font(.subheadline).fontWeight(.semibold).lineLimit(1)
-                    Spacer()
-                    if convo.unreadCount > 0 {
-                        BadgeView(count: convo.unreadCount)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(convoName)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if let stamp = relativeTimestamp {
+                        Text(stamp)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .fixedSize()
                     }
                 }
-                if let msg = convo.lastMessage {
-                    Text(msg.text)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                previewLine
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if convo.unreadCount > 0 {
+                BadgeView(count: convo.unreadCount)
+                    .padding(.top, 4)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .contentShape(Rectangle())
+    }
+
+    private var isGroup: Bool {
+        // RN's parseConvoView treats >2 members (i.e. self + 2+ others) as a group.
+        convo.members.count > 2
     }
 
     private var convoName: String {
@@ -198,6 +215,66 @@ private struct ConvoRow: View {
             handle: first?.handle.rawValue ?? "",
             size: 44
         )
+    }
+
+    /// Short-form timestamp ("now", "2h", "Yesterday", "Mar 4") matching RN's
+    /// `useTimeAgo` helper. Returns `nil` when there's no timestamp to show.
+    private var relativeTimestamp: String? {
+        guard let sentAt = convo.lastMessage?.sentAt else { return nil }
+        return Self.shortTimeAgo(from: sentAt, now: Date())
+    }
+
+    /// The body text — handles all four variants: regular message, deleted
+    /// placeholder, group sender prefix, and the empty "no messages" case.
+    private var previewLine: Text {
+        switch convo.lastMessage {
+        case .none:
+            return Text("No messages yet").italic()
+        case .deleted:
+            return Text("Message deleted").italic()
+        case .message(let msg):
+            let body = msg.text.isEmpty ? "(image)" : msg.text
+            if isGroup, let prefix = senderPrefix(for: msg) {
+                // Slightly bolder sender prefix; body inherits the secondary tint.
+                return Text(prefix).fontWeight(.semibold) + Text(body)
+            } else {
+                return Text(body)
+            }
+        }
+    }
+
+    /// Returns "@<handle>: " for the sender of a group-chat message, or `nil`
+    /// when the sender is the viewer (in which case RN suppresses the prefix).
+    private func senderPrefix(for msg: MessageView) -> String? {
+        if msg.sender.did == viewerDID { return "You: " }
+        guard let member = convo.members.first(where: { $0.did == msg.sender.did }) else {
+            return nil
+        }
+        return "@\(member.handle.rawValue): "
+    }
+
+    /// Mirrors RN's short-form "time ago" output. Public-static so it's
+    /// testable and stays pure.
+    static func shortTimeAgo(from date: Date, now: Date) -> String {
+        let delta = now.timeIntervalSince(date)
+        if delta < 60 { return "now" }
+        if delta < 3600 { return "\(Int(delta / 60))m" }
+        if delta < 86_400 { return "\(Int(delta / 3600))h" }
+
+        let cal = Calendar.current
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+
+        let days = Int(delta / 86_400)
+        if days < 7 { return "\(days)d" }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        if cal.component(.year, from: date) == cal.component(.year, from: now) {
+            formatter.setLocalizedDateFormatFromTemplate("MMMd")
+        } else {
+            formatter.setLocalizedDateFormatFromTemplate("MMMdyyyy")
+        }
+        return formatter.string(from: date)
     }
 }
 

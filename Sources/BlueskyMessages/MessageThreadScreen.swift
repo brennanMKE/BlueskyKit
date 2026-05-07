@@ -240,14 +240,14 @@ private let previewConvo = ConvoView(
             avatar: nil
         )
     ],
-    lastMessage: MessageView(
+    lastMessage: .message(MessageView(
         id: "msg-1",
         rev: "1",
         text: "Hey! How are you?",
         embed: nil,
         sender: MessageSender(did: DID(rawValue: "did:plc:alice")),
         sentAt: Date(timeIntervalSinceNow: -60)
-    ),
+    )),
     unreadCount: 1,
     muted: false
 )
