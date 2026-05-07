@@ -66,6 +66,7 @@ public struct ThreadView: View {
         }
         .navigationTitle("Thread")
         .adaptiveBlueskyTheme()
+        .toolbar { sortToolbar }
         .task { await viewModel.load() }
         .sheet(isPresented: Binding(
             get: { replyTarget != nil },
@@ -80,6 +81,38 @@ public struct ThreadView: View {
                 )
             }
         }
+    }
+
+    // MARK: - Toolbar
+
+    /// Reply-sort dropdown. Mirrors RN's `HeaderDropdown`
+    /// (`Bluesky-ReactNative/src/screens/PostThread/components/HeaderDropdown.tsx`).
+    /// Options span the full lexicon set (`hotness`, `most-likes`,
+    /// `newest`, `oldest`, `random`) per the issue spec, even though
+    /// the live RN screen surfaces only a subset.
+    @ToolbarContentBuilder
+    private var sortToolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Picker("Reply sorting", selection: sortBinding) {
+                    ForEach(ThreadSort.displayOrder, id: \.self) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label("Reply sorting", systemImage: "slider.horizontal.3")
+            }
+            .help("Reply sorting")
+            .disabled(viewModel.thread == nil)
+        }
+    }
+
+    private var sortBinding: Binding<ThreadSort> {
+        Binding(
+            get: { viewModel.sort },
+            set: { viewModel.setSort($0) }
+        )
     }
 
     // MARK: - Flat list
@@ -118,6 +151,8 @@ public struct ThreadView: View {
     }
 
     /// Walk the thread tree: ancestors (oldest first) → focal post → direct replies.
+    /// Replies use `viewModel.sortedReplies` so the toolbar Menu's
+    /// reply-sort selection drives row order without a refetch.
     private func flattenThread(_ node: ThreadViewPost) -> [FeedViewPost] {
         guard case .post(let tp) = node else { return [] }
 
@@ -130,12 +165,11 @@ public struct ThreadView: View {
         // Focal post
         result.append(FeedViewPost(post: tp.post, reply: nil, reason: nil))
 
-        // Direct replies (flat — one level only)
-        if let replies = tp.replies {
-            for reply in replies {
-                if case .post(let rtp) = reply {
-                    result.append(FeedViewPost(post: rtp.post, reply: nil, reason: nil))
-                }
+        // Direct replies (flat — one level only), client-sorted per
+        // the active `ThreadSort` selection.
+        for reply in viewModel.sortedReplies {
+            if case .post(let rtp) = reply {
+                result.append(FeedViewPost(post: rtp.post, reply: nil, reason: nil))
             }
         }
 
