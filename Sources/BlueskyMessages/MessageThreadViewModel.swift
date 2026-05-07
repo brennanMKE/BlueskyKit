@@ -55,6 +55,26 @@ public final class MessageThreadViewModel {
         await store.deleteMessage(messageId, convoId: convoId)
     }
 
+    /// Add an emoji reaction to a message (`chat.bsky.convo.addReaction`). The
+    /// store performs an optimistic update and rolls back on failure. Returns
+    /// `true` on success.
+    @discardableResult
+    public func addReaction(messageID: String, emoji: String) async -> Bool {
+        await store.addReaction(messageId: messageID, emoji: emoji, viewerDID: viewerDID, convoId: convoId)
+    }
+
+    /// Remove the caller's own emoji reaction from a message
+    /// (`chat.bsky.convo.removeReaction`). Optimistic, with rollback on failure.
+    @discardableResult
+    public func removeReaction(messageID: String, emoji: String) async -> Bool {
+        await store.removeReaction(messageId: messageID, emoji: emoji, viewerDID: viewerDID, convoId: convoId)
+    }
+
+    /// Caller's DID — exposed so the UI can mark "your" reaction in the
+    /// reaction strip without re-deriving it from `isOwn(_:)`. Optional because
+    /// preview/no-session contexts may construct the view model without one.
+    public var viewerDIDPublic: DID? { viewerDID }
+
     /// Mark the unread-state cleared. Called when the user scrolls back to the
     /// bottom of the thread or taps the "Jump to newest" pill.
     public func clearUnread() {

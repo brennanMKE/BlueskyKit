@@ -122,6 +122,11 @@ public struct MessageView: Codable, Sendable {
     public let embed: EmbedView?
     public let sender: MessageSender
     public let sentAt: Date
+    /// Per-message emoji reactions (`chat.bsky.convo.defs#messageView.reactions`).
+    /// Optional — the server omits the array entirely when no one has reacted.
+    /// RN reference: `state/messages/convo/agent.ts` (`addReaction` /
+    /// `removeReaction`) reads and mutates `prevMessage.reactions`.
+    public let reactions: [ReactionView]?
 
     public init(
         id: String,
@@ -129,7 +134,8 @@ public struct MessageView: Codable, Sendable {
         text: String,
         embed: EmbedView?,
         sender: MessageSender,
-        sentAt: Date
+        sentAt: Date,
+        reactions: [ReactionView]? = nil
     ) {
         self.id = id
         self.rev = rev
@@ -137,6 +143,7 @@ public struct MessageView: Codable, Sendable {
         self.embed = embed
         self.sender = sender
         self.sentAt = sentAt
+        self.reactions = reactions
     }
 }
 
@@ -146,6 +153,86 @@ public struct MessageSender: Codable, Sendable {
 
     public init(did: DID) {
         self.did = did
+    }
+}
+
+// MARK: - chat.bsky.convo.defs#reactionView
+
+/// A single emoji reaction on a message
+/// (`chat.bsky.convo.defs#reactionView`). Multiple reactions with the same
+/// `value` from different senders are kept as separate entries — the UI groups
+/// them by value when rendering the strip.
+public struct ReactionView: Codable, Sendable, Hashable {
+    /// The emoji grapheme — RN treats this as a single grapheme; we don't
+    /// validate length here so we round-trip whatever the server sent.
+    public let value: String
+    /// The user who reacted. Only `did` is populated by the server here; full
+    /// profile resolution requires a separate lookup.
+    public let sender: ReactionSender
+    /// Server-issued reaction creation timestamp.
+    public let createdAt: Date
+
+    public init(value: String, sender: ReactionSender, createdAt: Date) {
+        self.value = value
+        self.sender = sender
+        self.createdAt = createdAt
+    }
+}
+
+/// The sender reference inside a `ReactionView`
+/// (`chat.bsky.convo.defs#reactionViewSender`). Mirrors `MessageSender` but is
+/// kept distinct so the lexicons stay 1:1 with the upstream defs in case the
+/// server adds fields to either side.
+public struct ReactionSender: Codable, Sendable, Hashable {
+    public let did: DID
+
+    public init(did: DID) {
+        self.did = did
+    }
+}
+
+// MARK: - chat.bsky.convo.addReaction / removeReaction
+
+/// Request body for `chat.bsky.convo.addReaction`. RN reference:
+/// `state/messages/convo/agent.ts#addReaction` — the agent posts
+/// `{messageId, value, convoId}` and receives back the updated `MessageView`
+/// (with the new reaction included) inside `data.message`.
+public struct AddReactionRequest: Encodable, Sendable {
+    public let convoId: String
+    public let messageId: String
+    public let value: String
+
+    public init(convoId: String, messageId: String, value: String) {
+        self.convoId = convoId
+        self.messageId = messageId
+        self.value = value
+    }
+}
+
+/// Request body for `chat.bsky.convo.removeReaction`. Same shape as
+/// `AddReactionRequest` — the value identifies which reaction (per
+/// `(sender, value)`) to remove for the calling user. Server returns the
+/// updated `MessageView`.
+public struct RemoveReactionRequest: Encodable, Sendable {
+    public let convoId: String
+    public let messageId: String
+    public let value: String
+
+    public init(convoId: String, messageId: String, value: String) {
+        self.convoId = convoId
+        self.messageId = messageId
+        self.value = value
+    }
+}
+
+/// Response wrapper for both `addReaction` and `removeReaction` — both return
+/// `{message: MessageView}` so the client can replace its local copy with the
+/// server-of-record version (including the recomputed `reactions` array).
+public struct ReactionResponse: Decodable, Sendable {
+    public let message: MessageView
+
+    public init(message: MessageView) {
+        self.message = message
     }
 }
 

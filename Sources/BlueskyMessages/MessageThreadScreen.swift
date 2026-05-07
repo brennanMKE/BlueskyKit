@@ -162,8 +162,17 @@ public struct MessageThreadScreen: View {
                                     ? Self.bubbleTimestamp(for: message.sentAt, now: Date())
                                     : nil,
                                 senderProfile: senderProfile(for: message),
+                                viewerDID: viewerDID,
                                 onDeleteRequested: { pendingDeleteMessage = message },
-                                onPostTap: onPostTap
+                                onPostTap: onPostTap,
+                                onAddReaction: { emoji in
+                                    let id = message.id
+                                    Task { await viewModel.addReaction(messageID: id, emoji: emoji) }
+                                },
+                                onRemoveReaction: { emoji in
+                                    let id = message.id
+                                    Task { await viewModel.removeReaction(messageID: id, emoji: emoji) }
+                                }
                             )
                             .id(message.id)
                         }
@@ -479,6 +488,11 @@ private struct MessageBubble: View {
     /// when `isLastInRun` is true (parent decides). `nil` suppresses the row.
     var timestampLabel: String? = nil
     var senderProfile: ProfileBasic? = nil
+    /// The signed-in user's DID. Used to highlight the viewer's own reaction
+    /// pills in the strip and to short-circuit a tap on one of those pills to
+    /// `onRemoveReaction` instead of `onAddReaction`. RN parity: `MessageItem`
+    /// uses `currentAccount?.did` for the same purpose.
+    var viewerDID: DID? = nil
     /// Invoked when the user picks "Delete for me" from the context menu.
     /// The parent screen owns the confirmation prompt and the actual delete
     /// call; this closure simply surfaces the request upwards.
@@ -488,9 +502,26 @@ private struct MessageBubble: View {
     /// destination so the existing `ThreadView` push reuses the same plumbing
     /// as feed/profile post taps.
     var onPostTap: ((ATURI) -> Void)? = nil
+    /// Invoked with the emoji the viewer chose from the quick picker (or
+    /// tapped on an existing pill they had not yet reacted with).
+    var onAddReaction: ((String) -> Void)? = nil
+    /// Invoked when the viewer taps the pill carrying their own reaction —
+    /// tapping it again is the documented "remove" affordance in RN.
+    var onRemoveReaction: ((String) -> Void)? = nil
 
     /// Whether the system Translate sheet is currently presented for this bubble.
     @State private var isTranslating: Bool = false
+
+    /// Whether the small reactions popover is currently presented above the
+    /// bubble. Driven by the "React" item in the context menu. The popover is
+    /// the SwiftUI analogue of RN's `EmojiReactionPicker` — a horizontal row
+    /// of common emoji that adds the chosen reaction on tap. The full system
+    /// emoji picker is intentionally deferred (see issue 0110 Gotchas).
+    @State private var isShowingReactionPicker: Bool = false
+
+    /// RN's quick-react row in `EmojiReactionPicker.tsx`. We keep the same
+    /// five-emoji set so the picker feels familiar to existing users.
+    private static let quickReactions: [String] = ["👍", "😆", "❤️", "👀", "😢"]
 
     /// System link opener — used to launch link-card URLs from `external`
     /// embeds. Mirrors RN's behaviour of handing off external links to the
@@ -570,6 +601,13 @@ private struct MessageBubble: View {
                         .background(isOwn ? Color.accentColor : Color.secondary.opacity(0.15),
                                     in: RoundedRectangle(cornerRadius: 16))
                 }
+                // Reaction strip — RN renders this immediately under the
+                // bubble (`MessageItem.tsx#appliedReactions`). One pill per
+                // unique emoji with a count; the viewer's own reactions get a
+                // stronger background and tapping one removes the reaction.
+                if let groups = groupedReactions, !groups.isEmpty {
+                    reactionStrip(groups)
+                }
                 // Per-message timestamp — RN renders it beneath the *last*
                 // bubble in a same-sender cluster (see MessageItem.tsx →
                 // `effectiveLastInCluster && <MessageItemMetadata …/>`).
@@ -586,18 +624,31 @@ private struct MessageBubble: View {
             if !isOwn { Spacer(minLength: 60) }
         }
         // Per-message context menu — long-press on iOS, right-click on macOS.
-        // Mirrors RN's `MessageContextMenu.tsx` ordering: Translate, Copy,
-        // (divider), Delete, Report. Reactions are deferred to #0110; the
-        // message-subject Report wiring is deferred (`ReportDialog` does not
-        // accept a chat-message subject yet — see issue Gotchas).
+        // Mirrors RN's `MessageContextMenu.tsx` ordering: React, Translate,
+        // Copy, (divider), Delete, Report. The message-subject Report wiring
+        // remains deferred (see issue 0106 Gotchas).
         .contextMenu {
             messageContextMenu
+        }
+        .popover(isPresented: $isShowingReactionPicker, arrowEdge: .bottom) {
+            reactionQuickPicker
         }
         .translationPresentation(isPresented: $isTranslating, text: message.text)
     }
 
     @ViewBuilder
     private var messageContextMenu: some View {
+        // RN parity: the per-message context menu opens with a "React"
+        // affordance that anchors a horizontal emoji row above the bubble.
+        // We can't render a custom popover *inside* a SwiftUI context menu, so
+        // selecting "React" toggles the bubble's own popover state — the
+        // context menu auto-dismisses and the picker takes its place.
+        Button {
+            isShowingReactionPicker = true
+        } label: {
+            Label("React", systemImage: "face.smiling")
+        }
+
         if !message.text.isEmpty {
             Button {
                 isTranslating = true
@@ -622,6 +673,127 @@ private struct MessageBubble: View {
             }
         }
         // Report wiring is deferred — see issue 0106 Gotchas.
+    }
+
+    /// Quick emoji picker presented as a popover above the bubble. Mirrors
+    /// RN's `EmojiReactionPicker` quick row (the same five emoji), tapping any
+    /// of them adds the reaction and dismisses the popover. The "More"
+    /// affordance that opens the full system emoji picker is intentionally
+    /// deferred — RN has it; we ship the quick row only this pass.
+    @ViewBuilder
+    private var reactionQuickPicker: some View {
+        HStack(spacing: 6) {
+            ForEach(Self.quickReactions, id: \.self) { emoji in
+                let alreadyReacted = viewerHasReacted(with: emoji)
+                Button {
+                    isShowingReactionPicker = false
+                    if alreadyReacted {
+                        onRemoveReaction?(emoji)
+                    } else {
+                        onAddReaction?(emoji)
+                    }
+                } label: {
+                    Text(emoji)
+                        .font(.system(size: 28))
+                        .frame(width: 40, height: 40)
+                        .background(
+                            Circle()
+                                .fill(alreadyReacted
+                                      ? Color.accentColor.opacity(0.18)
+                                      : Color.clear)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(alreadyReacted
+                                    ? "Remove \(emoji) reaction"
+                                    : "React with \(emoji)")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .presentationCompactAdaptation(.popover)
+    }
+
+    /// Pre-grouped reaction tally for the strip. Returns `nil` when the
+    /// message has no reactions so callers can early-out without rendering an
+    /// empty container. Order is by first-seen — RN groups by encounter order
+    /// in `MessageItem.tsx#groupedReactions` so we match that.
+    private var groupedReactions: [(value: String, count: Int, viewerReacted: Bool)]? {
+        guard let reactions = message.reactions, !reactions.isEmpty else { return nil }
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        var byViewer: [String: Bool] = [:]
+        for r in reactions {
+            if counts[r.value] == nil {
+                order.append(r.value)
+                byViewer[r.value] = false
+            }
+            counts[r.value, default: 0] += 1
+            if let viewerDID, r.sender.did == viewerDID {
+                byViewer[r.value] = true
+            }
+        }
+        return order.map { v in
+            (value: v, count: counts[v] ?? 0, viewerReacted: byViewer[v] ?? false)
+        }
+    }
+
+    private func viewerHasReacted(with emoji: String) -> Bool {
+        guard let viewerDID, let reactions = message.reactions else { return false }
+        return reactions.contains { $0.value == emoji && $0.sender.did == viewerDID }
+    }
+
+    /// Horizontal pill row of grouped reactions, anchored to the bubble side
+    /// (right for own messages, left for others). Tapping a pill the viewer
+    /// already reacted with removes the reaction; tapping any other pill adds
+    /// the viewer's reaction with that emoji. RN parity: `MessageItem.tsx#appliedReactions`.
+    @ViewBuilder
+    private func reactionStrip(_ groups: [(value: String, count: Int, viewerReacted: Bool)]) -> some View {
+        HStack(spacing: 4) {
+            ForEach(groups, id: \.value) { group in
+                Button {
+                    if group.viewerReacted {
+                        onRemoveReaction?(group.value)
+                    } else {
+                        onAddReaction?(group.value)
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(group.value)
+                            .font(.system(size: 13))
+                        if group.count > 1 {
+                            Text("\(group.count)")
+                                .font(.caption2.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(group.viewerReacted
+                                                 ? Color.accentColor
+                                                 : Color.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(group.viewerReacted
+                                  ? Color.accentColor.opacity(0.18)
+                                  : Color.secondary.opacity(0.15))
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(group.viewerReacted
+                                          ? Color.accentColor.opacity(0.5)
+                                          : Color.secondary.opacity(0.25),
+                                          lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(group.viewerReacted
+                                    ? "You reacted \(group.value), \(group.count) total. Tap to remove."
+                                    : "\(group.value), \(group.count). Tap to react.")
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 2)
     }
 
     private func copyToPasteboard(_ text: String) {
