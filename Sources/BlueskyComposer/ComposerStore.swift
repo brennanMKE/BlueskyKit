@@ -91,10 +91,20 @@ public enum ThreadgateAllowSelection: Sendable, Equatable {
 public struct VideoAttachment: Sendable {
     public let data: Data
     public let mimeType: String
+    /// Alt text describing the video. Defaults to empty.
+    ///
+    /// RN models this as `media.video.altText` and consults it both for the
+    /// "alt text required" gate (see `ComposerViewModel.altTextWarning`) and
+    /// the `app.bsky.embed.video.alt` field on submit. The composer doesn't
+    /// yet ship a UI for editing this — see #0103 — but the field is here so
+    /// the require-alt-text warning can apply uniformly across images, GIFs,
+    /// and video, matching RN's `Composer.tsx#missingAltError`.
+    public var altText: String
 
-    public init(data: Data, mimeType: String) {
+    public init(data: Data, mimeType: String, altText: String = "") {
         self.data = data
         self.mimeType = mimeType
+        self.altText = altText
     }
 }
 

@@ -66,7 +66,8 @@ public struct ComposerSheet: View {
         replyToView: PostView? = nil,
         quotedPost: PostRef? = nil,
         quotedPostView: PostView? = nil,
-        initialAttachmentSource: ComposerInitialAttachmentSource = .none
+        initialAttachmentSource: ComposerInitialAttachmentSource = .none,
+        preferences: (any PreferencesStore)? = nil
     ) {
         _viewModel = State(wrappedValue: ComposerViewModel(
             network: network,
@@ -74,7 +75,8 @@ public struct ComposerSheet: View {
             replyTo: replyTo,
             replyToView: replyToView,
             quotedPost: quotedPost,
-            quotedPostView: quotedPostView
+            quotedPostView: quotedPostView,
+            preferences: preferences
         ))
         self.initialAttachmentSource = initialAttachmentSource
     }
@@ -100,6 +102,7 @@ public struct ComposerSheet: View {
                     imageGrid
                     videoPreview
                     gifPreview
+                    altTextReminder
                     mediaToolbar
                     // Thread posts
                     threadPosts
@@ -465,6 +468,34 @@ public struct ComposerSheet: View {
                 .buttonStyle(.plain)
             }
             .padding(.top, 8)
+        }
+    }
+
+    // MARK: - Alt-text-required reminder
+
+    /// Red `Admonition`-style banner shown above the toolbar when the
+    /// "Require Alt Text" preference is on AND any attached media is
+    /// missing alt text. Mirrors RN's `AltTextReminder` in
+    /// `view/com/composer/Composer.tsx` (which wraps the same copy in
+    /// `<Admonition type="error">`). The Post button is concurrently
+    /// disabled via `viewModel.canPost` while this banner is visible.
+    @ViewBuilder
+    private var altTextReminder: some View {
+        if let warning = viewModel.altTextWarning {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .foregroundStyle(Color.red)
+                Text(warning)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            .padding(.top, 8)
+            .accessibilityElement(children: .combine)
         }
     }
 

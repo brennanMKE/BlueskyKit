@@ -97,12 +97,43 @@ public final class ComposerViewModel {
 
     public var additionalPosts: [String] = []
 
+    // MARK: - Accessibility — require alt text
+
+    /// `true` when the user has enabled "Require Alt Text" in
+    /// Settings → Accessibility. Read once at composer construction time
+    /// (matching RN's `useRequireAltTextEnabled()` hook usage in
+    /// `view/com/composer/Composer.tsx`, which is read at the top of the
+    /// component and held for the compose session).
+    public var requireAltText: Bool
+
+    /// Mirrors RN's `missingAltError` (see
+    /// `Bluesky-ReactNative/src/view/com/composer/Composer.tsx` — the
+    /// `useMemo` block around `requireAltTextEnabled`). Returns the warning
+    /// copy when the preference is on AND any attached media is missing
+    /// alt text; otherwise `nil`. The exact strings match RN.
+    public var altTextWarning: String? {
+        guard requireAltText else { return nil }
+        if !images.isEmpty, images.contains(where: { $0.altText.isEmpty }) {
+            return "One or more images is missing alt text."
+        }
+        if let gif = selectedGIF, gif.altText.isEmpty {
+            return "One or more GIFs is missing alt text."
+        }
+        if let video = attachedVideo, video.altText.isEmpty {
+            return "One or more videos is missing alt text."
+        }
+        return nil
+    }
+
     // MARK: - Derived
 
     public var characterCount: Int { text.unicodeScalars.count }
     public var isOverLimit: Bool { characterCount > 300 }
     public var canPost: Bool {
-        !text.trimmingCharacters(in: .whitespaces).isEmpty && !isOverLimit && !isPosting
+        !text.trimmingCharacters(in: .whitespaces).isEmpty
+            && !isOverLimit
+            && !isPosting
+            && altTextWarning == nil
     }
 
     // MARK: - Draft key
@@ -151,7 +182,8 @@ public final class ComposerViewModel {
         replyToView: PostView? = nil,
         quotedPost: PostRef? = nil,
         quotedPostView: PostView? = nil,
-        draftsStore: (any DraftsStoring)? = nil
+        draftsStore: (any DraftsStoring)? = nil,
+        preferences: (any PreferencesStore)? = nil
     ) {
         self.store = ComposerStore(network: network, accountStore: accountStore)
         self.replyTo = replyTo
@@ -159,8 +191,39 @@ public final class ComposerViewModel {
         self.quotedPost = quotedPost
         self.quotedPostView = quotedPostView
         self.draftsStore = draftsStore ?? UserDefaultsDraftsStore()
+        self.requireAltText = Self.loadRequireAltText(from: preferences)
         // Restore saved draft
         self.text = UserDefaults.standard.string(forKey: draftKey) ?? ""
+    }
+
+    /// Read the "Require Alt Text" preference once at composer construction.
+    ///
+    /// Prefers the injected `PreferencesStore` so previews / tests can stub
+    /// it. When no store is injected (the existing call sites that don't yet
+    /// thread `BlueskyEnvironment` through), we fall back to reading the
+    /// same JSON-encoded key directly from `UserDefaults.standard` —
+    /// `UserDefaultsPreferencesStore` writes to `.standard` defaults via
+    /// `JSONEncoder().encode(value)`, so a `Data` decode of `Bool.self`
+    /// produces the same value the settings screen wrote. Any read failure
+    /// (corruption, type drift) falls back to `false`, matching the
+    /// preference's default value in `SettingsViewModel`.
+    private static func loadRequireAltText(from preferences: (any PreferencesStore)?) -> Bool {
+        let key = "settings.altTextRequired"
+        if let preferences {
+            do {
+                return try preferences.get(Bool.self, for: key) ?? false
+            } catch {
+                logger.warning("Could not read requireAltText from PreferencesStore: \(error.localizedDescription, privacy: .public). Defaulting to false.")
+                return false
+            }
+        }
+        guard let data = UserDefaults.standard.data(forKey: key) else { return false }
+        do {
+            return try JSONDecoder().decode(Bool.self, from: data)
+        } catch {
+            logger.warning("Could not decode requireAltText from UserDefaults: \(error.localizedDescription, privacy: .public). Defaulting to false.")
+            return false
+        }
     }
 
     // MARK: - Post
