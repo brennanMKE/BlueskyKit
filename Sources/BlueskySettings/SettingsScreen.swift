@@ -11,6 +11,7 @@ public struct SettingsScreen: View {
     @State private var viewModel: SettingsViewModel
     @Environment(\.openURL) private var openURL
     private let network: any NetworkClient
+    private let cache: (any CacheStore)?
     private let currentAccount: Account?
     private let onModerationTap: (() -> Void)?
     private let onSignOut: () -> Void
@@ -25,6 +26,7 @@ public struct SettingsScreen: View {
         preferences: any PreferencesStore,
         accountStore: any AccountStore,
         network: any NetworkClient,
+        cache: (any CacheStore)? = nil,
         currentAccount: Account? = nil,
         onModerationTap: (() -> Void)? = nil,
         onSignOut: @escaping () -> Void,
@@ -32,6 +34,7 @@ public struct SettingsScreen: View {
     ) {
         _viewModel = State(initialValue: SettingsViewModel(preferences: preferences, accountStore: accountStore))
         self.network = network
+        self.cache = cache
         self.currentAccount = currentAccount
         self.onModerationTap = onModerationTap
         self.onSignOut = onSignOut
@@ -135,7 +138,7 @@ public struct SettingsScreen: View {
                 .accessibilityHint(Text("Opens helpdesk in browser"))
 
                 NavigationLink {
-                    AboutScreen()
+                    AboutScreen(cache: cache, currentAccount: currentAccount)
                 } label: {
                     Label("About", systemImage: "info.circle")
                 }
