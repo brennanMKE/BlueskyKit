@@ -51,6 +51,12 @@ public struct ComposerSheet: View {
     /// Drives the GIF picker (Tenor) presentation. Mirrors RN's
     /// `SelectGifBtn` dialog control.
     @State private var showGIFPicker = false
+    /// Drives the drafts list sheet. Mirrors RN's `DraftsListDialog` control.
+    @State private var showDraftsSheet = false
+    /// Drives the "Save draft / Discard / Cancel" confirmation dialog when
+    /// the user taps Cancel with non-empty composer state. Mirrors RN's
+    /// `savePromptControl` in `DraftsButton.tsx`.
+    @State private var showCancelPrompt = false
     private let initialAttachmentSource: ComposerInitialAttachmentSource
 
     public init(
@@ -110,18 +116,54 @@ public struct ComposerSheet: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Post") {
-                        Task {
-                            await viewModel.post()
-                            if viewModel.didPost { dismiss() }
+                    Button("Cancel") {
+                        if viewModel.hasDraftableContent {
+                            showCancelPrompt = true
+                        } else {
+                            dismiss()
                         }
                     }
-                    .disabled(!viewModel.canPost)
-                    .fontWeight(.semibold)
                 }
+                ToolbarItem(placement: .confirmationAction) {
+                    HStack(spacing: 12) {
+                        draftsButton
+                        Button("Post") {
+                            Task {
+                                await viewModel.post()
+                                if viewModel.didPost { dismiss() }
+                            }
+                        }
+                        .disabled(!viewModel.canPost)
+                        .fontWeight(.semibold)
+                    }
+                }
+            }
+            .sheet(isPresented: $showDraftsSheet) {
+                DraftsSheet(store: viewModel.draftsStore) { draft in
+                    viewModel.loadDraft(draft)
+                }
+                #if os(macOS)
+                .frame(minWidth: 480, minHeight: 560)
+                #endif
+            }
+            .confirmationDialog(
+                "You have unsaved changes",
+                isPresented: $showCancelPrompt,
+                titleVisibility: .visible
+            ) {
+                Button("Save Draft") {
+                    Task {
+                        await viewModel.saveCurrentAsDraft()
+                        dismiss()
+                    }
+                }
+                Button("Discard", role: .destructive) {
+                    viewModel.discardCurrentContent()
+                    dismiss()
+                }
+                Button("Keep Editing", role: .cancel) {}
+            } message: {
+                Text("Save this post as a draft, or discard your changes?")
             }
             .alert("Post failed", isPresented: Binding(
                 get: { viewModel.errorMessage != nil },
@@ -563,6 +605,27 @@ public struct ComposerSheet: View {
         .padding(.top, 8)
         .accessibilityLabel(viewModel.hasInteractionRestrictions ? "Interaction limited" : "Anyone can interact")
         .accessibilityHint("Opens a dialog to choose who can reply to and quote this post")
+    }
+
+    /// Drafts button in the top toolbar, mirroring RN's `DraftsButton.tsx`
+    /// (sits to the left of the Post button). Tapping presents
+    /// `DraftsSheet`. The icon is `tray.full` — closer to RN's "tray of
+    /// drafts" mental model than the SF-symbol "doc.on.doc" alternative.
+    /// Accessibility label is the explicit word "Drafts" because the icon is
+    /// not unambiguous to a VoiceOver user.
+    private var draftsButton: some View {
+        Button {
+            #if os(iOS)
+            dismissKeyboard()
+            #endif
+            showDraftsSheet = true
+        } label: {
+            Image(systemName: "tray.full")
+                .imageScale(.medium)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Drafts")
+        .accessibilityHint("View and manage saved drafts")
     }
 
     /// GIF picker button mirroring RN's `SelectGifBtn`. RN uses a custom

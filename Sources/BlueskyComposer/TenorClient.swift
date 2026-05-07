@@ -11,7 +11,7 @@ private nonisolated let logger = Logger(
 /// A single GIF result from Tenor's v2 API. Field shape mirrors the v2
 /// envelope (`https://developers.google.com/tenor/guides/response-objects-and-errors`)
 /// — only the fields the composer renders or posts are decoded.
-public struct TenorGif: Decodable, Sendable, Identifiable, Equatable {
+public struct TenorGif: Codable, Sendable, Identifiable, Equatable {
     public let id: String
     public let title: String?
     public let contentDescription: String?
@@ -57,7 +57,7 @@ public struct TenorGif: Decodable, Sendable, Identifiable, Equatable {
     }
 }
 
-public struct TenorMediaFormats: Decodable, Sendable, Equatable {
+public struct TenorMediaFormats: Codable, Sendable, Equatable {
     public let gif: TenorMediaObject
     public let tinygif: TenorMediaObject
     public let preview: TenorMediaObject?
@@ -69,7 +69,7 @@ public struct TenorMediaFormats: Decodable, Sendable, Equatable {
     }
 }
 
-public struct TenorMediaObject: Decodable, Sendable, Equatable {
+public struct TenorMediaObject: Codable, Sendable, Equatable {
     public let url: String
     public let dims: [Int]
     public let size: Int?

@@ -114,6 +114,32 @@ public final class ComposerViewModel {
         return "composer.draft.text"
     }
 
+    // MARK: - Drafts list
+
+    /// User-facing drafts list (the "Drafts" button + sheet). Backed by a
+    /// `DraftsStoring` so previews and tests can substitute a mock store.
+    /// Distinct from the legacy single-slot auto-save under `draftKey` — the
+    /// auto-save remains in place to handle force-quits, while the drafts
+    /// list is populated explicitly via `saveCurrentAsDraft`.
+    public var draftsStore: any DraftsStoring
+
+    /// `true` when the composer was opened from a draft and should overwrite
+    /// it on save (rather than appending a new entry). Set by
+    /// `loadDraft(_:)`.
+    public var editingDraftID: UUID?
+
+    /// Returns `true` when there's any state worth saving as a draft.
+    public var hasDraftableContent: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !images.isEmpty
+            || attachedVideo != nil
+            || selectedGIF != nil
+            || !additionalPosts.allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            || !selectedLabels.isEmpty
+            || !threadgateAllow.isDefault
+            || !quotesEnabled
+    }
+
     // MARK: - Store
 
     private let store: any ComposerStoring
@@ -124,13 +150,15 @@ public final class ComposerViewModel {
         replyTo: PostRef? = nil,
         replyToView: PostView? = nil,
         quotedPost: PostRef? = nil,
-        quotedPostView: PostView? = nil
+        quotedPostView: PostView? = nil,
+        draftsStore: (any DraftsStoring)? = nil
     ) {
         self.store = ComposerStore(network: network, accountStore: accountStore)
         self.replyTo = replyTo
         self.replyToView = replyToView
         self.quotedPost = quotedPost
         self.quotedPostView = quotedPostView
+        self.draftsStore = draftsStore ?? UserDefaultsDraftsStore()
         // Restore saved draft
         self.text = UserDefaults.standard.string(forKey: draftKey) ?? ""
     }
@@ -157,6 +185,13 @@ public final class ComposerViewModel {
         )
         if store.didPost {
             clearDraft()
+            // If this compose session originated from a saved draft, drop
+            // that draft from the drafts list now that the post has gone
+            // out — matches RN's `deleteDraftAfterPost` behavior.
+            if let editingDraftID {
+                await draftsStore.delete(editingDraftID)
+            }
+            editingDraftID = nil
             // Reset transient state so the sheet closes cleanly without leaking
             // composed content into the next session. Importantly, clear `text`
             // BEFORE the sheet's onChange/onDisappear hooks fire — otherwise
@@ -325,6 +360,87 @@ public final class ComposerViewModel {
 
     public func clearDraft() {
         UserDefaults.standard.removeObject(forKey: draftKey)
+    }
+
+    // MARK: - Drafts list
+
+    /// Persist the current composer state as an entry in the drafts list.
+    /// Overwrites the existing draft when `editingDraftID` is set (the user
+    /// opened the composer from the drafts list); otherwise appends a new
+    /// draft. Image bytes are intentionally not persisted — see #0100
+    /// Gotchas.
+    public func saveCurrentAsDraft() async {
+        let now = Date()
+        let id = editingDraftID ?? UUID()
+        let createdAt: Date
+        if let editingDraftID {
+            // Preserve the original creation time when editing.
+            let existing = await draftsStore.loadAll().first(where: { $0.id == editingDraftID })
+            createdAt = existing?.createdAt ?? now
+        } else {
+            createdAt = now
+        }
+        let draft = Draft(
+            id: id,
+            text: text,
+            createdAt: createdAt,
+            updatedAt: now,
+            replyTo: replyTo?.uri,
+            quotedPostURI: quotedPost?.uri,
+            selectedLanguages: [selectedLanguage],
+            selfLabels: selectedLabels,
+            threadgateAllow: ThreadgateAllowSelectionSnapshot(from: threadgateAllow),
+            quotesEnabled: quotesEnabled,
+            imagePreviews: nil, // image persistence deferred — see #0100 Gotchas
+            selectedGIF: selectedGIF,
+            additionalPosts: nil // thread-draft persistence deferred — see #0100 Gotchas
+        )
+        await draftsStore.save(draft)
+        editingDraftID = id
+    }
+
+    /// Hydrate the composer from a saved draft entry. Mirrors RN's
+    /// `useSelectDraftMutation` flow: replace the visible composer state
+    /// outright (the user opened a draft to keep working on it). Image
+    /// attachments are not restored — see #0100 Gotchas.
+    public func loadDraft(_ draft: Draft) {
+        text = draft.text
+        selectedLanguage = draft.selectedLanguages.first ?? "en"
+        selectedLabels = draft.selfLabels
+        threadgateAllow = draft.threadgateAllow.toSelection()
+        quotesEnabled = draft.quotesEnabled
+        selectedGIF = draft.selectedGIF
+        editingDraftID = draft.id
+        // Drafts intentionally don't persist image attachments yet, so we
+        // clear any current ones rather than mixing draft state with stray
+        // images from the prior compose session.
+        images = []
+        attachedVideo = nil
+        additionalPosts = []
+        linkCardDismissed = false
+        detectedURL = nil
+        linkMetadata = nil
+        // Re-detect URLs in the restored text so the link card can rebuild.
+        onTextChange()
+    }
+
+    /// Clear the in-progress composer state without persisting anything.
+    /// Used when the user picks "Discard" from the cancel-with-content
+    /// prompt.
+    public func discardCurrentContent() {
+        text = ""
+        images = []
+        attachedVideo = nil
+        selectedGIF = nil
+        additionalPosts = []
+        selectedLabels = []
+        threadgateAllow = .everyone
+        quotesEnabled = true
+        linkCardDismissed = false
+        detectedURL = nil
+        linkMetadata = nil
+        clearDraft()
+        editingDraftID = nil
     }
 
     public func clearError() {
