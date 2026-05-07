@@ -547,10 +547,16 @@ public struct GetMessagesResponse: Codable, Sendable {
 public struct MessageInput: Encodable, Sendable {
     public let text: String
     public let embed: Embed?
+    /// Byte-range annotations (mentions, links, hashtags) over `text`.
+    /// Mirrors `chat.bsky.convo.defs#messageInput.facets` in the lexicon.
+    /// Encoded only when non-empty so a plain-text DM still serializes
+    /// without an empty `facets` array.
+    public let facets: [RichTextFacet]?
 
-    public init(text: String, embed: Embed? = nil) {
+    public init(text: String, embed: Embed? = nil, facets: [RichTextFacet]? = nil) {
         self.text = text
         self.embed = embed
+        self.facets = (facets?.isEmpty == true) ? nil : facets
     }
 }
 

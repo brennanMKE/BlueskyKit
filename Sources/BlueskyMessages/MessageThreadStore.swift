@@ -107,10 +107,17 @@ public final class MessageThreadStore: MessageThreadStoring {
         guard !trimmed.isEmpty, !isSending else { return }
         isSending = true
         defer { isSending = false }
+        // Build facets before sending so mentions, links, and hashtags
+        // come through as tappable pills/links on the recipient side. Mirrors
+        // RN's `MessagesList.tsx#onSendMessage` which runs `RichText` +
+        // `detectFacets` over the text before calling `convoState.sendMessage`.
+        // `buildAsync` runs `resolveHandle` for each `@handle`; handles that
+        // fail to resolve are silently dropped (RN's `stripInvalidMentions`).
+        let facets = await FacetBuilder.buildAsync(from: trimmed, network: network)
         do {
             let req = SendMessageRequest(
                 convoId: convoId,
-                message: MessageInput(text: trimmed)
+                message: MessageInput(text: trimmed, facets: facets)
             )
             let sent: MessageView = try await network.post(
                 lexicon: "chat.bsky.convo.sendMessage", body: req
