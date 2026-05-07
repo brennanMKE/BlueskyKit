@@ -81,7 +81,7 @@ public struct SettingsScreen: View {
                 }
 
                 NavigationLink {
-                    ContentSettingsScreen(viewModel: viewModel)
+                    ContentSettingsScreen(viewModel: viewModel, network: network)
                 } label: {
                     Label("Content & Media", systemImage: "photo.on.rectangle")
                 }

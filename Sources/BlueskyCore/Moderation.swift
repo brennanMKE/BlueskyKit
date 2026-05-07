@@ -117,6 +117,38 @@ public struct ContentLabelPref: Sendable {
     }
 }
 
+// MARK: - app.bsky.actor.defs#threadViewPref
+
+/// User preferences for how a post's reply thread is sorted and grouped.
+///
+/// Mirrors `app.bsky.actor.defs#threadViewPref` from the AT Proto lexicon.
+/// `sort` is one of `"oldest" | "newest" | "most-likes" | "random" | "hotness"`
+/// — RN treats the value as a free-form string so we keep it that way and let
+/// the UI map known values to localized labels.
+///
+/// The lexicon also carries an optional `prioritizeFollowedUsers: Bool` flag
+/// that the appview honors when ordering replies. RN's *current* Settings →
+/// Thread Preferences screen exposes only the sort radio + a tree-view toggle
+/// (the latter rides in `lab_treeViewEnabled`, deliberately *not* modeled
+/// here — it's a labs flag the SwiftUI client does not yet ship).
+public struct ThreadViewPref: Sendable, Equatable {
+    public var sort: String
+    public var prioritizeFollowedUsers: Bool
+
+    public init(sort: String, prioritizeFollowedUsers: Bool) {
+        self.sort = sort
+        self.prioritizeFollowedUsers = prioritizeFollowedUsers
+    }
+
+    /// Defaults match RN's `useThreadPreferences` fallback (`'top'`/most-likes
+    /// equivalent → `"hotness"` is server-side V2; the V1 lexicon value most
+    /// closely matching RN's "Top" radio is `"most-likes"`). RN's
+    /// `normalizeSort` collapses anything unknown to `"top"`. We keep the
+    /// canonical lexicon value here and rely on the UI to render localized
+    /// labels.
+    public static let defaultPref = ThreadViewPref(sort: "hotness", prioritizeFollowedUsers: true)
+}
+
 // MARK: - app.bsky.actor.defs#savedFeed
 
 public struct SavedFeed: Codable, Sendable, Identifiable {
@@ -143,6 +175,10 @@ public struct GetPreferencesResponse: Decodable, Sendable {
     /// one stored. Used by the Account settings hub to show / edit the user's
     /// birthday. Optional because pre-existing accounts may not have it.
     public let birthDate: Date?
+    /// `app.bsky.actor.defs#threadViewPref`, if present. The Thread
+    /// Preferences screen reads this to populate sort + prioritization rows;
+    /// `ThreadView` reads it later (#0140) to pick the default reply sort.
+    public let threadView: ThreadViewPref?
 
     private enum OuterKeys: String, CodingKey { case preferences }
 
@@ -161,9 +197,12 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             let labelerDid: DID?
             let feedItems: [FeedItemHelper]?
             let birthDate: String?
+            let sort: String?
+            let prioritizeFollowedUsers: Bool?
             private enum CodingKeys: String, CodingKey {
                 case type = "$type", enabled, label, visibility, labelerDid, birthDate
                 case feedItems = "items"
+                case sort, prioritizeFollowedUsers
             }
         }
 
@@ -192,6 +231,16 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             .first { $0.type == "app.bsky.actor.defs#personalDetailsPref" }?
             .birthDate
             .flatMap { parser.date(from: $0) }
+
+        if let pref = items.first(where: { $0.type == "app.bsky.actor.defs#threadViewPref" }) {
+            self.threadView = ThreadViewPref(
+                sort: pref.sort ?? ThreadViewPref.defaultPref.sort,
+                prioritizeFollowedUsers: pref.prioritizeFollowedUsers
+                    ?? ThreadViewPref.defaultPref.prioritizeFollowedUsers
+            )
+        } else {
+            self.threadView = nil
+        }
     }
 }
 
@@ -276,6 +325,25 @@ public struct PutPreferencesRequest: Encodable, Sendable {
             let fmt = ISO8601DateFormatter()
             try c.encode("app.bsky.actor.defs#personalDetailsPref", forKey: .type)
             try c.encode(fmt.string(from: birthDate), forKey: .birthDate)
+        }
+    }
+
+    /// Writes a `threadViewPref` carrying `sort` and `prioritizeFollowedUsers`.
+    /// Mirrors RN's `agent.setThreadViewPrefs({sort, prioritizeFollowedUsers})`
+    /// path used by `useSetThreadViewPreferencesMutation`.
+    public init(threadView: ThreadViewPref) {
+        self.preferences = [AnyEncodable(_ThreadViewPref(threadView))]
+    }
+
+    private struct _ThreadViewPref: Encodable, Sendable {
+        let pref: ThreadViewPref
+        private enum K: String, CodingKey { case type = "$type", sort, prioritizeFollowedUsers }
+        init(_ pref: ThreadViewPref) { self.pref = pref }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: K.self)
+            try c.encode("app.bsky.actor.defs#threadViewPref", forKey: .type)
+            try c.encode(pref.sort, forKey: .sort)
+            try c.encode(pref.prioritizeFollowedUsers, forKey: .prioritizeFollowedUsers)
         }
     }
 }

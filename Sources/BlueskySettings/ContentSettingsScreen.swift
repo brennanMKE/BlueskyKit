@@ -25,6 +25,16 @@ private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
 
 struct ContentSettingsScreen: View {
     @Bindable var viewModel: SettingsViewModel
+    /// Optional so existing `#Preview` and call sites that don't yet pass a
+    /// network client compile unchanged. When `nil` the Thread preferences
+    /// row is hidden; the row is otherwise the only navigation entry on this
+    /// screen.
+    let network: (any NetworkClient)?
+
+    init(viewModel: SettingsViewModel, network: (any NetworkClient)? = nil) {
+        self.viewModel = viewModel
+        self.network = network
+    }
 
     var body: some View {
         Form {
@@ -35,6 +45,18 @@ struct ContentSettingsScreen: View {
                 Text("Media")
             } footer: {
                 Text("External embeds include link cards and media from third-party sites. Disabling reduces data usage and improves privacy.")
+            }
+
+            if let network {
+                Section {
+                    NavigationLink {
+                        ThreadPreferencesScreen(network: network)
+                    } label: {
+                        Label("Thread preferences", systemImage: "bubble.left.and.bubble.right")
+                    }
+                } header: {
+                    Text("Threads")
+                }
             }
         }
         .navigationTitle("Content & Media")
