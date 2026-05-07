@@ -89,7 +89,46 @@ public struct ProfileHeaderView: View {
 
     // MARK: - Banner
 
+    /// Banner image scoped to its own row in the header `VStack`. On iOS the
+    /// row visually extends behind the top safe-area inset (status bar /
+    /// notch) without expanding the layout container itself — the `frame`
+    /// stays at `bannerHeight`, so the avatar / name / stats below stay in
+    /// the LazyVStack's safe-area-respecting bounds. macOS keeps the simpler
+    /// flat banner since there's no status-bar zone to bleed into.
+    ///
+    /// Why the GeometryReader instead of `.ignoresSafeArea(edges: .top)`?
+    /// We tried that twice and both times the leading edge of the entire
+    /// header subtree shifted ~16pt off-screen:
+    ///   - #0089: applying `.ignoresSafeArea(edges: .top)` to the banner
+    ///     while the parent ScrollView also ignored the top safe area
+    ///     pushed the `VStack(alignment: .leading)` children off the left.
+    ///     We removed the banner's modifier, leaving only the ScrollView's.
+    ///   - #0155: even with the banner-level modifier gone, the
+    ///     ScrollView-level `.ignoresSafeArea(edges: .top)` was *still*
+    ///     leaking horizontally inside the iPhone compact `NavigationStack`
+    ///     wrapped by `MainTabView`'s `safeAreaInset(edge: .top)`. Dropped
+    ///     the ScrollView modifier and moved the bleed-up here, scoped to
+    ///     just the banner image via negative top padding — the layout
+    ///     container is unaffected so nothing else shifts.
     private var bannerSection: some View {
+        #if os(iOS)
+        GeometryReader { geo in
+            let topInset = geo.safeAreaInsets.top
+            bannerContent
+                .frame(width: geo.size.width, height: bannerHeight + topInset)
+                .clipped()
+                .padding(.top, -topInset)
+        }
+        .frame(height: bannerHeight)
+        #else
+        bannerContent
+            .frame(maxWidth: .infinity)
+            .frame(height: bannerHeight)
+            .clipped()
+        #endif
+    }
+
+    private var bannerContent: some View {
         Group {
             if let bannerURL = profile?.banner {
                 AsyncImage(url: bannerURL) { phase in
@@ -104,18 +143,6 @@ public struct ProfileHeaderView: View {
                 bannerPlaceholder
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: bannerHeight)
-        .clipped()
-        // Note (#0089): the banner used to apply `.ignoresSafeArea(edges: .top)`
-        // here on iOS so it would bleed under the status bar (#0083). Since
-        // #0088, the outer `ScrollView` in `ProfileScreen` already extends
-        // behind the top safe area, so a second `ignoresSafeArea` on this
-        // child caused a layout conflict that shifted the rest of the header
-        // (avatar, name, bio, stats, known-followers chip) ~16pt off the
-        // leading edge — every line lost its first character. The bleed-up
-        // is now owned solely by the ScrollView; the banner is positioned
-        // by its parent like any other child of the LazyVStack.
     }
 
     private var bannerHeight: CGFloat {

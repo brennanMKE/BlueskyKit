@@ -65,15 +65,17 @@ public struct ProfileScreen: View {
                 }
             }
         }
-        #if os(iOS)
-        // Fix #0088: extend the ScrollView behind the top safe area so the
-        // banner (first child of `LazyVStack`) renders flush under the
-        // status bar. `ProfileHeaderView.bannerSection` already applies
-        // `.ignoresSafeArea(edges: .top)`, but a constraining parent
-        // (`MainTabView`'s NavigationStack on iOS compact) was preventing
-        // it from reaching the screen edge.
-        .ignoresSafeArea(edges: .top)
-        #endif
+        // #0155: do NOT apply `.ignoresSafeArea(edges: .top)` to this ScrollView.
+        // It used to live here from #0088 to let the banner bleed behind the
+        // status bar, but inside the iPhone compact `NavigationStack` (which is
+        // wrapped in a `safeAreaInset(edge: .top)` carrying an `EmptyView` on
+        // the Profile tab — see `MainTabView.iosCompactLayout`), `.ignoresSafeArea`
+        // here was leaking horizontally and pulling the LazyVStack ~16pt off the
+        // leading edge. Every text line, the avatar, and the tab strip all
+        // shifted left, clipping their first character / partial avatar / the
+        // Feeds tab. Instead, the bleed-up is now owned by `ProfileHeaderView`'s
+        // `bannerSection` via a `GeometryReader`-based negative top padding —
+        // see the comment there.
         .refreshable {
             await viewModel.loadProfile()
             await loadCurrentTab(selectedTab)
