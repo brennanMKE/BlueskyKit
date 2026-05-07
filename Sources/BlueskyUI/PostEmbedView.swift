@@ -41,7 +41,7 @@ public struct PostEmbedView: View {
                 quotePost(rv.record)
             }
         case .video(let video):
-            videoThumbnail(video)
+            VideoEmbedPlayer(video: video)
         case .unknown:
             EmptyView()
         }
@@ -194,30 +194,6 @@ public struct PostEmbedView: View {
         case .unknown:
             EmptyView()
         }
-    }
-
-    // MARK: - Video thumbnail
-
-    private func videoThumbnail(_ video: EmbedVideoView) -> some View {
-        ZStack {
-            if let thumb = video.thumbnail {
-                AsyncImage(url: thumb) { phase in
-                    if let img = phase.image {
-                        img.resizable().aspectRatio(contentMode: .fit)
-                    } else {
-                        Color.black.opacity(0.1)
-                    }
-                }
-            } else {
-                Color.black.opacity(0.1)
-            }
-            Image(systemName: "play.circle.fill")
-                .font(.system(size: 44))
-                .foregroundStyle(.white.opacity(0.9))
-                .shadow(radius: 4)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .frame(maxHeight: 280)
     }
 
     // MARK: - Placeholder
