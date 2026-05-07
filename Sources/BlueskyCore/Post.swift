@@ -1,5 +1,52 @@
 import Foundation
 
+// MARK: - Self labels (com.atproto.label.defs#selfLabels)
+
+/// A single self-applied label value, as embedded inside a `SelfLabels`
+/// container. AT Proto encodes this as
+/// `com.atproto.label.defs#selfLabel`. Only the `val` string is meaningful
+/// here — the issuing DID, timestamp, etc. are filled in server-side when
+/// the record is indexed.
+public struct SelfLabelValue: Codable, Hashable, Sendable {
+    /// One of the recognized self-label values, e.g. `"porn"`, `"sexual"`,
+    /// `"nudity"`, `"graphic-media"`. The set of valid values for a post
+    /// is curated in the composer UI; this type stays open so additional
+    /// vocabularies (e.g. `"!no-unauthenticated"`) can be expressed.
+    public let val: String
+
+    public init(val: String) {
+        self.val = val
+    }
+}
+
+/// A `com.atproto.label.defs#selfLabels` container, attached to a record
+/// (here, an `app.bsky.feed.post`) to declare its own moderation labels.
+/// Encoded with an explicit `$type` discriminator so the appview accepts
+/// it as a tagged union variant of the post's `labels` field.
+public struct SelfLabels: Codable, Hashable, Sendable {
+    public let values: [SelfLabelValue]
+
+    public init(values: [SelfLabelValue]) {
+        self.values = values
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "$type"
+        case values
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.values = try c.decodeIfPresent([SelfLabelValue].self, forKey: .values) ?? []
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode("com.atproto.label.defs#selfLabels", forKey: .type)
+        try c.encode(values, forKey: .values)
+    }
+}
+
 // MARK: - Post record (app.bsky.feed.post)
 
 /// The stored content of a post as written to the AT Protocol repo.
@@ -10,6 +57,12 @@ public struct PostRecord: Codable, Sendable {
     public let reply: ReplyRef?
     /// BCP-47 language codes for the post text.
     public let langs: [String]?
+    /// Self-applied moderation labels (content warnings) the author chose
+    /// to attach. Encoded as `com.atproto.label.defs#selfLabels`. `nil`
+    /// when no labels are selected — the field is omitted from the record
+    /// entirely in that case rather than being written as an empty
+    /// container.
+    public let labels: SelfLabels?
     public let createdAt: Date
 
     public init(
@@ -18,6 +71,7 @@ public struct PostRecord: Codable, Sendable {
         embed: Embed? = nil,
         reply: ReplyRef? = nil,
         langs: [String]? = nil,
+        labels: SelfLabels? = nil,
         createdAt: Date = .now
     ) {
         self.text = text
@@ -25,6 +79,7 @@ public struct PostRecord: Codable, Sendable {
         self.embed = embed
         self.reply = reply
         self.langs = langs
+        self.labels = labels
         self.createdAt = createdAt
     }
 }

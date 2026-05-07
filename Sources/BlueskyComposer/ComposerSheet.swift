@@ -42,6 +42,9 @@ public struct ComposerSheet: View {
     /// don't re-present a picker the user just dismissed.
     @State private var didTriggerInitialAttachment = false
     #endif
+    /// Drives the self-labels (content warnings) picker presentation.
+    /// Mirrors RN's `LabelsBtn` dialog control.
+    @State private var showLabelsPicker = false
     private let initialAttachmentSource: ComposerInitialAttachmentSource
 
     public init(
@@ -386,6 +389,10 @@ public struct ComposerSheet: View {
                 }
                 .padding(.top, 8)
             }
+            labelsButton
+        }
+        .sheet(isPresented: $showLabelsPicker) {
+            SelfLabelsPicker(selectedLabels: $viewModel.selectedLabels)
         }
         #elseif os(macOS)
         HStack(spacing: 16) {
@@ -409,9 +416,54 @@ public struct ComposerSheet: View {
                 .buttonStyle(.plain)
                 .padding(.top, 8)
             }
+            labelsButton
+        }
+        .popover(isPresented: $showLabelsPicker, arrowEdge: .top) {
+            SelfLabelsPicker(selectedLabels: $viewModel.selectedLabels)
+                .frame(minWidth: 320)
         }
         #endif
     }
+
+    /// Content-warning button mirroring RN's `LabelsBtn`. Renders a shield
+    /// when no labels are attached and an exclamation triangle (tinted
+    /// orange) when at least one self-label is selected, signalling the
+    /// post will carry a content warning. Tapping presents a sheet of
+    /// the four valid self-label values.
+    private var labelsButton: some View {
+        Button {
+            #if os(iOS)
+            // Match RN's `Keyboard.dismiss()` before opening the dialog
+            // so the picker isn't half-occluded by the soft keyboard.
+            dismissKeyboard()
+            #endif
+            showLabelsPicker = true
+        } label: {
+            Label(
+                viewModel.selectedLabels.isEmpty ? "Labels" : "Labels added",
+                systemImage: viewModel.selectedLabels.isEmpty
+                    ? "shield"
+                    : "exclamationmark.triangle.fill"
+            )
+            .font(.subheadline)
+            .foregroundStyle(viewModel.selectedLabels.isEmpty ? .secondary : Color.orange)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 8)
+        .accessibilityLabel("Content warnings")
+        .accessibilityHint("Opens a dialog to add a content warning to your post")
+    }
+
+    #if os(iOS)
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+    #endif
 
     #if os(macOS)
     /// macOS native image picker via NSOpenPanel. Bluesky accepts up to 4 images
@@ -610,6 +662,137 @@ private struct ImageAttachmentCell: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .padding()
+        }
+    }
+}
+
+// MARK: - Self-labels (content warning) picker
+
+/// Presents the four self-label toggles RN exposes in `LabelsBtn` /
+/// `LabelsDialog`:
+///
+///   - **Suggestive** — `sexual`
+///   - **Nudity** — `nudity`
+///   - **Adult** — `porn`
+///   - **Graphic Media** — `graphic-media`
+///
+/// RN groups the first three under "Adult Content" with single-selection
+/// semantics (`updateAdultLabels` filters out the other two before adding
+/// the new one). Graphic media sits in its own "Other" group and toggles
+/// independently. The labels list copy and the per-selection helper text
+/// are matched verbatim against RN.
+private struct SelfLabelsPicker: View {
+    @Binding var selectedLabels: Set<String>
+    @Environment(\.dismiss) private var dismiss
+
+    private static let adultLabels: Set<String> = ["sexual", "nudity", "porn"]
+
+    private var adultSelection: String? {
+        selectedLabels.first(where: { Self.adultLabels.contains($0) })
+    }
+
+    private var hasGraphicMedia: Bool {
+        selectedLabels.contains("graphic-media")
+    }
+
+    private func selectAdult(_ value: String) {
+        // Mirror RN's `updateAdultLabels`: only one of the three may be
+        // selected at a time. Tapping the currently selected row clears
+        // the adult-content selection entirely.
+        let alreadyOn = selectedLabels.contains(value)
+        for v in Self.adultLabels { selectedLabels.remove(v) }
+        if !alreadyOn { selectedLabels.insert(value) }
+    }
+
+    private func toggleGraphicMedia() {
+        if selectedLabels.contains("graphic-media") {
+            selectedLabels.remove("graphic-media")
+        } else {
+            selectedLabels.insert("graphic-media")
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Please add any content warning labels that are applicable for the media you are posting.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Adult Content") {
+                    adultRow(value: "sexual", title: "Suggestive")
+                    adultRow(value: "nudity", title: "Nudity")
+                    adultRow(value: "porn", title: "Adult")
+                    if let helper = adultHelperText {
+                        Text(helper)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Other") {
+                    Button {
+                        toggleGraphicMedia()
+                    } label: {
+                        HStack {
+                            Text("Graphic Media")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if hasGraphicMedia {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if hasGraphicMedia {
+                        Text("Media that may be disturbing or inappropriate for some audiences.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Add a content warning")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    private func adultRow(value: String, title: String) -> some View {
+        Button {
+            selectAdult(value)
+        } label: {
+            HStack {
+                Text(title)
+                    .foregroundStyle(.primary)
+                Spacer()
+                if adultSelection == value {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Per-selection helper text mirroring RN's switch in `LabelsDialog`.
+    private var adultHelperText: String? {
+        switch adultSelection {
+        case "sexual": return "Pictures meant for adults."
+        case "nudity": return "Artistic or non-erotic nudity."
+        case "porn": return "Sexual activity or erotic nudity."
+        default: return nil
         }
     }
 }

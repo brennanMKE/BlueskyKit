@@ -25,6 +25,12 @@ public final class ComposerViewModel {
     public var text: String = ""
     public var selectedLanguage: String = "en"
     public var images: [ComposerImageAttachment] = []
+    /// Self-labels (content warnings) the author has attached to this post.
+    /// Mirrors RN's `LabelsBtn` state — values come from the curated set
+    /// `{"sexual", "nudity", "porn", "graphic-media"}`. The composer
+    /// constrains the adult-content trio to a single selection at a time
+    /// (matching RN's `updateAdultLabels`); `graphic-media` is independent.
+    public var selectedLabels: Set<String> = []
 
     public var replyTo: PostRef?
     public var replyToView: PostView?
@@ -116,7 +122,8 @@ public final class ComposerViewModel {
             replyTo: replyTo,
             quotedPost: quotedPost,
             selectedLanguage: selectedLanguage,
-            mentionDIDs: mentionDIDs
+            mentionDIDs: mentionDIDs,
+            selfLabels: selectedLabels
         )
         if store.didPost {
             clearDraft()
@@ -133,6 +140,7 @@ public final class ComposerViewModel {
             detectedURL = nil
             mentionPrefix = nil
             mentionDIDs = [:]
+            selectedLabels = []
         }
     }
 

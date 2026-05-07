@@ -24,7 +24,8 @@ public protocol ComposerStoring: AnyObject, Observable, Sendable {
         replyTo: PostRef?,
         quotedPost: PostRef?,
         selectedLanguage: String,
-        mentionDIDs: [String: DID]
+        mentionDIDs: [String: DID],
+        selfLabels: Set<String>
     ) async -> [ComposerImageAttachment]
     func searchMentions(_ prefix: String)
     func clearError()
@@ -93,7 +94,8 @@ public final class ComposerStore: ComposerStoring {
         replyTo: PostRef?,
         quotedPost: PostRef?,
         selectedLanguage: String,
-        mentionDIDs: [String: DID]
+        mentionDIDs: [String: DID],
+        selfLabels: Set<String>
     ) async -> [ComposerImageAttachment] {
         guard !isPosting else { return images }
         let viewerDID: DID?
@@ -181,12 +183,19 @@ public final class ComposerStore: ComposerStoring {
 
             let facets = FacetBuilder.build(from: text, mentionDIDs: mentionDIDs)
             let reply = replyTo.map { ReplyRef(root: $0, parent: $0) }
+            // Encode self-labels only when at least one is selected, so the
+            // record's `labels` field is omitted entirely for an unlabeled
+            // post (matching RN's `if (draft.labels.length)` guard).
+            let labelsRecord: SelfLabels? = selfLabels.isEmpty
+                ? nil
+                : SelfLabels(values: selfLabels.sorted().map { SelfLabelValue(val: $0) })
             let record = PostRecord(
                 text: text,
                 facets: facets.isEmpty ? nil : facets,
                 embed: embed,
                 reply: reply,
-                langs: [selectedLanguage]
+                langs: [selectedLanguage],
+                labels: labelsRecord
             )
             let req = CreateRecordRequest(
                 repo: viewerDID.rawValue,
@@ -209,7 +218,8 @@ public final class ComposerStore: ComposerStoring {
                         facets: threadFacets.isEmpty ? nil : threadFacets,
                         embed: nil,
                         reply: ReplyRef(root: rootRef, parent: parentRef),
-                        langs: [selectedLanguage]
+                        langs: [selectedLanguage],
+                        labels: labelsRecord
                     )
                     let threadReq = CreateRecordRequest(
                         repo: viewerDID.rawValue,

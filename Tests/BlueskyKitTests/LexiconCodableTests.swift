@@ -237,3 +237,57 @@ struct ModerationCodableTests {
         #expect(resp.reportedBy.rawValue == "did:plc:reporter")
     }
 }
+
+// MARK: - Post
+
+@Suite("Post lexicon")
+struct PostCodableTests {
+    @Test("SelfLabels encodes with $type discriminator")
+    func encodeSelfLabels() throws {
+        let labels = SelfLabels(values: [SelfLabelValue(val: "porn")])
+        let data = try JSONEncoder().encode(labels)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(json["$type"] as? String == "com.atproto.label.defs#selfLabels")
+        let values = json["values"] as! [[String: Any]]
+        #expect(values.count == 1)
+        #expect(values.first?["val"] as? String == "porn")
+    }
+
+    @Test("PostRecord with labels encodes selfLabels payload")
+    func encodePostRecordWithLabels() throws {
+        let record = PostRecord(
+            text: "hi",
+            labels: SelfLabels(values: [SelfLabelValue(val: "graphic-media")])
+        )
+        let data = try iso8601Encoder.encode(record)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let labels = json["labels"] as! [String: Any]
+        #expect(labels["$type"] as? String == "com.atproto.label.defs#selfLabels")
+        let values = labels["values"] as! [[String: Any]]
+        #expect(values.first?["val"] as? String == "graphic-media")
+    }
+
+    @Test("PostRecord without labels omits the field")
+    func encodePostRecordWithoutLabels() throws {
+        let record = PostRecord(text: "hi")
+        let data = try iso8601Encoder.encode(record)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(json["labels"] == nil)
+    }
+
+    @Test("PostRecord with labels round-trips")
+    func roundTripPostRecordLabels() throws {
+        let json = """
+        {
+            "text": "hello",
+            "createdAt": "2026-05-06T00:00:00Z",
+            "labels": {
+                "$type": "com.atproto.label.defs#selfLabels",
+                "values": [{"val": "sexual"}]
+            }
+        }
+        """.data(using: .utf8)!
+        let record = try iso8601.decode(PostRecord.self, from: json)
+        #expect(record.labels?.values.map(\.val) == ["sexual"])
+    }
+}
