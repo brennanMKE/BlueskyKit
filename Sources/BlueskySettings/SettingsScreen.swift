@@ -3,8 +3,13 @@ import BlueskyCore
 import BlueskyKit
 import BlueskyUI
 
+/// RN parity: `HELP_DESK_URL` from `Bluesky-ReactNative/src/lib/constants.ts`.
+/// The Help row in the Settings hub opens this URL in the system browser.
+private let helpDeskURL = URL(string: "https://blueskyweb.zendesk.com/hc/en-us")!
+
 public struct SettingsScreen: View {
     @State private var viewModel: SettingsViewModel
+    @Environment(\.openURL) private var openURL
     private let network: any NetworkClient
     private let currentAccount: Account?
     private let onModerationTap: (() -> Void)?
@@ -122,6 +127,13 @@ public struct SettingsScreen: View {
             }
 
             Section {
+                Button {
+                    openURL(helpDeskURL)
+                } label: {
+                    Label("Help", systemImage: "questionmark.circle")
+                }
+                .accessibilityHint(Text("Opens helpdesk in browser"))
+
                 NavigationLink {
                     AboutScreen()
                 } label: {
