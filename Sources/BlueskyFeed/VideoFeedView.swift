@@ -30,8 +30,27 @@ private final class PreviewNoOpCache: CacheStore, @unchecked Sendable {
 public struct VideoFeedView: View {
     @State private var viewModel: FeedViewModel
     @State private var currentIndex = 0
+    /// Per-session mute preference. Mirrors the RN immersive-video behaviour
+    /// where the mute state is sticky across pages until the user toggles it.
+    @State private var isMuted = true
+    /// Autoplay preference, threaded down from the parent. Defaults to true
+    /// so the video feed plays even when the parent doesn't inject a value.
+    private let autoplay: Bool
+    /// Tap-the-author callbacks. The video feed page surfaces an avatar/handle
+    /// row in the bottom-left and a comments button in the right-edge stack —
+    /// both navigate, and the parent owns the navigation stack.
+    private let onProfileTap: ((DID) -> Void)?
+    private let onPostTap: ((PostView) -> Void)?
 
-    public init(network: any NetworkClient, accountStore: any AccountStore, cache: any CacheStore, feedURI: String) {
+    public init(
+        network: any NetworkClient,
+        accountStore: any AccountStore,
+        cache: any CacheStore,
+        feedURI: String,
+        autoplay: Bool = true,
+        onProfileTap: ((DID) -> Void)? = nil,
+        onPostTap: ((PostView) -> Void)? = nil
+    ) {
         _viewModel = State(
             initialValue: FeedViewModel(
                 network: network,
@@ -40,6 +59,9 @@ public struct VideoFeedView: View {
                 selection: .feed(uri: feedURI)
             )
         )
+        self.autoplay = autoplay
+        self.onProfileTap = onProfileTap
+        self.onPostTap = onPostTap
     }
 
     private var videoPosts: [FeedViewPost] {
@@ -74,13 +96,21 @@ public struct VideoFeedView: View {
         TabView(selection: $currentIndex) {
             ForEach(Array(videoPosts.enumerated()), id: \.element.post.uri) { index, feedPost in
                 if case .video(let video) = feedPost.post.embed {
-                    VideoPostPage(feedPost: feedPost, video: video)
-                        .tag(index)
-                        .onAppear {
-                            if index >= videoPosts.count - 2 {
-                                Task { await viewModel.loadMore() }
-                            }
+                    VideoPostPage(
+                        feedPost: feedPost,
+                        video: video,
+                        viewModel: viewModel,
+                        isMuted: $isMuted,
+                        autoplay: autoplay,
+                        onProfileTap: onProfileTap,
+                        onPostTap: onPostTap
+                    )
+                    .tag(index)
+                    .onAppear {
+                        if index >= videoPosts.count - 2 {
+                            Task { await viewModel.loadMore() }
                         }
+                    }
                 }
             }
         }
@@ -91,65 +121,348 @@ public struct VideoFeedView: View {
     }
 }
 
+// MARK: - VideoPostPage
+
 private struct VideoPostPage: View {
     let feedPost: FeedViewPost
     let video: EmbedVideoView
+    /// Reference to the shared feed view model so per-page like / repost taps
+    /// flow through the existing optimistic-update path used by the regular
+    /// feed (`FeedViewModel.toggleLike` / `toggleRepost`).
+    let viewModel: FeedViewModel
+    @Binding var isMuted: Bool
+    let autoplay: Bool
+    let onProfileTap: ((DID) -> Void)?
+    let onPostTap: ((PostView) -> Void)?
 
     @State private var player: AVPlayer?
     @State private var isShowingInfo = false
+    @State private var isPlaying = false
+    @State private var progress: Double = 0
+    /// Briefly shown after a tap toggles play/pause, mirroring the RN
+    /// "tap-to-pause" visual feedback.
+    @State private var showPlayPauseIndicator = false
+    @State private var playPauseIndicatorWorkItem: DispatchWorkItem?
+    /// Token returned by `addPeriodicTimeObserver`; must be passed back to
+    /// `removeTimeObserver` on disappear or the player will retain the
+    /// observer (and the closure capturing self) past the view's lifetime.
+    @State private var timeObserverToken: Any?
+
+    /// Live snapshot of the post from the view model — drives like/repost
+    /// counts so the optimistic update from `toggleLike(_:)` shows up here
+    /// without re-routing the whole feed.
+    private var currentPost: PostView {
+        viewModel.posts.first(where: { $0.post.uri == feedPost.post.uri })?.post
+            ?? feedPost.post
+    }
+
+    private var isLiked: Bool { currentPost.viewer?.like != nil }
+    private var isReposted: Bool { currentPost.viewer?.repost != nil }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             Color.black.ignoresSafeArea()
 
             if let player {
                 VideoPlayer(player: player)
+                    .disabled(true) // suppress system controls so our overlay tap wins
                     .ignoresSafeArea()
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
+            // Tap-to-play/pause hit area covers the full bounds but sits
+            // beneath the action overlays (which have higher z-order).
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { togglePlayPause() }
+
+            if showPlayPauseIndicator {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 56, weight: .bold))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.5), radius: 6)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
+
+            overlayContent
+        }
+        .onAppear { setUpPlayer() }
+        .onDisappear { tearDownPlayer() }
+        .onChange(of: isMuted) { _, newValue in
+            player?.isMuted = newValue
+        }
+    }
+
+    // MARK: Overlays
+
+    private var overlayContent: some View {
+        VStack(spacing: 0) {
+            // Top bar — mute toggle pinned top-trailing.
+            HStack {
+                Spacer()
+                Button {
+                    isMuted.toggle()
+                } label: {
+                    Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(.black.opacity(0.45), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help(isMuted ? "Unmute" : "Mute")
+                .padding(.top, 12)
+                .padding(.trailing, 12)
+            }
+
+            Spacer(minLength: 0)
+
+            // Bottom row — author/text on the left, action stack on the right.
+            HStack(alignment: .bottom, spacing: Spacing.sm) {
+                authorAndCaption
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                actionStack
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.sm)
+
+            scrubber
+        }
+    }
+
+    private var authorAndCaption: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Button {
+                onProfileTap?(currentPost.author.did)
+            } label: {
+                HStack(spacing: Spacing.sm) {
                     AvatarView(
-                        url: feedPost.post.author.avatar,
-                        handle: feedPost.post.author.handle.rawValue,
+                        url: currentPost.author.avatar,
+                        handle: currentPost.author.handle.rawValue,
                         size: 36
                     )
                     VStack(alignment: .leading, spacing: 2) {
-                        if let name = feedPost.post.author.displayName {
-                            Text(name).fontWeight(.semibold).foregroundStyle(.white)
+                        if let name = currentPost.author.displayName {
+                            Text(name)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
                         }
-                        Text("@\(feedPost.post.author.handle.rawValue)")
+                        Text("@\(currentPost.author.handle.rawValue)")
                             .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.8))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .lineLimit(1)
                     }
                 }
-
-                if !feedPost.post.record.text.isEmpty {
-                    let text = feedPost.post.record.text
-                    Text(text)
-                        .foregroundStyle(.white)
-                        .lineLimit(isShowingInfo ? nil : 2)
-                        .onTapGesture { isShowingInfo.toggle() }
-                }
-
-                if let alt = video.alt, !alt.isEmpty, isShowingInfo {
-                    Text("Alt: \(alt)")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
-                }
             }
-            .padding()
-            .background(.black.opacity(0.4))
+            .buttonStyle(.plain)
+
+            if !currentPost.record.text.isEmpty {
+                Text(currentPost.record.text)
+                    .foregroundStyle(.white)
+                    .lineLimit(isShowingInfo ? nil : 2)
+                    .onTapGesture { isShowingInfo.toggle() }
+            }
+
+            if let alt = video.alt, !alt.isEmpty, isShowingInfo {
+                Text("Alt: \(alt)")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
         }
-        .onAppear {
-            let p = AVPlayer(url: video.playlist)
+        .padding(Spacing.sm)
+        .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    /// Right-edge action stack — order matches the RN PostControls layout in
+    /// `Bluesky-ReactNative/src/components/PostControls/`: reply, repost,
+    /// like, share. We fold "comments / reply" into the entry that opens the
+    /// thread because the immersive video feed has no inline reply composer.
+    private var actionStack: some View {
+        VStack(spacing: Spacing.lg) {
+            actionButton(
+                icon: "bubble.left",
+                count: currentPost.replyCount,
+                tint: .white,
+                help: "Comments"
+            ) {
+                onPostTap?(currentPost)
+            }
+
+            actionButton(
+                icon: isReposted ? "arrow.2.squarepath" : "arrow.2.squarepath",
+                count: currentPost.repostCount,
+                tint: isReposted ? .green : .white,
+                help: isReposted ? "Undo repost" : "Repost"
+            ) {
+                let snapshot = currentPost
+                Task { await viewModel.toggleRepost(post: snapshot) }
+            }
+
+            actionButton(
+                icon: isLiked ? "heart.fill" : "heart",
+                count: currentPost.likeCount,
+                tint: isLiked ? .pink : .white,
+                help: isLiked ? "Unlike" : "Like"
+            ) {
+                let snapshot = currentPost
+                Task { await viewModel.toggleLike(post: snapshot) }
+            }
+
+            if let url = shareURL(for: currentPost) {
+                ShareLink(item: url) {
+                    actionGlyph(icon: "square.and.arrow.up", count: nil, tint: .white)
+                }
+                .buttonStyle(.plain)
+                .help("Share")
+            }
+        }
+    }
+
+    private func actionButton(
+        icon: String,
+        count: Int?,
+        tint: Color,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            actionGlyph(icon: icon, count: count, tint: tint)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private func actionGlyph(icon: String, count: Int?, tint: Color) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: icon)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(tint)
+                .shadow(color: .black.opacity(0.5), radius: 2)
+            if let count, count > 0 {
+                Text(formatCount(count))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.5), radius: 2)
+            }
+        }
+        .frame(width: 44)
+    }
+
+    private var scrubber: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.25))
+                Rectangle()
+                    .fill(Color.white.opacity(0.9))
+                    .frame(width: proxy.size.width * progress)
+            }
+        }
+        .frame(height: 2)
+    }
+
+    // MARK: Player lifecycle
+
+    private func setUpPlayer() {
+        let p = AVPlayer(url: video.playlist)
+        p.isMuted = isMuted
+        if autoplay {
             p.play()
-            self.player = p
+            isPlaying = true
+        } else {
+            isPlaying = false
         }
-        .onDisappear {
-            player?.pause()
-            player = nil
+        // Loop playback — RN's expo-video sets `player.loop = true`; on AVPlayer
+        // we re-seek to zero on the AVPlayerItem `didPlayToEndTime` notification.
+        if let item = p.currentItem {
+            NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: item,
+                queue: .main
+            ) { [weak p] _ in
+                p?.seek(to: .zero)
+                p?.play()
+            }
         }
+
+        // Periodic time observer to drive the scrubber. 10 Hz is enough for a
+        // thin progress bar without burning the main thread.
+        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+        let token = p.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
+            guard let duration = p.currentItem?.duration.seconds, duration.isFinite, duration > 0 else {
+                return
+            }
+            let current = time.seconds
+            let next = min(max(current / duration, 0), 1)
+            // The observer runs on `.main` so we hop onto MainActor to satisfy
+            // strict-concurrency: SwiftUI `@State` mutations must be isolated.
+            Task { @MainActor in
+                progress = next
+            }
+        }
+        timeObserverToken = token
+        player = p
+    }
+
+    private func tearDownPlayer() {
+        if let token = timeObserverToken {
+            player?.removeTimeObserver(token)
+            timeObserverToken = nil
+        }
+        if let item = player?.currentItem {
+            NotificationCenter.default.removeObserver(
+                self as Any,
+                name: .AVPlayerItemDidPlayToEndTime,
+                object: item
+            )
+        }
+        player?.pause()
+        player = nil
+        isPlaying = false
+    }
+
+    private func togglePlayPause() {
+        guard let player else { return }
+        if player.timeControlStatus == .playing {
+            player.pause()
+            isPlaying = false
+        } else {
+            player.play()
+            isPlaying = true
+        }
+        // Briefly flash the play / pause indicator to mirror the RN tap
+        // feedback. Cancel any in-flight reset so rapid taps don't leave
+        // the icon stuck on screen.
+        playPauseIndicatorWorkItem?.cancel()
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showPlayPauseIndicator = true
+        }
+        let workItem = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                showPlayPauseIndicator = false
+            }
+        }
+        playPauseIndicatorWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: workItem)
+    }
+
+    // MARK: Helpers
+
+    private func shareURL(for post: PostView) -> URL? {
+        let handle = post.author.handle.rawValue
+        let rkey = post.uri.rawValue.components(separatedBy: "/").last ?? ""
+        guard !rkey.isEmpty else { return nil }
+        return URL(string: "https://bsky.app/profile/\(handle)/post/\(rkey)")
+    }
+
+    private func formatCount(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            return String(format: "%.1fM", Double(count) / 1_000_000)
+        } else if count >= 1_000 {
+            return String(format: "%.1fK", Double(count) / 1_000)
+        }
+        return "\(count)"
     }
 }
 
