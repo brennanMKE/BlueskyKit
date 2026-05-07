@@ -27,31 +27,95 @@ public struct ModerationListsScreen: View {
 
     public var body: some View {
         List {
-            if viewModel.modLists.isEmpty && !viewModel.isLoading {
+            if viewModel.modLists.isEmpty
+                && viewModel.subscribedModLists.isEmpty
+                && !viewModel.isLoading {
                 ContentUnavailableView(
                     "No Moderation Lists",
                     systemImage: "list.bullet.clipboard",
-                    description: Text("Moderation lists you subscribe to will appear here.")
+                    description: Text("Public, sharable lists of users to mute or block in bulk.")
                 )
             } else {
-                ForEach(viewModel.modLists, id: \.uri) { list in
-                    ModListRow(list: list) {
-                        Task { await viewModel.unmuteList(list.uri) }
-                    }
-                    .onAppear {
-                        if list.uri == viewModel.modLists.last?.uri {
-                            Task { await viewModel.loadMoreModLists() }
-                        }
-                    }
+                // "My moderation lists" — lists the viewer authored. Mirrors
+                // RN's `MyLists filter="mod"` rows where the list's creator
+                // matches the signed-in account. Edit/delete affordances live
+                // inside the list detail screen.
+                Section("My moderation lists") {
+                    ownedSection
+                }
+
+                // "Subscribed" — mod lists the viewer subscribed to without
+                // owning. Drawn from `getListMutes` / `getListBlocks` and
+                // filtered to lists where `creator.did != viewerDID`. Per-row
+                // action is Unsubscribe (calls `unmuteActorList` for muted,
+                // deletes the `listblock` record for blocked).
+                Section("Subscribed") {
+                    subscribedSection
                 }
             }
         }
         .navigationTitle("Moderation Lists")
-        .refreshable { await viewModel.loadModLists() }
-        .task { await viewModel.loadModLists() }
+        .refreshable {
+            await viewModel.resolveViewerDID()
+            await viewModel.loadModLists()
+        }
+        .task {
+            await viewModel.resolveViewerDID()
+            await viewModel.loadModLists()
+        }
         .overlay {
-            if viewModel.isLoading && viewModel.modLists.isEmpty {
+            if viewModel.isLoading
+                && viewModel.modLists.isEmpty
+                && viewModel.subscribedModLists.isEmpty {
                 ProgressView()
+            }
+        }
+    }
+
+    // MARK: - Sections
+
+    /// Rows for mod lists the viewer authored. Tail-of-section pagination
+    /// fires `loadMoreModLists` (paginates the underlying `getLists` cursor).
+    @ViewBuilder
+    private var ownedSection: some View {
+        let owned = viewModel.modLists
+        if owned.isEmpty {
+            Text("Moderation lists you create will appear here.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(owned, id: \.uri) { list in
+                ModListRow(list: list, action: .none)
+                    .onAppear {
+                        if list.uri == owned.last?.uri {
+                            Task { await viewModel.loadMoreModLists() }
+                        }
+                    }
+            }
+        }
+    }
+
+    /// Rows for mod lists the viewer subscribed to. Per-row Unsubscribe
+    /// button picks `unmuteActorList` (for muted lists) or
+    /// `deleteRecord(listblock)` (for blocked lists), matching RN's
+    /// `useListMuteMutation` / `useListBlockMutation` split.
+    @ViewBuilder
+    private var subscribedSection: some View {
+        let subscribed = viewModel.subscribedModLists
+        if subscribed.isEmpty {
+            Text("Subscribed mod lists will appear here.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(subscribed, id: \.uri) { list in
+                ModListRow(list: list, action: .unsubscribe {
+                    Task { await viewModel.unsubscribe(from: list) }
+                })
+                .onAppear {
+                    if list.uri == subscribed.last?.uri && viewModel.hasMoreSubscribedModLists {
+                        Task { await viewModel.loadMoreSubscribedModLists() }
+                    }
+                }
             }
         }
     }
@@ -59,9 +123,14 @@ public struct ModerationListsScreen: View {
 
 // MARK: - ModListRow
 
+private enum ModListRowAction {
+    case none
+    case unsubscribe(() -> Void)
+}
+
 private struct ModListRow: View {
     let list: ListView
-    let onUnsubscribe: () -> Void
+    let action: ModListRowAction
 
     var body: some View {
         HStack(spacing: 12) {
@@ -83,9 +152,14 @@ private struct ModListRow: View {
 
             Spacer()
 
-            Button("Unsubscribe", role: .destructive) { onUnsubscribe() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            switch action {
+            case .none:
+                EmptyView()
+            case .unsubscribe(let onUnsubscribe):
+                Button("Unsubscribe", role: .destructive) { onUnsubscribe() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
         }
         .padding(.vertical, 4)
     }

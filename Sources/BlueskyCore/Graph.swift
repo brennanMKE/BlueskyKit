@@ -116,6 +116,39 @@ public struct GetListsResponse: Codable, Sendable {
     }
 }
 
+// MARK: - app.bsky.graph.getListMutes
+
+/// Lists the authenticated viewer has subscribed to via `muteActorList`.
+/// Mirrors `app.bsky.graph.getListMutes` — the lexicon returns `lists` and an
+/// optional pagination `cursor`. RN's `useMyListsQuery(filter: 'mod')`
+/// stitches the response into the mod-lists hub alongside `getLists` (owned)
+/// and `getListBlocks` (subscribed by block).
+public struct GetListMutesResponse: Codable, Sendable {
+    public let lists: [ListView]
+    public let cursor: Cursor?
+
+    public init(lists: [ListView], cursor: Cursor?) {
+        self.lists = lists
+        self.cursor = cursor
+    }
+}
+
+// MARK: - app.bsky.graph.getListBlocks
+
+/// Lists the authenticated viewer has subscribed to via a `listblock` record.
+/// Mirrors `app.bsky.graph.getListBlocks` — same shape as `getListMutes`. The
+/// returned `ListView.viewer.blocked` carries the AT-URI of the viewer's own
+/// `app.bsky.graph.listblock` record, which the unsubscribe path deletes.
+public struct GetListBlocksResponse: Codable, Sendable {
+    public let lists: [ListView]
+    public let cursor: Cursor?
+
+    public init(lists: [ListView], cursor: Cursor?) {
+        self.lists = lists
+        self.cursor = cursor
+    }
+}
+
 // MARK: - List record (app.bsky.graph.list)
 
 /// A list record for use with `com.atproto.repo.createRecord` /

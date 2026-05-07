@@ -12,6 +12,11 @@ public protocol ModerationStoring: AnyObject, Observable, Sendable {
     var mutes: [ProfileView] { get }
     var blocks: [ProfileView] { get }
     var modLists: [ListView] { get }
+    /// Mod lists the viewer subscribed to via `muteActorList` or a
+    /// `listblock` record. Populated by `loadModLists` from `getListMutes`
+    /// and `getListBlocks` and filtered against the viewer's own DID so we
+    /// don't double-count owned lists the viewer also muted.
+    var subscribedModLists: [ListView] { get }
     var adultContentEnabled: Bool { get set }
     var contentLabels: [ContentLabelPref] { get }
     var subscribedLabelerDIDs: [DID] { get }
@@ -21,6 +26,8 @@ public protocol ModerationStoring: AnyObject, Observable, Sendable {
     var hasMoreMutes: Bool { get }
     var hasMoreBlocks: Bool { get }
     var hasMoreModLists: Bool { get }
+    var hasMoreSubscribedMutes: Bool { get }
+    var hasMoreSubscribedBlocks: Bool { get }
     var isLoading: Bool { get }
     var errorMessage: String? { get }
 
@@ -30,6 +37,7 @@ public protocol ModerationStoring: AnyObject, Observable, Sendable {
     func loadMoreBlocks() async
     func loadModLists() async
     func loadMoreModLists() async
+    func loadMoreSubscribedModLists() async
     func loadPreferences() async
     func loadSubscribedLabelers() async
     func removeUnavailableLabelers() async
@@ -37,6 +45,7 @@ public protocol ModerationStoring: AnyObject, Observable, Sendable {
     func unblock(profile: ProfileView) async
     func muteList(_ listURI: ATURI) async
     func unmuteList(_ listURI: ATURI) async
+    func unblockList(_ list: ListView) async
     func setAdultContent(enabled: Bool) async
     func setLabelVisibility(label: String, labelerDid: DID?, visibility: String) async
     func report(subject: some Encodable & Sendable, reasonType: String, reason: String?, labelerDID: DID?) async throws
@@ -50,6 +59,7 @@ public final class ModerationStore: ModerationStoring {
     public private(set) var mutes: [ProfileView] = []
     public private(set) var blocks: [ProfileView] = []
     public private(set) var modLists: [ListView] = []
+    public private(set) var subscribedModLists: [ListView] = []
     public var adultContentEnabled = false
     public private(set) var contentLabels: [ContentLabelPref] = []
     public private(set) var subscribedLabelerDIDs: [DID] = []
@@ -59,12 +69,16 @@ public final class ModerationStore: ModerationStoring {
     public private(set) var hasMoreMutes = true
     public private(set) var hasMoreBlocks = true
     public private(set) var hasMoreModLists = true
+    public private(set) var hasMoreSubscribedMutes = true
+    public private(set) var hasMoreSubscribedBlocks = true
     public private(set) var isLoading = false
     public private(set) var errorMessage: String?
 
     private var mutesCursor: Cursor?
     private var blocksCursor: Cursor?
     private var modListsCursor: Cursor?
+    private var subscribedMutesCursor: Cursor?
+    private var subscribedBlocksCursor: Cursor?
 
     private let network: any NetworkClient
     private let accountStore: any AccountStore
@@ -147,6 +161,12 @@ public final class ModerationStore: ModerationStoring {
 
     // MARK: - Moderation lists
 
+    /// Loads both the viewer's authored mod lists (from `getLists`) and the
+    /// mod lists they've subscribed to (from `getListMutes` / `getListBlocks`).
+    /// Mirrors RN's `useMyListsQuery(filter: 'mod')` — the RN query accumulates
+    /// all three endpoints and de-dupes by URI. The split is held in two
+    /// arrays here so the screen can render two sections with different
+    /// per-row affordances (edit/delete vs unsubscribe).
     public func loadModLists() async {
         let viewerDID: DID?
         do {
@@ -161,16 +181,65 @@ public final class ModerationStore: ModerationStoring {
         defer { isLoading = false }
         errorMessage = nil
         do {
-            let resp: GetListsResponse = try await network.get(
+            // Owned mod lists (`getLists` filtered by purpose).
+            let owned: GetListsResponse = try await network.get(
                 lexicon: "app.bsky.graph.getLists",
                 params: ["actor": viewerDID.rawValue, "limit": "50"]
             )
-            modLists = resp.lists.filter { $0.purpose == "app.bsky.graph.defs#modlist" }
-            modListsCursor = resp.cursor
-            hasMoreModLists = resp.cursor != nil
+            modLists = owned.lists.filter { $0.purpose == "app.bsky.graph.defs#modlist" }
+            modListsCursor = owned.cursor
+            hasMoreModLists = owned.cursor != nil
         } catch {
             errorMessage = error.localizedDescription
         }
+
+        // Subscribed mod lists — RN accumulates `getListMutes` and
+        // `getListBlocks`, filters to `modlist` purpose, and drops anything
+        // the viewer also owns (already in `modLists`).
+        var subscribed: [ListView] = []
+        var seen: Set<String> = Set(modLists.map { $0.uri.rawValue })
+
+        do {
+            let muted: GetListMutesResponse = try await network.get(
+                lexicon: "app.bsky.graph.getListMutes",
+                params: ["limit": "50"]
+            )
+            for list in muted.lists {
+                guard list.purpose == "app.bsky.graph.defs#modlist" else { continue }
+                guard list.creator.did != viewerDID else { continue }
+                guard !seen.contains(list.uri.rawValue) else { continue }
+                subscribed.append(list)
+                seen.insert(list.uri.rawValue)
+            }
+            subscribedMutesCursor = muted.cursor
+            hasMoreSubscribedMutes = muted.cursor != nil
+        } catch {
+            // A failed subscribed-mutes fetch shouldn't blow away the owned
+            // section — surface the error and continue with blocks.
+            logger.error("loadModLists: getListMutes failed: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+        }
+
+        do {
+            let blocked: GetListBlocksResponse = try await network.get(
+                lexicon: "app.bsky.graph.getListBlocks",
+                params: ["limit": "50"]
+            )
+            for list in blocked.lists {
+                guard list.purpose == "app.bsky.graph.defs#modlist" else { continue }
+                guard list.creator.did != viewerDID else { continue }
+                guard !seen.contains(list.uri.rawValue) else { continue }
+                subscribed.append(list)
+                seen.insert(list.uri.rawValue)
+            }
+            subscribedBlocksCursor = blocked.cursor
+            hasMoreSubscribedBlocks = blocked.cursor != nil
+        } catch {
+            logger.error("loadModLists: getListBlocks failed: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+        }
+
+        subscribedModLists = subscribed
     }
 
     public func loadMoreModLists() async {
@@ -194,6 +263,65 @@ public final class ModerationStore: ModerationStoring {
             hasMoreModLists = resp.cursor != nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Paginate the subscribed-mod-lists section. Mirrors RN's accumulator
+    /// over `getListMutes` / `getListBlocks`: each endpoint is paged until
+    /// its cursor runs out. We track separate cursors and chain mutes
+    /// before blocks (matching RN's promise array order).
+    public func loadMoreSubscribedModLists() async {
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("loadMoreSubscribedModLists: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            return
+        }
+        guard let viewerDID else { return }
+        var seen: Set<String> = Set(modLists.map { $0.uri.rawValue })
+        seen.formUnion(subscribedModLists.map { $0.uri.rawValue })
+
+        if hasMoreSubscribedMutes, let cursor = subscribedMutesCursor {
+            do {
+                let muted: GetListMutesResponse = try await network.get(
+                    lexicon: "app.bsky.graph.getListMutes",
+                    params: ["limit": "50", "cursor": cursor]
+                )
+                for list in muted.lists {
+                    guard list.purpose == "app.bsky.graph.defs#modlist" else { continue }
+                    guard list.creator.did != viewerDID else { continue }
+                    guard !seen.contains(list.uri.rawValue) else { continue }
+                    subscribedModLists.append(list)
+                    seen.insert(list.uri.rawValue)
+                }
+                subscribedMutesCursor = muted.cursor
+                hasMoreSubscribedMutes = muted.cursor != nil
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            return
+        }
+
+        if hasMoreSubscribedBlocks, let cursor = subscribedBlocksCursor {
+            do {
+                let blocked: GetListBlocksResponse = try await network.get(
+                    lexicon: "app.bsky.graph.getListBlocks",
+                    params: ["limit": "50", "cursor": cursor]
+                )
+                for list in blocked.lists {
+                    guard list.purpose == "app.bsky.graph.defs#modlist" else { continue }
+                    guard list.creator.did != viewerDID else { continue }
+                    guard !seen.contains(list.uri.rawValue) else { continue }
+                    subscribedModLists.append(list)
+                    seen.insert(list.uri.rawValue)
+                }
+                subscribedBlocksCursor = blocked.cursor
+                hasMoreSubscribedBlocks = blocked.cursor != nil
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -337,6 +465,37 @@ public final class ModerationStore: ModerationStoring {
             let _: EmptyResponse = try await network.post(
                 lexicon: "app.bsky.graph.unmuteActorList",
                 body: ListMuteRequest(list: listURI)
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Unblock a mod list by deleting the viewer's `app.bsky.graph.listblock`
+    /// record. The block-record AT-URI rides on `list.viewer.blocked` (the
+    /// appview surfaces it specifically so clients can drop the record
+    /// without having to re-discover the rkey). Mirrors RN's
+    /// `agent.unblockModList(uri)` which performs a `deleteRecord` against
+    /// the matching listblock record.
+    public func unblockList(_ list: ListView) async {
+        guard let blockURI = list.viewer?.blocked, let rkey = blockURI.rkey else { return }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("unblockList: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            return
+        }
+        guard let viewerDID else { return }
+        do {
+            let _: EmptyResponse = try await network.post(
+                lexicon: "com.atproto.repo.deleteRecord",
+                body: DeleteRecordRequest(
+                    repo: viewerDID.rawValue,
+                    collection: "app.bsky.graph.listblock",
+                    rkey: rkey
+                )
             )
         } catch {
             errorMessage = error.localizedDescription
