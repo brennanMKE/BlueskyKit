@@ -45,6 +45,9 @@ public struct ComposerSheet: View {
     /// Drives the self-labels (content warnings) picker presentation.
     /// Mirrors RN's `LabelsBtn` dialog control.
     @State private var showLabelsPicker = false
+    /// Drives the threadgate / postgate (interaction restrictions) picker
+    /// presentation. Mirrors RN's `ThreadgateBtn` dialog control.
+    @State private var showThreadgatePicker = false
     private let initialAttachmentSource: ComposerInitialAttachmentSource
 
     public init(
@@ -390,9 +393,16 @@ public struct ComposerSheet: View {
                 .padding(.top, 8)
             }
             labelsButton
+            threadgateButton
         }
         .sheet(isPresented: $showLabelsPicker) {
             SelfLabelsPicker(selectedLabels: $viewModel.selectedLabels)
+        }
+        .sheet(isPresented: $showThreadgatePicker) {
+            ThreadgatePicker(
+                allow: $viewModel.threadgateAllow,
+                quotesEnabled: $viewModel.quotesEnabled
+            )
         }
         #elseif os(macOS)
         HStack(spacing: 16) {
@@ -417,10 +427,18 @@ public struct ComposerSheet: View {
                 .padding(.top, 8)
             }
             labelsButton
+            threadgateButton
         }
         .popover(isPresented: $showLabelsPicker, arrowEdge: .top) {
             SelfLabelsPicker(selectedLabels: $viewModel.selectedLabels)
                 .frame(minWidth: 320)
+        }
+        .popover(isPresented: $showThreadgatePicker, arrowEdge: .top) {
+            ThreadgatePicker(
+                allow: $viewModel.threadgateAllow,
+                quotesEnabled: $viewModel.quotesEnabled
+            )
+            .frame(minWidth: 360, minHeight: 420)
         }
         #endif
     }
@@ -452,6 +470,30 @@ public struct ComposerSheet: View {
         .padding(.top, 8)
         .accessibilityLabel("Content warnings")
         .accessibilityHint("Opens a dialog to add a content warning to your post")
+    }
+
+    /// Reply / quote restrictions button mirroring RN's `ThreadgateBtn`.
+    /// Shows a globe (`globe`) when anyone can interact with the post and a
+    /// people-group (`person.2`) when any restriction is in place. Tapping
+    /// presents `ThreadgatePicker`.
+    private var threadgateButton: some View {
+        Button {
+            #if os(iOS)
+            dismissKeyboard()
+            #endif
+            showThreadgatePicker = true
+        } label: {
+            Label(
+                viewModel.hasInteractionRestrictions ? "Interaction limited" : "Anyone can interact",
+                systemImage: viewModel.hasInteractionRestrictions ? "person.2.fill" : "globe"
+            )
+            .font(.subheadline)
+            .foregroundStyle(viewModel.hasInteractionRestrictions ? Color.accentColor : .secondary)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 8)
+        .accessibilityLabel(viewModel.hasInteractionRestrictions ? "Interaction limited" : "Anyone can interact")
+        .accessibilityHint("Opens a dialog to choose who can reply to and quote this post")
     }
 
     #if os(iOS)
@@ -794,6 +836,168 @@ private struct SelfLabelsPicker: View {
         case "porn": return "Sexual activity or erotic nudity."
         default: return nil
         }
+    }
+}
+
+// MARK: - Threadgate / postgate picker
+
+/// Reply + quote restriction picker mirroring RN's
+/// `PostInteractionSettingsControlledDialog` body. The RN dialog exposes:
+///
+///   - Reply restrictions: **Everyone** (default), **Mentioned users**,
+///     **Followed users** (people the author follows), **Followers** (people
+///     who follow the author), zero or more **lists**, or **Nobody**.
+///   - Quote restrictions: a single **Allow quotes** toggle.
+///
+/// "Everyone" and "Nobody" are mutually exclusive with the granular
+/// toggles; the granular toggles combine as a union ("anyone matching any
+/// of these can reply"). We model the state as `ThreadgateAllowSelection`
+/// to make impossible combinations unrepresentable.
+///
+/// **Bail rule applied (#0098):** the list multi-select branch is deferred
+/// — fetching the viewer's curate / mod lists requires either reusing
+/// `BlueskyLists` (cross-Layer-3 dependency, forbidden) or duplicating the
+/// `app.bsky.graph.getLists` plumbing into the composer. Both are larger
+/// than the picker itself, so this picker ships without a list option.
+/// See the issue Gotchas for follow-up.
+private struct ThreadgatePicker: View {
+    @Binding var allow: ThreadgateAllowSelection
+    @Binding var quotesEnabled: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    /// Granular state pulled out for binding ergonomics — collapsed back to
+    /// `ThreadgateAllowSelection` whenever any toggle changes.
+    @State private var mentionEnabled = false
+    @State private var followingEnabled = false
+    @State private var followerEnabled = false
+
+    private var isEveryone: Bool {
+        if case .everyone = allow { return true }
+        return false
+    }
+
+    private var isNobody: Bool {
+        if case .nobody = allow { return true }
+        return false
+    }
+
+    private func selectEveryone() {
+        mentionEnabled = false
+        followingEnabled = false
+        followerEnabled = false
+        allow = .everyone
+    }
+
+    private func selectNobody() {
+        mentionEnabled = false
+        followingEnabled = false
+        followerEnabled = false
+        allow = .nobody
+    }
+
+    /// Re-derives `allow` after a granular toggle changes. If every toggle
+    /// is off we fall back to `.everyone` (the user clearing all checkboxes
+    /// shouldn't lock down replies; matching RN's collapse behavior).
+    private func updateGranular() {
+        if !mentionEnabled && !followingEnabled && !followerEnabled {
+            allow = .everyone
+        } else {
+            allow = .granular(
+                mention: mentionEnabled,
+                following: followingEnabled,
+                follower: followerEnabled,
+                listURIs: []
+            )
+        }
+    }
+
+    /// Hydrate the local toggles from the bound `allow` value when the
+    /// picker first appears, so that re-opening the picker shows the
+    /// previously-chosen restrictions.
+    private func hydrate() {
+        if case .granular(let m, let fg, let fr, _) = allow {
+            mentionEnabled = m
+            followingEnabled = fg
+            followerEnabled = fr
+        } else {
+            mentionEnabled = false
+            followingEnabled = false
+            followerEnabled = false
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Choose who can reply to your post and whether others can quote it.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Who can reply?") {
+                    radioRow(title: "Everyone", isSelected: isEveryone, action: selectEveryone)
+                    Toggle("Mentioned users", isOn: Binding(
+                        get: { mentionEnabled },
+                        set: { newVal in
+                            mentionEnabled = newVal
+                            updateGranular()
+                        }
+                    ))
+                    .disabled(isNobody)
+                    Toggle("Followed users", isOn: Binding(
+                        get: { followingEnabled },
+                        set: { newVal in
+                            followingEnabled = newVal
+                            updateGranular()
+                        }
+                    ))
+                    .disabled(isNobody)
+                    Toggle("Your followers", isOn: Binding(
+                        get: { followerEnabled },
+                        set: { newVal in
+                            followerEnabled = newVal
+                            updateGranular()
+                        }
+                    ))
+                    .disabled(isNobody)
+                    radioRow(title: "Nobody", isSelected: isNobody, action: selectNobody)
+                }
+
+                Section("Quote settings") {
+                    Toggle("Allow quotes", isOn: $quotesEnabled)
+                }
+            }
+            .navigationTitle("Reply & quote settings")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+            .onAppear { hydrate() }
+        }
+    }
+
+    private func radioRow(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+        } label: {
+            HStack {
+                Text(title)
+                    .foregroundStyle(.primary)
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

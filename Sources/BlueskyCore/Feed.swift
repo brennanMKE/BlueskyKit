@@ -62,12 +62,30 @@ public struct GetPostsResponse: Decodable, Sendable {
 public struct CreateRecordRequest<T: Encodable & Sendable>: Encodable, Sendable {
     public let repo: String
     public let collection: String
+    /// Optional record key. When `nil` the server allocates a TID; when
+    /// non-`nil` the server writes at that exact key. This is required for
+    /// companion records (threadgate / postgate) that must share an rkey
+    /// with the post they gate.
+    public let rkey: String?
     public let record: T
 
-    public init(repo: String, collection: String, record: T) {
+    public init(repo: String, collection: String, rkey: String? = nil, record: T) {
         self.repo = repo
         self.collection = collection
+        self.rkey = rkey
         self.record = record
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case repo, collection, rkey, record
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(repo, forKey: .repo)
+        try c.encode(collection, forKey: .collection)
+        try c.encodeIfPresent(rkey, forKey: .rkey)
+        try record.encode(to: c.superEncoder(forKey: .record))
     }
 }
 

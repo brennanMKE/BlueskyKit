@@ -291,3 +291,107 @@ struct PostCodableTests {
         #expect(record.labels?.values.map(\.val) == ["sexual"])
     }
 }
+
+// MARK: - Threadgate / postgate
+
+@Suite("Threadgate lexicon")
+struct ThreadgateCodableTests {
+    @Test("Allow=nil omits the field — everyone can reply")
+    func encodeEveryone() throws {
+        let r = ThreadgateRecord(
+            post: ATURI(rawValue: "at://did:plc:abc/app.bsky.feed.post/rkey1"),
+            allow: nil
+        )
+        let data = try iso8601Encoder.encode(r)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(json["$type"] as? String == "app.bsky.feed.threadgate")
+        #expect(json["allow"] == nil)
+    }
+
+    @Test("Allow=[] keeps the field as empty array — nobody can reply")
+    func encodeNobody() throws {
+        let r = ThreadgateRecord(
+            post: ATURI(rawValue: "at://did:plc:abc/app.bsky.feed.post/rkey1"),
+            allow: []
+        )
+        let data = try iso8601Encoder.encode(r)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let allow = json["allow"] as? [Any]
+        #expect(allow != nil)
+        #expect(allow?.count == 0)
+    }
+
+    @Test("Granular allow round-trips with $type discriminators")
+    func roundTripGranular() throws {
+        let r = ThreadgateRecord(
+            post: ATURI(rawValue: "at://did:plc:abc/app.bsky.feed.post/rkey1"),
+            allow: [
+                .mention,
+                .following,
+                .follower,
+                .list(ATURI(rawValue: "at://did:plc:abc/app.bsky.graph.list/list1")),
+            ]
+        )
+        let data = try iso8601Encoder.encode(r)
+        let decoded = try iso8601.decode(ThreadgateRecord.self, from: data)
+        #expect(decoded.allow?.count == 4)
+        #expect(decoded.allow?[0] == .mention)
+        #expect(decoded.allow?[1] == .following)
+        #expect(decoded.allow?[2] == .follower)
+        if case .list(let uri) = decoded.allow?[3] {
+            #expect(uri.rawValue == "at://did:plc:abc/app.bsky.graph.list/list1")
+        } else {
+            Issue.record("expected list rule")
+        }
+    }
+
+    @Test("Decoding distinguishes omitted vs empty allow")
+    func decodeOmittedVsEmpty() throws {
+        let omitted = """
+        {
+            "post": "at://did:plc:abc/app.bsky.feed.post/rkey1",
+            "createdAt": "2026-05-06T00:00:00Z"
+        }
+        """.data(using: .utf8)!
+        let empty = """
+        {
+            "post": "at://did:plc:abc/app.bsky.feed.post/rkey1",
+            "createdAt": "2026-05-06T00:00:00Z",
+            "allow": []
+        }
+        """.data(using: .utf8)!
+        let r1 = try iso8601.decode(ThreadgateRecord.self, from: omitted)
+        let r2 = try iso8601.decode(ThreadgateRecord.self, from: empty)
+        #expect(r1.allow == nil)
+        #expect(r2.allow != nil)
+        #expect(r2.allow?.count == 0)
+    }
+}
+
+@Suite("Postgate lexicon")
+struct PostgateCodableTests {
+    @Test("Disable rule encodes with $type discriminator")
+    func encodeDisable() throws {
+        let r = PostgateRecord(
+            post: ATURI(rawValue: "at://did:plc:abc/app.bsky.feed.post/rkey1"),
+            embeddingRules: [.disable]
+        )
+        let data = try iso8601Encoder.encode(r)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(json["$type"] as? String == "app.bsky.feed.postgate")
+        let rules = json["embeddingRules"] as! [[String: Any]]
+        #expect(rules.first?["$type"] as? String == "app.bsky.feed.postgate#disableRule")
+    }
+
+    @Test("PostgateRecord round-trips")
+    func roundTripPostgate() throws {
+        let r = PostgateRecord(
+            post: ATURI(rawValue: "at://did:plc:abc/app.bsky.feed.post/rkey1"),
+            embeddingRules: [.disable]
+        )
+        let data = try iso8601Encoder.encode(r)
+        let decoded = try iso8601.decode(PostgateRecord.self, from: data)
+        #expect(decoded.embeddingRules == [.disable])
+        #expect(decoded.post.rawValue == "at://did:plc:abc/app.bsky.feed.post/rkey1")
+    }
+}

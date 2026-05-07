@@ -25,11 +25,64 @@ public protocol ComposerStoring: AnyObject, Observable, Sendable {
         quotedPost: PostRef?,
         selectedLanguage: String,
         mentionDIDs: [String: DID],
-        selfLabels: Set<String>
+        selfLabels: Set<String>,
+        threadgateAllow: ThreadgateAllowSelection,
+        quotesEnabled: Bool
     ) async -> [ComposerImageAttachment]
     func searchMentions(_ prefix: String)
     func clearError()
     func setError(_ message: String)
+}
+
+// MARK: - ThreadgateAllowSelection
+
+/// Composer-side model of who can reply to the post being composed.
+///
+/// Mirrors RN's `ThreadgateAllowUISetting[]` from
+/// `state/queries/threadgate/types.ts`, but expressed as a single value type
+/// so the "Everyone" / "Nobody" radio semantics aren't representable in the
+/// granular case. The mapping back to the AT Proto record is:
+///
+///   - `.everyone` → record's `allow` field omitted → everyone can reply.
+///   - `.nobody` → record's `allow` field present and empty → nobody can reply.
+///   - `.granular(...)` → record's `allow` field present with one rule per
+///     enabled toggle. An empty granular selection is invalid (the UI should
+///     prevent it); if it slips through, treat as `.everyone` to avoid
+///     accidentally locking down replies on a record that isn't supposed to.
+public enum ThreadgateAllowSelection: Sendable, Equatable {
+    case everyone
+    case nobody
+    case granular(mention: Bool, following: Bool, follower: Bool, listURIs: [ATURI])
+
+    /// `true` when the selection is the default ("everyone can reply") and
+    /// no threadgate record needs to be written.
+    public var isDefault: Bool {
+        if case .everyone = self { return true }
+        return false
+    }
+
+    /// Build the lexicon `allow` value for this selection. Returns `nil`
+    /// when the field should be **omitted** (everyone can reply); returns
+    /// `[]` when the field should be **present-but-empty** (nobody can
+    /// reply); otherwise returns the rule list.
+    public func toAllowRules() -> [ThreadgateAllowRule]? {
+        switch self {
+        case .everyone:
+            return nil
+        case .nobody:
+            return []
+        case .granular(let mention, let following, let follower, let listURIs):
+            var rules: [ThreadgateAllowRule] = []
+            if mention { rules.append(.mention) }
+            if following { rules.append(.following) }
+            if follower { rules.append(.follower) }
+            for uri in listURIs { rules.append(.list(uri)) }
+            // Empty granular collapses back to `everyone` semantics: the
+            // user toggled all boxes off, which would otherwise mean
+            // "nobody can reply" — almost certainly not what they wanted.
+            return rules.isEmpty ? nil : rules
+        }
+    }
 }
 
 // MARK: - VideoAttachment
@@ -95,7 +148,9 @@ public final class ComposerStore: ComposerStoring {
         quotedPost: PostRef?,
         selectedLanguage: String,
         mentionDIDs: [String: DID],
-        selfLabels: Set<String>
+        selfLabels: Set<String>,
+        threadgateAllow: ThreadgateAllowSelection,
+        quotesEnabled: Bool
     ) async -> [ComposerImageAttachment] {
         guard !isPosting else { return images }
         let viewerDID: DID?
@@ -205,6 +260,60 @@ public final class ComposerStore: ComposerStoring {
             let firstResponse: CreateRecordResponse = try await network.post(
                 lexicon: "com.atproto.repo.createRecord", body: req
             )
+
+            // Threadgate / postgate companion records, written at the same
+            // rkey as the post they gate (see RN
+            // `lib/api/index.ts`). RN bundles the post + gate writes into a
+            // single `applyWrites` call and computes the CID locally; we
+            // post them as separate `createRecord` calls in sequence
+            // because we read the rkey back from the server's URI, which
+            // means the post must hit the network first. The user-visible
+            // outcome is the same — both records exist at the same rkey
+            // by the time the composer dismisses.
+            if let postRkey = firstResponse.uri.rkey {
+                if !threadgateAllow.isDefault {
+                    let threadgate = ThreadgateRecord(
+                        post: firstResponse.uri,
+                        allow: threadgateAllow.toAllowRules()
+                    )
+                    let tgReq = CreateRecordRequest(
+                        repo: viewerDID.rawValue,
+                        collection: "app.bsky.feed.threadgate",
+                        rkey: postRkey,
+                        record: threadgate
+                    )
+                    do {
+                        let _: CreateRecordResponse = try await network.post(
+                            lexicon: "com.atproto.repo.createRecord", body: tgReq
+                        )
+                    } catch {
+                        // Surface a soft warning but don't fail the whole
+                        // post — the post itself succeeded; the gate just
+                        // didn't apply. Match RN behavior of best-effort
+                        // gate writes.
+                        logger.error("threadgate write failed: \(error, privacy: .public)")
+                    }
+                }
+                if !quotesEnabled {
+                    let postgate = PostgateRecord(
+                        post: firstResponse.uri,
+                        embeddingRules: [.disable]
+                    )
+                    let pgReq = CreateRecordRequest(
+                        repo: viewerDID.rawValue,
+                        collection: "app.bsky.feed.postgate",
+                        rkey: postRkey,
+                        record: postgate
+                    )
+                    do {
+                        let _: CreateRecordResponse = try await network.post(
+                            lexicon: "com.atproto.repo.createRecord", body: pgReq
+                        )
+                    } catch {
+                        logger.error("postgate write failed: \(error, privacy: .public)")
+                    }
+                }
+            }
 
             // Submit additional thread posts
             if !additionalPosts.isEmpty {

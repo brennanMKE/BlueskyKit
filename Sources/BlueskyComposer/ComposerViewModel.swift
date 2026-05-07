@@ -32,6 +32,25 @@ public final class ComposerViewModel {
     /// (matching RN's `updateAdultLabels`); `graphic-media` is independent.
     public var selectedLabels: Set<String> = []
 
+    /// Reply-restriction selection. Defaults to `.everyone`, which omits the
+    /// threadgate record entirely. RN models this as `ThreadgateAllowUISetting[]`
+    /// in `view/com/composer/threadgate/ThreadgateBtn.tsx`. We collapse the
+    /// two exclusive radios ("Everyone" / "Nobody") and the granular
+    /// checkboxes into a single value type so impossible combinations
+    /// aren't representable.
+    public var threadgateAllow: ThreadgateAllowSelection = .everyone
+
+    /// `false` writes a postgate record disabling quotes. Mirrors RN's
+    /// "Allow quotes" toggle on the same dialog.
+    public var quotesEnabled: Bool = true
+
+    /// Convenience accessor for the threadgate button: `true` when *any*
+    /// non-default restriction is in effect, mirroring RN's
+    /// `anyoneCanInteract` derived state.
+    public var hasInteractionRestrictions: Bool {
+        !threadgateAllow.isDefault || !quotesEnabled
+    }
+
     public var replyTo: PostRef?
     public var replyToView: PostView?
     public var quotedPost: PostRef?
@@ -123,7 +142,9 @@ public final class ComposerViewModel {
             quotedPost: quotedPost,
             selectedLanguage: selectedLanguage,
             mentionDIDs: mentionDIDs,
-            selfLabels: selectedLabels
+            selfLabels: selectedLabels,
+            threadgateAllow: threadgateAllow,
+            quotesEnabled: quotesEnabled
         )
         if store.didPost {
             clearDraft()
@@ -141,6 +162,8 @@ public final class ComposerViewModel {
             mentionPrefix = nil
             mentionDIDs = [:]
             selectedLabels = []
+            threadgateAllow = .everyone
+            quotesEnabled = true
         }
     }
 

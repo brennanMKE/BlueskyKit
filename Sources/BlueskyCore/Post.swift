@@ -47,6 +47,226 @@ public struct SelfLabels: Codable, Hashable, Sendable {
     }
 }
 
+// MARK: - Threadgate (app.bsky.feed.threadgate)
+
+/// One element in a threadgate's `allow` list. The AT Proto lexicon defines
+/// four discriminated `$type`s under `app.bsky.feed.threadgate`:
+///
+///   - `#mentionRule` — anyone the post mentions can reply.
+///   - `#followingRule` — anyone the author follows can reply.
+///   - `#followerRule` — anyone who follows the author can reply.
+///   - `#listRule` — anyone in the linked list (`list: ATURI`) can reply.
+///
+/// The semantics of the *outer* `allow` field on the record matter and are
+/// asymmetric:
+///
+///   - `allow == nil` (field omitted) → **everyone** can reply (default).
+///   - `allow == []` (empty array) → **nobody** can reply.
+///   - `allow == [rule, …]` → only the union of the named rules can reply.
+///
+/// This mirrors RN's `threadgateRecordToAllowUISetting` /
+/// `threadgateAllowUISettingToAllowRecordValue`.
+public enum ThreadgateAllowRule: Codable, Hashable, Sendable {
+    case mention
+    case following
+    case follower
+    case list(ATURI)
+    case unknown(String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "$type"
+        case list
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try c.decode(String.self, forKey: .type)
+        switch type {
+        case "app.bsky.feed.threadgate#mentionRule":
+            self = .mention
+        case "app.bsky.feed.threadgate#followingRule":
+            self = .following
+        case "app.bsky.feed.threadgate#followerRule":
+            self = .follower
+        case "app.bsky.feed.threadgate#listRule":
+            let uri = try c.decode(ATURI.self, forKey: .list)
+            self = .list(uri)
+        default:
+            self = .unknown(type)
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .mention:
+            try c.encode("app.bsky.feed.threadgate#mentionRule", forKey: .type)
+        case .following:
+            try c.encode("app.bsky.feed.threadgate#followingRule", forKey: .type)
+        case .follower:
+            try c.encode("app.bsky.feed.threadgate#followerRule", forKey: .type)
+        case .list(let uri):
+            try c.encode("app.bsky.feed.threadgate#listRule", forKey: .type)
+            try c.encode(uri, forKey: .list)
+        case .unknown(let t):
+            try c.encode(t, forKey: .type)
+        }
+    }
+}
+
+/// `app.bsky.feed.threadgate` record. Restricts who can reply to the post
+/// identified by `post`. The threadgate's `rkey` always matches the rkey of
+/// the post it gates, so the threadgate is written into the
+/// `app.bsky.feed.threadgate` collection at the same key.
+///
+/// `allow` is intentionally an `Optional<[ThreadgateAllowRule]>` because the
+/// AT Proto lexicon distinguishes:
+///
+///   - omitted → everyone can reply.
+///   - present but empty → nobody can reply.
+///
+/// Encoding preserves this distinction: `nil` omits the field; an empty array
+/// is encoded as an empty array.
+public struct ThreadgateRecord: Codable, Sendable {
+    public let post: ATURI
+    public let allow: [ThreadgateAllowRule]?
+    /// Optional list of reply URIs the author has hidden from the thread.
+    /// SwiftUI doesn't surface this UI yet — pass through to round-trip
+    /// records fetched from the network without dropping the field.
+    public let hiddenReplies: [ATURI]?
+    public let createdAt: Date
+
+    public init(
+        post: ATURI,
+        allow: [ThreadgateAllowRule]?,
+        hiddenReplies: [ATURI]? = nil,
+        createdAt: Date = .now
+    ) {
+        self.post = post
+        self.allow = allow
+        self.hiddenReplies = hiddenReplies
+        self.createdAt = createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "$type"
+        case post, allow, hiddenReplies, createdAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        post = try c.decode(ATURI.self, forKey: .post)
+        // `allow` is meaningful when present-but-empty, so use
+        // `decodeIfPresent` and preserve the array verbatim (don't coalesce
+        // an empty array into `nil`).
+        if c.contains(.allow) {
+            allow = try c.decodeIfPresent([ThreadgateAllowRule].self, forKey: .allow)
+        } else {
+            allow = nil
+        }
+        hiddenReplies = try c.decodeIfPresent([ATURI].self, forKey: .hiddenReplies)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode("app.bsky.feed.threadgate", forKey: .type)
+        try c.encode(post, forKey: .post)
+        // Preserve `nil` vs empty-array distinction: `nil` omits the field
+        // (everyone can reply); empty array encodes as `[]` (nobody can reply).
+        if let allow {
+            try c.encode(allow, forKey: .allow)
+        }
+        try c.encodeIfPresent(hiddenReplies, forKey: .hiddenReplies)
+        try c.encode(createdAt, forKey: .createdAt)
+    }
+}
+
+// MARK: - Postgate (app.bsky.feed.postgate)
+
+/// One element in a postgate's `embeddingRules` list. The only known variant
+/// today is `#disableRule`, which disables quote-posts of the post.
+public enum PostgateEmbeddingRule: Codable, Hashable, Sendable {
+    case disable
+    case unknown(String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "$type"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try c.decode(String.self, forKey: .type)
+        switch type {
+        case "app.bsky.feed.postgate#disableRule":
+            self = .disable
+        default:
+            self = .unknown(type)
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .disable:
+            try c.encode("app.bsky.feed.postgate#disableRule", forKey: .type)
+        case .unknown(let t):
+            try c.encode(t, forKey: .type)
+        }
+    }
+}
+
+/// `app.bsky.feed.postgate` record. Restricts how the post identified by
+/// `post` can be embedded (e.g. quoted). Like threadgate, the postgate's rkey
+/// matches the post's rkey.
+///
+/// Both arrays default to an empty array per RN's `createPostgateRecord`
+/// (RN ships `embeddingRules: postgate.embeddingRules || []`), and the appview
+/// treats that as "no restrictions". To disable quotes, push a
+/// `PostgateEmbeddingRule.disable` into `embeddingRules`.
+public struct PostgateRecord: Codable, Sendable {
+    public let post: ATURI
+    /// URIs of quote-posts the author has detached. SwiftUI doesn't surface
+    /// this UI today; preserve to round-trip records fetched from the network.
+    public let detachedEmbeddingUris: [ATURI]
+    public let embeddingRules: [PostgateEmbeddingRule]
+    public let createdAt: Date
+
+    public init(
+        post: ATURI,
+        detachedEmbeddingUris: [ATURI] = [],
+        embeddingRules: [PostgateEmbeddingRule] = [],
+        createdAt: Date = .now
+    ) {
+        self.post = post
+        self.detachedEmbeddingUris = detachedEmbeddingUris
+        self.embeddingRules = embeddingRules
+        self.createdAt = createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "$type"
+        case post, detachedEmbeddingUris, embeddingRules, createdAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        post = try c.decode(ATURI.self, forKey: .post)
+        detachedEmbeddingUris = try c.decodeIfPresent([ATURI].self, forKey: .detachedEmbeddingUris) ?? []
+        embeddingRules = try c.decodeIfPresent([PostgateEmbeddingRule].self, forKey: .embeddingRules) ?? []
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode("app.bsky.feed.postgate", forKey: .type)
+        try c.encode(post, forKey: .post)
+        try c.encode(detachedEmbeddingUris, forKey: .detachedEmbeddingUris)
+        try c.encode(embeddingRules, forKey: .embeddingRules)
+        try c.encode(createdAt, forKey: .createdAt)
+    }
+}
+
 // MARK: - Post record (app.bsky.feed.post)
 
 /// The stored content of a post as written to the AT Protocol repo.
