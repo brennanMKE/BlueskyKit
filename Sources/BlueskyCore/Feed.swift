@@ -128,20 +128,72 @@ public struct PutRecordRequest<T: Encodable & Sendable>: Encodable, Sendable {
     }
 }
 
+// MARK: - Get record (com.atproto.repo.getRecord)
+
+/// Generic response shape for `com.atproto.repo.getRecord`. The `value` is the
+/// stored record itself, decoded as the caller-supplied type. `cid` is the
+/// record's content hash — useful for compare-and-swap writes via
+/// `PutRecordRequest.swapRecord`.
+public struct GetRecordResponse<T: Decodable & Sendable>: Decodable, Sendable {
+    public let uri: String
+    public let cid: String?
+    public let value: T
+
+    public init(uri: String, cid: String?, value: T) {
+        self.uri = uri
+        self.cid = cid
+        self.value = value
+    }
+}
+
 // MARK: - Profile record (app.bsky.actor.profile)
 
-public struct ProfileRecord: Encodable, Sendable {
-    private let type: String = "app.bsky.actor.profile"
+/// In-repo `app.bsky.actor.profile` record. Encoded with an explicit `$type`
+/// discriminator (the appview rejects writes that omit it), and decodable so
+/// callers can read the existing record (e.g. for the PWI self-label) before
+/// writing it back.
+///
+/// Fields tracked here are the ones we currently read or write. Unknown
+/// fields on the wire (e.g. `pinnedPost`, `joinedViaStarterPack`) are dropped
+/// on decode and would be lost on a round-trip — only round-trip this struct
+/// in flows that own all of the user-visible fields, or pass the unknown ones
+/// through explicitly.
+public struct ProfileRecord: Codable, Sendable {
+    private let type: String
     public let displayName: String?
     public let description: String?
+    /// Self-applied labels container. The PWI ("personal-web-indexing")
+    /// opt-out is expressed as a `!no-unauthenticated` self-label here.
+    public let labels: SelfLabels?
 
     private enum CodingKeys: String, CodingKey {
-        case type = "$type", displayName, description
+        case type = "$type", displayName, description, labels
     }
 
-    public init(displayName: String?, description: String?) {
+    public init(displayName: String?, description: String?, labels: SelfLabels? = nil) {
+        self.type = "app.bsky.actor.profile"
         self.displayName = displayName
         self.description = description
+        self.labels = labels
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // The server sometimes omits `$type` on the embedded value of a
+        // `getRecord` response — default to the canonical NSID rather than
+        // refusing to decode.
+        type = try c.decodeIfPresent(String.self, forKey: .type) ?? "app.bsky.actor.profile"
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        labels = try c.decodeIfPresent(SelfLabels.self, forKey: .labels)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type, forKey: .type)
+        try c.encodeIfPresent(displayName, forKey: .displayName)
+        try c.encodeIfPresent(description, forKey: .description)
+        try c.encodeIfPresent(labels, forKey: .labels)
     }
 }
 

@@ -103,7 +103,11 @@ public struct SettingsScreen: View {
 
             Section("Privacy") {
                 NavigationLink {
-                    PrivacySettingsScreen(viewModel: viewModel)
+                    PrivacySettingsScreen(
+                        network: network,
+                        accountStore: viewModel.accountStore,
+                        currentAccount: currentAccount
+                    )
                 } label: {
                     Label("Privacy & Security", systemImage: "lock.shield")
                 }
