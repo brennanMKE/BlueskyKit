@@ -111,7 +111,8 @@ public final class SessionManager: SessionManaging {
             avatarURL: nil,
             serviceEndpoint: target,
             email: email ?? request.email,
-            emailConfirmed: false
+            emailConfirmed: false,
+            status: nil
         )
         let stored = StoredAccount(
             account: account,
@@ -215,7 +216,8 @@ public final class SessionManager: SessionManaging {
             avatarURL: nil,
             serviceEndpoint: serviceURL,
             email: response.email,
-            emailConfirmed: response.emailConfirmed
+            emailConfirmed: response.emailConfirmed,
+            status: SessionManager.normalizeStatus(active: response.active, status: response.status)
         )
         let stored = StoredAccount(account: account, accessJwt: response.accessJwt, refreshJwt: response.refreshJwt)
 
@@ -232,8 +234,11 @@ public final class SessionManager: SessionManaging {
 
         if jwtIsExpired(stored.accessJwt) {
             let refreshed = try await callRefreshSession(stored: stored)
+            let refreshedAccount = stored.account.with(
+                status: Self.normalizeStatus(active: refreshed.active, status: refreshed.status)
+            )
             stored = StoredAccount(
-                account: stored.account,
+                account: refreshedAccount,
                 accessJwt: refreshed.accessJwt,
                 refreshJwt: refreshed.refreshJwt
             )
@@ -242,6 +247,75 @@ public final class SessionManager: SessionManaging {
 
         upsert(account: stored.account)
         currentAccount = stored.account
+
+        // Pull the authoritative `status` flag from `getSession` so the gate in
+        // RootView can tell active / deactivated / takendown / suspended apart.
+        // Best-effort: a network failure here must not block the resume — the
+        // user is signed in either way; we'll re-check on the next launch.
+        do {
+            let info = try await callGetSession(stored: stored)
+            let merged = stored.account.with(
+                status: Self.normalizeStatus(active: info.active, status: info.status)
+            )
+            let updatedStored = StoredAccount(
+                account: merged,
+                accessJwt: stored.accessJwt,
+                refreshJwt: stored.refreshJwt
+            )
+            try await accountStore.save(updatedStored)
+            upsert(account: merged)
+            if currentAccount?.did == merged.did {
+                currentAccount = merged
+            }
+        } catch {
+            logger.debug("getSession during resume failed (non-fatal): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Refreshes the active session's `status` from `com.atproto.server.getSession`.
+    ///
+    /// Used by `DeactivatedView` after a successful `activateAccount` so the
+    /// RootView gate can re-evaluate and route to MainTabView. Returns the
+    /// updated `Account` on success.
+    @discardableResult
+    public func refreshCurrentSession() async throws -> Account {
+        guard let did = currentAccount?.did,
+              let stored = try await accountStore.load(did: did) else {
+            throw ATError.unknown("No active session to refresh")
+        }
+        let info = try await callGetSession(stored: stored)
+        let merged = stored.account.with(
+            status: Self.normalizeStatus(active: info.active, status: info.status)
+        )
+        let updatedStored = StoredAccount(
+            account: merged,
+            accessJwt: stored.accessJwt,
+            refreshJwt: stored.refreshJwt
+        )
+        try await accountStore.save(updatedStored)
+        upsert(account: merged)
+        currentAccount = merged
+        return merged
+    }
+
+    /// Calls `com.atproto.server.activateAccount` on the active account's PDS.
+    ///
+    /// On success the account leaves the `deactivated` state. The caller
+    /// should follow up with `refreshCurrentSession()` so the RootView gate
+    /// can route back to `MainTabView`. Mirrors RN's `Deactivated.tsx`
+    /// `handleActivate` flow (`agent.com.atproto.server.activateAccount()`
+    /// followed by `agent.resumeSession`).
+    public func activateAccount() async throws {
+        guard let did = currentAccount?.did,
+              let stored = try await accountStore.load(did: did) else {
+            throw ATError.unknown("No active session to activate")
+        }
+        let url = stored.account.serviceEndpoint.appending(path: "xrpc/com.atproto.server.activateAccount")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(stored.accessJwt)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validateHTTP(response: response, data: data)
     }
 
     public func switchAccount(to did: DID) async throws {
@@ -309,6 +383,14 @@ public final class SessionManager: SessionManaging {
         return try await send(req, expecting: RefreshSessionResponse.self)
     }
 
+    private func callGetSession(stored: StoredAccount) async throws -> GetSessionResponse {
+        let url = stored.account.serviceEndpoint.appending(path: "xrpc/com.atproto.server.getSession")
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(stored.accessJwt)", forHTTPHeaderField: "Authorization")
+        return try await send(req, expecting: GetSessionResponse.self)
+    }
+
     private func callDeleteSession(stored: StoredAccount) async throws {
         let url = stored.account.serviceEndpoint.appending(path: "xrpc/com.atproto.server.deleteSession")
         var req = URLRequest(url: url)
@@ -371,6 +453,16 @@ public final class SessionManager: SessionManaging {
 
     // MARK: - Helpers
 
+    /// Reconciles the two flavors of "is this account in a holding state" that
+    /// the AT Proto server returns. Mirrors RN, which prefers `status` when
+    /// present and falls back to `active` (treating `active: true` as the
+    /// implicit `.active` state).
+    static func normalizeStatus(active: Bool?, status: AccountStatus?) -> AccountStatus? {
+        if let status { return status }
+        if active == false { return nil } // unknown specific status, but inactive
+        return .active
+    }
+
     private func upsert(account: Account) {
         if let i = accounts.firstIndex(where: { $0.did == account.did }) {
             accounts[i] = account
@@ -395,6 +487,8 @@ private struct CreateSessionResponse: Decodable, Sendable {
     let emailConfirmed: Bool?
     let accessJwt: String
     let refreshJwt: String
+    let active: Bool?
+    let status: AccountStatus?
 }
 
 private struct RefreshSessionResponse: Decodable, Sendable {
@@ -402,6 +496,8 @@ private struct RefreshSessionResponse: Decodable, Sendable {
     let handle: String
     let accessJwt: String
     let refreshJwt: String
+    let active: Bool?
+    let status: AccountStatus?
 }
 
 private struct XRPCErrorEnvelope: Decodable, Sendable {

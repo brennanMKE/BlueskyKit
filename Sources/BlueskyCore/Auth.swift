@@ -116,6 +116,46 @@ public struct CreateAccountResponse: Decodable, Sendable {
     public let refreshJwt: String
 }
 
+// MARK: - com.atproto.server.getSession
+
+/// Output of `com.atproto.server.getSession`. Returns the same session
+/// information the access JWT was minted for, plus moderation / lifecycle
+/// flags that drive the deactivated / takendown / suspended gates.
+///
+/// `active` is the boolean equivalent of "no holding status applied"; `status`
+/// is the more specific reason the account is held. RN treats absent `status`
+/// + `active=true` as the normal signed-in state.
+public struct GetSessionResponse: Decodable, Sendable {
+    public let did: String
+    public let handle: String
+    public let email: String?
+    public let emailConfirmed: Bool?
+    public let active: Bool?
+    public let status: AccountStatus?
+
+    public init(
+        did: String,
+        handle: String,
+        email: String?,
+        emailConfirmed: Bool?,
+        active: Bool?,
+        status: AccountStatus?
+    ) {
+        self.did = did
+        self.handle = handle
+        self.email = email
+        self.emailConfirmed = emailConfirmed
+        self.active = active
+        self.status = status
+    }
+}
+
+// MARK: - com.atproto.server.activateAccount
+
+/// `com.atproto.server.activateAccount` takes no body and returns an empty
+/// response. Use `EmptyResponse`-style decoding (or just discard the body).
+public enum ActivateAccount {}
+
 // MARK: - com.atproto.server.requestPasswordReset
 
 /// Request body for `com.atproto.server.requestPasswordReset`. The server
