@@ -20,9 +20,20 @@ private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
 
 public struct MutesScreen: View {
     @State private var viewModel: ModerationViewModel
+    @State private var searchText: String = ""
 
     public init(network: any NetworkClient, accountStore: any AccountStore) {
         _viewModel = State(initialValue: ModerationViewModel(network: network, accountStore: accountStore))
+    }
+
+    private var filteredMutes: [ProfileView] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return viewModel.mutes }
+        return viewModel.mutes.filter { profile in
+            if profile.handle.rawValue.lowercased().contains(query) { return true }
+            if let name = profile.displayName, name.lowercased().contains(query) { return true }
+            return false
+        }
     }
 
     public var body: some View {
@@ -34,11 +45,12 @@ public struct MutesScreen: View {
                     description: Text("Accounts you mute will appear here.")
                 )
             } else {
-                ForEach(viewModel.mutes, id: \.did) { profile in
+                ForEach(filteredMutes, id: \.did) { profile in
                     ActorRow(profile: profile) {
                         Task { await viewModel.unmute(did: profile.did) }
                     }
                     .onAppear {
+                        // Pagination triggers off the unfiltered tail.
                         if profile.did == viewModel.mutes.last?.did {
                             Task { await viewModel.loadMoreMutes() }
                         }
@@ -47,6 +59,7 @@ public struct MutesScreen: View {
             }
         }
         .navigationTitle("Muted Accounts")
+        .searchable(text: $searchText, prompt: "Search…")
         .refreshable { await viewModel.loadMutes() }
         .task { await viewModel.loadMutes() }
         .overlay {

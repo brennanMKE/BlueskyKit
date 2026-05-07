@@ -20,9 +20,20 @@ private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
 
 public struct BlocksScreen: View {
     @State private var viewModel: ModerationViewModel
+    @State private var searchText: String = ""
 
     public init(network: any NetworkClient, accountStore: any AccountStore) {
         _viewModel = State(initialValue: ModerationViewModel(network: network, accountStore: accountStore))
+    }
+
+    private var filteredBlocks: [ProfileView] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return viewModel.blocks }
+        return viewModel.blocks.filter { profile in
+            if profile.handle.rawValue.lowercased().contains(query) { return true }
+            if let name = profile.displayName, name.lowercased().contains(query) { return true }
+            return false
+        }
     }
 
     public var body: some View {
@@ -34,11 +45,12 @@ public struct BlocksScreen: View {
                     description: Text("Accounts you block will appear here.")
                 )
             } else {
-                ForEach(viewModel.blocks, id: \.did) { profile in
+                ForEach(filteredBlocks, id: \.did) { profile in
                     BlockedActorRow(profile: profile) {
                         Task { await viewModel.unblock(profile: profile) }
                     }
                     .onAppear {
+                        // Pagination triggers off the unfiltered tail.
                         if profile.did == viewModel.blocks.last?.did {
                             Task { await viewModel.loadMoreBlocks() }
                         }
@@ -47,6 +59,7 @@ public struct BlocksScreen: View {
             }
         }
         .navigationTitle("Blocked Accounts")
+        .searchable(text: $searchText, prompt: "Search…")
         .refreshable { await viewModel.loadBlocks() }
         .task { await viewModel.loadBlocks() }
         .overlay {
