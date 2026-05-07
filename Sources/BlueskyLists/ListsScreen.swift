@@ -24,10 +24,20 @@ public struct ListsScreen: View {
     @State private var showCreateSheet = false
     private let actorDID: String
     private let network: any NetworkClient
+    /// Surfaces creator-tap from the list-detail header back to the host so it
+    /// can push a `ProfileScreen`. Optional because `BlueskyLists` cannot
+    /// import `BlueskyProfile`; the app shell wires the navigation.
+    private let onProfileTap: ((DID) -> Void)?
 
-    public init(actorDID: String, network: any NetworkClient, accountStore: any AccountStore) {
+    public init(
+        actorDID: String,
+        network: any NetworkClient,
+        accountStore: any AccountStore,
+        onProfileTap: ((DID) -> Void)? = nil
+    ) {
         self.actorDID = actorDID
         self.network = network
+        self.onProfileTap = onProfileTap
         _viewModel = State(initialValue: ListsViewModel(network: network, accountStore: accountStore))
     }
 
@@ -42,7 +52,11 @@ public struct ListsScreen: View {
             } else {
                 ForEach(viewModel.lists, id: \.uri) { list in
                     NavigationLink {
-                        ListDetailScreen(listURI: list.uri, network: network)
+                        ListDetailScreen(
+                            listURI: list.uri,
+                            network: network,
+                            onProfileTap: onProfileTap
+                        )
                     } label: {
                         ListRow(list: list)
                     }

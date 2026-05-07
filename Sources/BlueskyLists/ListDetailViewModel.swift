@@ -22,4 +22,9 @@ final class ListDetailViewModel {
     func loadMore() async { await store.loadMore() }
     func loadFeed() async { await store.loadFeed() }
     func loadMoreFeed() async { await store.loadMoreFeed() }
+
+    /// Subscribe to a moderation list as a mute (RN's `Subscribe → Mute accounts`).
+    func subscribeMute() async { await store.muteList() }
+    /// Unsubscribe a moderation-list mute.
+    func unsubscribeMute() async { await store.unmuteList() }
 }

@@ -52,7 +52,7 @@ let package = Package(
         .target(name: "BlueskyComposer", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
         .target(name: "BlueskyModeration", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
         .target(name: "BlueskySettings", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
-        .target(name: "BlueskyLists", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
+        .target(name: "BlueskyLists", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI", "BlueskyModeration"], swiftSettings: swiftSettings),
         .target(name: "BlueskyOnboarding", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyAuth", "BlueskyDataStore", "BlueskyUI", "BlueskyNetworking"], swiftSettings: swiftSettings),
         .testTarget(
             name: "BlueskyKitTests",

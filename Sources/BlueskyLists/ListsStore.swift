@@ -253,6 +253,13 @@ public protocol ListDetailStoring: AnyObject, Observable, Sendable {
     func loadMore() async
     func loadFeed() async
     func loadMoreFeed() async
+
+    /// Subscribe to a moderation list as a mute. Mirrors RN's
+    /// `useListMuteMutation({mute: true})` path on
+    /// `app.bsky.graph.muteActorList`.
+    func muteList() async
+    /// Unsubscribe a moderation-list mute.
+    func unmuteList() async
 }
 
 // MARK: - ListDetailStore
@@ -333,6 +340,67 @@ public final class ListDetailStore: ListDetailStoring {
             feed.append(contentsOf: resp.feed)
             feedCursor = resp.cursor
         } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    // MARK: - Mute / unmute (moderation list subscribe)
+
+    public func muteList() async {
+        guard let listURI else { return }
+        let previous = list
+        // Optimistic update so the header flips immediately.
+        if let current = list {
+            list = ListView(
+                uri: current.uri,
+                cid: current.cid,
+                creator: current.creator,
+                name: current.name,
+                purpose: current.purpose,
+                description: current.description,
+                avatar: current.avatar,
+                labels: current.labels,
+                indexedAt: current.indexedAt,
+                listItemCount: current.listItemCount,
+                viewer: ListViewerState(muted: true, blocked: current.viewer?.blocked)
+            )
+        }
+        do {
+            let _: EmptyResponse = try await network.post(
+                lexicon: "app.bsky.graph.muteActorList",
+                body: ListMuteRequest(list: listURI)
+            )
+        } catch {
+            list = previous
+            self.error = error.localizedDescription
+        }
+    }
+
+    public func unmuteList() async {
+        guard let listURI else { return }
+        let previous = list
+        if let current = list {
+            list = ListView(
+                uri: current.uri,
+                cid: current.cid,
+                creator: current.creator,
+                name: current.name,
+                purpose: current.purpose,
+                description: current.description,
+                avatar: current.avatar,
+                labels: current.labels,
+                indexedAt: current.indexedAt,
+                listItemCount: current.listItemCount,
+                viewer: ListViewerState(muted: false, blocked: current.viewer?.blocked)
+            )
+        }
+        do {
+            let _: EmptyResponse = try await network.post(
+                lexicon: "app.bsky.graph.unmuteActorList",
+                body: ListMuteRequest(list: listURI)
+            )
+        } catch {
+            list = previous
             self.error = error.localizedDescription
         }
     }

@@ -172,6 +172,23 @@ public struct GetListFeedResponse: Decodable, Sendable {
     public let cursor: String?
 }
 
+// MARK: - app.bsky.graph.defs#listViewerState
+
+/// The authenticated viewer's relationship to a list. Mirrors
+/// `app.bsky.graph.defs#listViewerState` in the AT Proto lexicon. RN's
+/// `ProfileList/Header` consults `viewer.muted` and `viewer.blocked` to pick
+/// the primary action label (Subscribe / Unmute / Unblock).
+public struct ListViewerState: Codable, Sendable {
+    public let muted: Bool?
+    /// AT-URI of the viewer's `app.bsky.graph.listblock` record, if blocking.
+    public let blocked: ATURI?
+
+    public init(muted: Bool?, blocked: ATURI?) {
+        self.muted = muted
+        self.blocked = blocked
+    }
+}
+
 // MARK: - app.bsky.graph.defs#listView
 
 /// An `app.bsky.graph.defs#listView` — a user-created list (moderation or curation).
@@ -186,6 +203,12 @@ public struct ListView: Codable, Sendable {
     public let avatar: URL?
     public let labels: [Label]
     public let indexedAt: Date?
+    /// Number of subjects (members) on this list. Optional in the lexicon —
+    /// older appviews may omit it. RN renders the count in the list header.
+    public let listItemCount: Int?
+    /// Authenticated viewer's relationship to the list (muted / blocked).
+    /// Drives the primary action button in `ListDetailScreen`'s header.
+    public let viewer: ListViewerState?
 
     public init(
         uri: ATURI,
@@ -196,7 +219,9 @@ public struct ListView: Codable, Sendable {
         description: String?,
         avatar: URL?,
         labels: [Label] = [],
-        indexedAt: Date?
+        indexedAt: Date?,
+        listItemCount: Int? = nil,
+        viewer: ListViewerState? = nil
     ) {
         self.uri = uri
         self.cid = cid
@@ -207,5 +232,7 @@ public struct ListView: Codable, Sendable {
         self.avatar = avatar
         self.labels = labels
         self.indexedAt = indexedAt
+        self.listItemCount = listItemCount
+        self.viewer = viewer
     }
 }
