@@ -16,12 +16,18 @@ public struct PostCard: View {
     var actions: Actions?
 
     @Environment(\.blueskyTheme) private var theme
+    @Environment(\.openURL) private var openURL
 
     /// Toggles the system Translation popover (`.translationPresentation`).
     /// Set by the inline "Translate" link and the ellipsis-menu "Translate
     /// post" item — RN parity (#0143). Mirrors the per-message translate
     /// pattern from #0106.
     @State private var isTranslating: Bool = false
+
+    /// Drives the "Copied to clipboard" toast triggered by the ellipsis menu's
+    /// "Copy link to post" action — RN parity (#0144). Mirrors the
+    /// `Toast.show(...)` call in `ShareMenuItems.tsx`.
+    @State private var showCopiedToast: Bool = false
 
     public init(item: FeedViewPost, actions: Actions? = nil) {
         self.item = item
@@ -92,6 +98,9 @@ public struct PostCard: View {
         // ellipsis-menu "Translate post" item flips this flag, which presents
         // Apple's TranslationKit UI on iOS 17.4+ / macOS 14.4+.
         .translationPresentation(isPresented: $isTranslating, text: item.post.record.text)
+        // Brief confirmation after "Copy link to post" (#0144), mirroring
+        // RN's `Toast.show("Copied to clipboard")` in `ShareMenuItems.tsx`.
+        .toast(isPresented: $showCopiedToast, message: "Copied to clipboard")
     }
 
     /// Render a post embed, with image embeds extended toward the card edge.
@@ -267,16 +276,37 @@ public struct PostCard: View {
             Menu {
                 Button {
                     let text = post.record.text
-                    #if canImport(UIKit)
-                    UIPasteboard.general.string = text
-                    #elseif canImport(AppKit)
-                    let pb = NSPasteboard.general
-                    pb.clearContents()
-                    pb.setString(text, forType: .string)
-                    #endif
+                    copyStringToClipboard(text)
                 } label: {
                     Label("Copy post text", systemImage: "doc.on.doc")
                 }
+
+                // RN parity (#0144): "Copy link to post" puts the bsky.app URL
+                // on the clipboard and shows a brief "Copied to clipboard"
+                // toast — mirrors `onCopyLink` in
+                // `ShareMenuItems.tsx`. Disabled if we can't compute a URL
+                // (no rkey).
+                Button {
+                    if let url = shareURL(for: post) {
+                        copyStringToClipboard(url.absoluteString)
+                        showCopiedToast = true
+                    }
+                } label: {
+                    Label("Copy link to post", systemImage: "link")
+                }
+                .disabled(shareURL(for: post) == nil)
+
+                // RN's web client opens the same `bsky.app/profile/.../post/...`
+                // URL in a new tab; on Apple platforms we route through
+                // `openURL` so it lands in the user's default browser.
+                Button {
+                    if let url = shareURL(for: post) {
+                        openURL(url)
+                    }
+                } label: {
+                    Label("Open in browser", systemImage: "safari")
+                }
+                .disabled(shareURL(for: post) == nil)
 
                 // RN parity (#0143): "Translate post" is offered in the
                 // ellipsis menu regardless of the post's source language.
@@ -321,6 +351,18 @@ public struct PostCard: View {
         let rkey = post.uri.rawValue.components(separatedBy: "/").last ?? ""
         guard !rkey.isEmpty else { return nil }
         return URL(string: "https://bsky.app/profile/\(handle)/post/\(rkey)")
+    }
+
+    /// Cross-platform clipboard write used by the ellipsis menu's
+    /// "Copy post text" and "Copy link to post" actions (#0144).
+    private func copyStringToClipboard(_ string: String) {
+        #if canImport(UIKit)
+        UIPasteboard.general.string = string
+        #elseif canImport(AppKit)
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(string, forType: .string)
+        #endif
     }
 
     // MARK: - Helpers
