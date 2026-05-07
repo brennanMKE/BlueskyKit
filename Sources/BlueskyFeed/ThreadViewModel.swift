@@ -63,6 +63,13 @@ public final class ThreadViewModel {
     /// Preferences settings screen (#0116).
     public var sort: ThreadSort = .hotness
 
+    /// URIs of nested-reply nodes the user has explicitly expanded by
+    /// tapping a "Show N more replies" button (#0141). Drives the tree
+    /// renderer in `ThreadView` so a deep branch only walks past
+    /// `MAX_TREE_DEPTH` once the user opts in. Mutated via
+    /// `toggleExpanded(_:)`.
+    public var expandedNodes: Set<ATURI> = []
+
     /// Random seed reshuffled each time the user picks `random`. Drives
     /// `sortedReplies` deterministically within a session so SwiftUI
     /// list diffing doesn't churn between renders.
@@ -106,6 +113,17 @@ public final class ThreadViewModel {
             thread = response.thread
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Mark a reply node as expanded (or collapse it). Used by the
+    /// tree renderer to reveal nested replies that sit at or beyond
+    /// the indentation cap.
+    public func toggleExpanded(_ uri: ATURI) {
+        if expandedNodes.contains(uri) {
+            expandedNodes.remove(uri)
+        } else {
+            expandedNodes.insert(uri)
         }
     }
 

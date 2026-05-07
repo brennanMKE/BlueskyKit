@@ -4,7 +4,32 @@ import BlueskyKit
 import BlueskyUI
 import BlueskyComposer
 
-/// Renders a post thread — focal post at the top, direct replies below as a flat list.
+// MARK: - Tree-render constants
+
+/// RN parity constants for the nested-reply tree renderer (#0141).
+/// Mirrors `Bluesky-ReactNative/src/screens/PostThread/const.ts` and the
+/// `app.bsky.unspecced.getPostThreadV2` `below` cap used for desktop tree
+/// view (`TREE_VIEW_BELOW_DESKTOP`). Indent and avatar widths come from
+/// the RN `TREE_INDENT` (= `tokens.space.lg` = 16) and `TREE_AVI_WIDTH`
+/// (= 24) values.
+private enum ThreadTree {
+    /// Per-level indent width for the left rail. Matches RN's
+    /// `TREE_INDENT + TREE_AVI_WIDTH/2`.
+    static let indentUnit: CGFloat = Spacing.lg + (treeAvatarSize / 2)
+    /// Avatar width inside a tree row. RN uses `TREE_AVI_WIDTH = 24`.
+    static let treeAvatarSize: CGFloat = 24
+    /// Width of the connector line stroke.
+    static let lineWidth: CGFloat = 2
+    /// Maximum depth at which we keep increasing indent. Past this
+    /// level, rows continue to render at the cap — this matches RN's
+    /// `TREE_VIEW_BELOW_DESKTOP` (= 6) from
+    /// `state/queries/usePostThread/const.ts`.
+    static let maxDepth: Int = 6
+}
+
+/// Renders a post thread — focal post at the top, then a recursively
+/// indented tree of replies with vertical connector lines and "Show N
+/// more replies" expanders for branches beyond the indentation cap.
 public struct ThreadView: View {
 
     private let uri: ATURI
@@ -115,17 +140,19 @@ public struct ThreadView: View {
         )
     }
 
-    // MARK: - Flat list
+    // MARK: - Thread list
 
     private func threadList(_ node: ThreadViewPost) -> some View {
-        let rows = flattenThread(node)
         let focalURI = focalPostURI(node)
         return ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(rows, id: \.post.uri) { item in
+                // Ancestors + focal post — flat, no indent.
+                ForEach(linearRows(for: node), id: \.post.uri) { item in
                     PostCard(item: item, actions: actions(for: item.post, focalURI: focalURI))
                     Divider()
                 }
+                // Replies — recursive tree (#0141).
+                replyTree(of: node, focalURI: focalURI)
             }
         }
         .refreshable { await viewModel.load() }
@@ -150,29 +177,14 @@ public struct ThreadView: View {
         return tp.post.uri
     }
 
-    /// Walk the thread tree: ancestors (oldest first) → focal post → direct replies.
-    /// Replies use `viewModel.sortedReplies` so the toolbar Menu's
-    /// reply-sort selection drives row order without a refetch.
-    private func flattenThread(_ node: ThreadViewPost) -> [FeedViewPost] {
+    /// Linear (non-tree) rows above the reply list: ancestors (oldest
+    /// first) followed by the focal post. Reply rows are rendered
+    /// separately by `replyTree(of:focalURI:)` so each one can carry
+    /// its tree-depth metadata.
+    private func linearRows(for node: ThreadViewPost) -> [FeedViewPost] {
         guard case .post(let tp) = node else { return [] }
-
-        var result: [FeedViewPost] = []
-
-        // Ancestors (parent chain, oldest first)
-        let ancestors = collectAncestors(tp.parent)
-        result.append(contentsOf: ancestors)
-
-        // Focal post
+        var result = collectAncestors(tp.parent)
         result.append(FeedViewPost(post: tp.post, reply: nil, reason: nil))
-
-        // Direct replies (flat — one level only), client-sorted per
-        // the active `ThreadSort` selection.
-        for reply in viewModel.sortedReplies {
-            if case .post(let rtp) = reply {
-                result.append(FeedViewPost(post: rtp.post, reply: nil, reason: nil))
-            }
-        }
-
         return result
     }
 
@@ -182,6 +194,95 @@ public struct ThreadView: View {
         var chain = collectAncestors(tp.parent)
         chain.append(FeedViewPost(post: tp.post, reply: nil, reason: nil))
         return chain
+    }
+
+    // MARK: - Reply tree
+
+    /// Top-level entry into the recursive reply walker. Uses
+    /// `viewModel.sortedReplies` so the toolbar's reply-sort selection
+    /// drives row order without a refetch (#0140).
+    @ViewBuilder
+    private func replyTree(of node: ThreadViewPost, focalURI: ATURI?) -> some View {
+        ForEach(Array(viewModel.sortedReplies.enumerated()), id: \.offset) { _, reply in
+            replyRow(reply, depth: 1, focalURI: focalURI)
+        }
+    }
+
+    /// Recursive renderer. `depth` is 1-based — the focal post's direct
+    /// replies sit at depth 1. Indentation grows with depth up to
+    /// `ThreadTree.maxDepth`, then flattens. Returns `AnyView` to break
+    /// the self-referential `some View` recursion.
+    private func replyRow(
+        _ node: ThreadViewPost,
+        depth: Int,
+        focalURI: ATURI?
+    ) -> AnyView {
+        guard case .post(let tp) = node else {
+            return AnyView(EmptyView())
+        }
+        let post = tp.post
+        let item = FeedViewPost(post: post, reply: nil, reason: nil)
+        let cappedDepth = min(depth, ThreadTree.maxDepth)
+        let nestedReplies = (tp.replies ?? []).filter { reply in
+            if case .post = reply { return true }
+            return false
+        }
+        let isAtCap = depth >= ThreadTree.maxDepth
+        let isExpanded = viewModel.expandedNodes.contains(post.uri)
+        let serverHasMore = post.replyCount > nestedReplies.count
+
+        return AnyView(
+            VStack(spacing: 0) {
+                TreeReplyRow(
+                    item: item,
+                    depth: cappedDepth,
+                    actions: actions(for: post, focalURI: focalURI)
+                )
+                Divider()
+                // Render direct children when not at the cap, or the
+                // user has expanded this subtree past the cap.
+                if !isAtCap || isExpanded {
+                    ForEach(Array(nestedReplies.enumerated()), id: \.offset) { _, child in
+                        replyRow(child, depth: depth + 1, focalURI: focalURI)
+                    }
+                }
+                // "Show N more replies" — appears when:
+                //   1. We're at the cap and the user hasn't expanded yet, or
+                //   2. The server reported more nested replies than were
+                //      hydrated in the loaded payload.
+                if (isAtCap && !isExpanded && !nestedReplies.isEmpty) {
+                    showMoreButton(
+                        depth: cappedDepth + 1,
+                        count: nestedReplies.count,
+                        action: { viewModel.toggleExpanded(post.uri) }
+                    )
+                } else if serverHasMore {
+                    showMoreButton(
+                        depth: cappedDepth + 1,
+                        count: post.replyCount - nestedReplies.count,
+                        action: { selectedReplyURI = post.uri }
+                    )
+                }
+            }
+        )
+    }
+
+    private func showMoreButton(depth: Int, count: Int, action: @escaping () -> Void) -> some View {
+        let cappedDepth = min(depth, ThreadTree.maxDepth)
+        return Button(action: action) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 14))
+                Text(count == 1 ? "Show 1 more reply" : "Show \(count) more replies")
+                    .font(Typography.bodySmall)
+            }
+            .foregroundStyle(Color.secondary)
+            .padding(.vertical, Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, ThreadTree.indentUnit * CGFloat(cappedDepth) + Spacing.md)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Actions
@@ -222,6 +323,82 @@ public struct ThreadView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Tree reply row
+
+/// One reply row inside the recursive tree. Lays out the parent-chain
+/// connector lines on the left, then renders a `PostCard` for the post
+/// itself. Mirrors the visual structure of RN's
+/// `ThreadItemTreePostOuterWrapper` + `ThreadItemTreePostInnerWrapper`
+/// from `Bluesky-ReactNative/src/screens/PostThread/components/ThreadItemTreePost.tsx`.
+private struct TreeReplyRow: View {
+
+    let item: FeedViewPost
+    /// 1-based depth (depth=1 is a direct reply to the focal post).
+    /// Capped at `ThreadTree.maxDepth` by the caller.
+    let depth: Int
+    let actions: PostCard.Actions
+
+    @Environment(\.blueskyTheme) private var theme
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            // Ancestor rails: one vertical line per ancestor depth.
+            // RN renders `indent - 1` rails (the row's own depth uses
+            // a curved corner connector below).
+            ForEach(0..<max(0, depth - 1), id: \.self) { _ in
+                ZStack(alignment: .trailing) {
+                    Color.clear
+                        .frame(width: ThreadTree.indentUnit)
+                    Rectangle()
+                        .fill(theme.colors.border)
+                        .frame(width: ThreadTree.lineWidth)
+                }
+            }
+            // Row content with a curved connector hooking it onto its
+            // parent's rail. The connector is an overlay so the post
+            // card's own padding/background is unaffected.
+            PostCard(item: item, actions: actions)
+                .overlay(alignment: .topLeading) {
+                    if depth > 0 {
+                        connectorCorner
+                    }
+                }
+        }
+        .background(theme.colors.background)
+    }
+
+    /// Curved bottom-left corner that joins the row to the rail to its
+    /// left. RN renders this with `borderLeftWidth + borderBottomWidth +
+    /// borderBottomLeftRadius`; we approximate with a `Path` so we don't
+    /// depend on platform-specific border drawing.
+    private var connectorCorner: some View {
+        ConnectorCornerShape()
+            .stroke(theme.colors.border, lineWidth: ThreadTree.lineWidth)
+            .frame(width: ThreadTree.indentUnit / 2, height: ThreadTree.treeAvatarSize)
+            .offset(x: -ThreadTree.indentUnit / 2, y: 0)
+    }
+}
+
+/// L-shaped corner: starts at top-left, drops down, curves into a
+/// horizontal stub. Approximates RN's `border*Width + border*Radius`
+/// rendering of the parent→reply connector.
+private struct ConnectorCornerShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let radius: CGFloat = 6
+        // Vertical stem from top-left down to (almost) the bottom.
+        p.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - radius))
+        // Quarter-arc into the horizontal stub.
+        p.addQuadCurve(
+            to: CGPoint(x: rect.minX + radius, y: rect.maxY),
+            control: CGPoint(x: rect.minX, y: rect.maxY)
+        )
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        return p
     }
 }
 
