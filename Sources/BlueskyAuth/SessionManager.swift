@@ -318,6 +318,56 @@ public final class SessionManager: SessionManaging {
         try validateHTTP(response: response, data: data)
     }
 
+    /// Submits a takendown / suspended-account appeal as a moderation report
+    /// against the current user's own DID. Mirrors RN's `Takendown.tsx`
+    /// `submitAppeal` mutation:
+    ///
+    ///     agent.com.atproto.moderation.createReport(
+    ///       { reasonType: ToolsOzoneReportDefs.REASONAPPEAL,
+    ///         subject: { $type: 'com.atproto.admin.defs#repoRef',
+    ///                    did: currentAccount.did },
+    ///         reason: appealText },
+    ///       { headers: BLUESKY_MOD_SERVICE_HEADERS })
+    ///
+    /// The `BLUESKY_MOD_SERVICE_HEADERS` constant routes the report through
+    /// the Bluesky moderation labeler at
+    /// `did:plc:ar7c4by46qjdydhdevvrndac#atproto_labeler`. Without that
+    /// header the request would otherwise hit the user's PDS and be rejected
+    /// (the takendown account can't act on its own behalf there).
+    ///
+    /// We bypass the shared `NetworkClient.post` because:
+    ///   * The caller is in a `.takendown` / `.suspended` state — wrapping
+    ///     in the standard auto-refresh path would compete with the gate.
+    ///   * The labeler proxy header is one-shot, not a global proxy rule.
+    ///
+    /// Throws `ATError.xrpc` on a server rejection so the view can render
+    /// the message inline.
+    public func submitTakendownAppeal(reason: String) async throws {
+        guard let did = currentAccount?.did,
+              let stored = try await accountStore.load(did: did) else {
+            throw ATError.unknown("No active session to appeal")
+        }
+
+        let body = TakendownAppealBody(
+            reasonType: "tools.ozone.report.defs#reasonAppeal",
+            subject: TakendownAppealBody.Subject(did: did.rawValue),
+            reason: reason
+        )
+
+        let url = stored.account.serviceEndpoint.appending(path: "xrpc/com.atproto.moderation.createReport")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(stored.accessJwt)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Route the report through the Bluesky moderation labeler. RN sets
+        // the same header via `BLUESKY_MOD_SERVICE_HEADERS`.
+        req.setValue("did:plc:ar7c4by46qjdydhdevvrndac#atproto_labeler", forHTTPHeaderField: "atproto-proxy")
+        req.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validateHTTP(response: response, data: data)
+    }
+
     public func switchAccount(to did: DID) async throws {
         guard let stored = try await accountStore.load(did: did) else {
             throw ATError.unknown("No stored account for DID \(did)")
@@ -507,4 +557,27 @@ private struct XRPCErrorEnvelope: Decodable, Sendable {
 
 private struct JWTClaims: Decodable, Sendable {
     let exp: Int?
+}
+
+/// Request body for the takendown / suspended self-appeal call. Encodes as a
+/// `com.atproto.moderation.createReport` payload with the subject as a
+/// `com.atproto.admin.defs#repoRef` pointing at the user's own DID.
+private struct TakendownAppealBody: Encodable, Sendable {
+    let reasonType: String
+    let subject: Subject
+    let reason: String
+
+    struct Subject: Encodable, Sendable {
+        let did: String
+
+        private enum CodingKeys: String, CodingKey {
+            case type = "$type", did
+        }
+
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode("com.atproto.admin.defs#repoRef", forKey: .type)
+            try c.encode(did, forKey: .did)
+        }
+    }
 }
