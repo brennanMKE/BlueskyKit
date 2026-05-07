@@ -71,9 +71,15 @@ public struct MessageThreadScreen: View {
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 8)
                     }
-                    ForEach(viewModel.messages, id: \.id) { message in
-                        MessageBubble(message: message, isOwn: viewModel.isOwn(message))
-                            .id(message.id)
+                    ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
+                        MessageBubble(
+                            message: message,
+                            isOwn: viewModel.isOwn(message),
+                            isGroup: isGroup,
+                            isFirstInRun: isFirstInRun(at: index),
+                            senderProfile: senderProfile(for: message)
+                        )
+                        .id(message.id)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -85,6 +91,32 @@ public struct MessageThreadScreen: View {
                 }
             }
         }
+    }
+
+    // MARK: - Run clustering / member lookup
+
+    /// RN's `parseConvoView` treats >2 members (self + 2+ others) as a group chat.
+    private var isGroup: Bool {
+        members.count > 2
+    }
+
+    /// Members from the freshest convo we have — view-model may have refreshed it.
+    private var members: [ProfileBasic] {
+        viewModel.convo?.members ?? convo.members
+    }
+
+    /// First message in a "run" of consecutive messages from the same sender.
+    /// Mirrors RN's `isFirstInCluster` (without the 5-minute time gate, which
+    /// our model does not currently surface in the UI).
+    private func isFirstInRun(at index: Int) -> Bool {
+        guard index > 0 else { return true }
+        let prev = viewModel.messages[index - 1]
+        let curr = viewModel.messages[index]
+        return prev.sender.did != curr.sender.did
+    }
+
+    private func senderProfile(for message: MessageView) -> ProfileBasic? {
+        members.first(where: { $0.did == message.sender.did })
     }
 
     // MARK: - Compose bar
@@ -163,11 +195,56 @@ public struct MessageThreadScreen: View {
 private struct MessageBubble: View {
     let message: MessageView
     let isOwn: Bool
+    var isGroup: Bool = false
+    var isFirstInRun: Bool = true
+    var senderProfile: ProfileBasic? = nil
+
+    private static let avatarSize: CGFloat = 24
+    private static let avatarGutter: CGFloat = 6
+
+    /// Show the small "Display Name @handle" label above the first bubble in a
+    /// non-self run inside a group chat. Matches RN's `showDisplayName` rule.
+    private var showSenderHeader: Bool {
+        isGroup && !isOwn && isFirstInRun
+    }
+
+    /// Show the avatar beside the first bubble in a non-self run in a group
+    /// chat. RN places it at the bottom of the cluster; we use the top so it
+    /// pairs visually with the sender header introduced above the bubble.
+    private var showAvatar: Bool {
+        isGroup && !isOwn && isFirstInRun
+    }
+
+    /// Reserve gutter width on every non-self bubble in a group so subsequent
+    /// bubbles in the run line up under the first one (matches RN's stack).
+    private var avatarGutterWidth: CGFloat {
+        (isGroup && !isOwn) ? Self.avatarSize + Self.avatarGutter : 0
+    }
 
     var body: some View {
-        HStack {
-            if isOwn { Spacer(minLength: 60) }
-            VStack(alignment: isOwn ? .trailing : .leading, spacing: 6) {
+        HStack(alignment: .top, spacing: 0) {
+            if isOwn {
+                Spacer(minLength: 60)
+            } else if isGroup {
+                // Avatar gutter: shown only on the first bubble of a run; an
+                // empty spacer on subsequent bubbles keeps them aligned.
+                if showAvatar, let profile = senderProfile {
+                    AvatarView(
+                        url: profile.avatar,
+                        handle: profile.handle.rawValue,
+                        size: Self.avatarSize
+                    )
+                    .padding(.trailing, Self.avatarGutter)
+                } else {
+                    Color.clear
+                        .frame(width: avatarGutterWidth, height: 1)
+                }
+            }
+
+            VStack(alignment: isOwn ? .trailing : .leading, spacing: 2) {
+                if showSenderHeader, let profile = senderProfile {
+                    senderHeader(profile)
+                }
                 if let images = embeddedImages, !images.isEmpty {
                     imageStack(images)
                 }
@@ -181,8 +258,22 @@ private struct MessageBubble: View {
                                     in: RoundedRectangle(cornerRadius: 16))
                 }
             }
+
             if !isOwn { Spacer(minLength: 60) }
         }
+    }
+
+    @ViewBuilder
+    private func senderHeader(_ profile: ProfileBasic) -> some View {
+        let displayName = profile.displayName?.trimmingCharacters(in: .whitespaces)
+        let nameText = (displayName?.isEmpty == false ? displayName! : profile.handle.rawValue)
+        (Text(nameText).font(.caption).fontWeight(.semibold)
+         + Text(" @\(profile.handle.rawValue)").font(.caption))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.leading, 4)
+            .padding(.bottom, 1)
     }
 
     private var embeddedImages: [EmbedImageView]? {
