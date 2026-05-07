@@ -33,6 +33,27 @@ struct ListDetailScreen: View {
         _viewModel = State(initialValue: ListDetailViewModel(network: network))
     }
 
+    /// Whether the loaded list is a curation list (`app.bsky.graph.defs#curatelist`).
+    /// Curate lists show Posts / People / About. Moderation lists show Members / About.
+    private var isCurateList: Bool {
+        viewModel.list?.purpose == "app.bsky.graph.defs#curatelist"
+    }
+
+    /// Tabs for the current list. Order mirrors RN's `sectionTitlesCurate`
+    /// (`Posts`, `People`) for curate lists, plus the SwiftUI-specific About
+    /// tab tracked by #0126. Mod lists drop the feed tab — RN renders only
+    /// the members section for mod lists.
+    private var tabs: [String] {
+        isCurateList ? ["Posts", "People", "About"] : ["Members", "About"]
+    }
+
+    /// Index in `tabs` for the feed/posts content. Curate-only.
+    private var feedTabIndex: Int? { isCurateList ? 0 : nil }
+    /// Index in `tabs` for the members list.
+    private var membersTabIndex: Int { isCurateList ? 1 : 0 }
+    /// Index in `tabs` for the About metadata content.
+    private var aboutTabIndex: Int { isCurateList ? 2 : 1 }
+
     var body: some View {
         VStack(spacing: 0) {
             if viewModel.list != nil {
@@ -40,17 +61,20 @@ struct ListDetailScreen: View {
             }
 
             Picker("Tab", selection: $selectedTab) {
-                Text("Members").tag(0)
-                Text("Feed").tag(1)
+                ForEach(Array(tabs.enumerated()), id: \.offset) { index, title in
+                    Text(title).tag(index)
+                }
             }
             .pickerStyle(.segmented)
             .padding(.horizontal)
             .padding(.vertical, 8)
 
-            if selectedTab == 0 {
-                membersTab
-            } else {
+            if selectedTab == feedTabIndex {
                 feedTab
+            } else if selectedTab == membersTabIndex {
+                membersTab
+            } else if selectedTab == aboutTabIndex, let list = viewModel.list {
+                aboutTab(for: list)
             }
         }
         .navigationTitle(viewModel.list?.name ?? "List")
@@ -61,7 +85,7 @@ struct ListDetailScreen: View {
         }
         .task { await viewModel.load(listURI: listURI) }
         .onChange(of: selectedTab) { _, newValue in
-            if newValue == 1 && viewModel.feed.isEmpty {
+            if newValue == feedTabIndex && viewModel.feed.isEmpty {
                 Task { await viewModel.loadFeed() }
             }
         }
@@ -311,6 +335,138 @@ struct ListDetailScreen: View {
             }
         }
         .listStyle(.plain)
+    }
+
+    // MARK: - About Tab
+
+    /// About tab — surfaces the list metadata that doesn't fit in the header:
+    /// full description, creator handle, member count, creation date, copyable
+    /// list URI, and (for moderation lists) the labels applied by the list.
+    /// Mirrors the spirit of RN's metadata layout in `ProfileSubpageHeader` +
+    /// `Header.tsx` — RN packs everything into the header; SwiftUI splits the
+    /// long-form bits into a dedicated tab so the header stays compact.
+    @ViewBuilder
+    private func aboutTab(for list: ListView) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.lg) {
+                if let desc = list.description, !desc.isEmpty {
+                    aboutSection(title: "Description") {
+                        Text(desc)
+                            .font(Typography.body)
+                            .foregroundStyle(theme.colors.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                aboutSection(title: "Creator") {
+                    Button {
+                        onProfileTap?(list.creator.did)
+                    } label: {
+                        HStack(spacing: Spacing.sm) {
+                            AvatarView(
+                                url: list.creator.avatar,
+                                handle: list.creator.handle.rawValue,
+                                size: 28
+                            )
+                            VStack(alignment: .leading, spacing: 0) {
+                                if let displayName = list.creator.displayName,
+                                   !displayName.isEmpty {
+                                    Text(displayName)
+                                        .font(Typography.bodySmall.weight(.semibold))
+                                        .foregroundStyle(theme.colors.textPrimary)
+                                        .lineLimit(1)
+                                }
+                                Text("@\(list.creator.handle.rawValue)")
+                                    .font(Typography.footnote)
+                                    .foregroundStyle(theme.colors.link)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if let count = list.listItemCount {
+                    aboutSection(title: "Members") {
+                        Text(memberCountLabel(count))
+                            .font(Typography.body)
+                            .foregroundStyle(theme.colors.textPrimary)
+                    }
+                }
+
+                if let indexedAt = list.indexedAt {
+                    aboutSection(title: "Created") {
+                        Text(indexedAt.formatted(date: .long, time: .omitted))
+                            .font(Typography.body)
+                            .foregroundStyle(theme.colors.textPrimary)
+                    }
+                }
+
+                aboutSection(title: "List URI") {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                        Text(list.uri.rawValue)
+                            .font(Typography.bodySmall.monospaced())
+                            .foregroundStyle(theme.colors.textSecondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+
+                        Spacer(minLength: Spacing.xs)
+
+                        Button {
+                            copyToClipboard(list.uri.rawValue)
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                                .labelStyle(.iconOnly)
+                                .font(Typography.bodySmall)
+                                .foregroundStyle(theme.colors.textSecondary)
+                                .frame(width: 28, height: 28)
+                                .background(theme.colors.backgroundSecondary)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Copy list URI")
+                    }
+                }
+
+                // Moderation lists publish labels via separate labeler records
+                // (`app.bsky.label.defs#label`) — the appview does not surface a
+                // labels-applied set on `app.bsky.graph.defs#listView`. RN's
+                // header omits this view too. If the lexicon ever grows the
+                // field, render it here. For now, expose any moderation
+                // labels attached directly to the list record (e.g. `!hide`).
+                if list.purpose == "app.bsky.graph.defs#modlist" && !list.labels.isEmpty {
+                    aboutSection(title: "Labels") {
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            ForEach(list.labels, id: \.self) { label in
+                                Text(label.val)
+                                    .font(Typography.bodySmall)
+                                    .padding(.horizontal, Spacing.sm)
+                                    .padding(.vertical, Spacing._2xs)
+                                    .background(theme.colors.backgroundSecondary)
+                                    .clipShape(Capsule())
+                                    .foregroundStyle(theme.colors.textPrimary)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(Spacing.lg)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func aboutSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text(title.uppercased())
+                .font(Typography.footnote.weight(.semibold))
+                .foregroundStyle(theme.colors.textTertiary)
+            content()
+        }
     }
 
     // MARK: - Feed Tab
