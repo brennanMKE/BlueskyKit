@@ -21,6 +21,17 @@ public protocol ListsStoring: AnyObject, Observable, Sendable {
     func addMember(listURI: ATURI, subjectDID: DID, repo: String) async
     func removeMember(itemURI: ATURI, repo: String) async
     func createStarterPack(name: String, description: String?, listURI: ATURI) async
+    /// Creates a starter pack end-to-end: a backing reference list of curated
+    /// profiles plus the starter-pack record (with optional feeds). Mirrors
+    /// RN's `useCreateStarterPackMutation` flow which first creates the list,
+    /// fans out `applyWrites` to add list-item members, then creates the
+    /// starter-pack record. Returns `true` on success.
+    func createStarterPackWithProfiles(
+        name: String,
+        description: String?,
+        profileDIDs: [DID],
+        feedURIs: [ATURI]
+    ) async -> Bool
     func loadStarterPack(uri: ATURI) async
     func followAll(pack: StarterPackView) async
     func clearError()
@@ -191,6 +202,110 @@ public final class ListsStore: ListsStoring {
             )
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    /// Wizard create path. Mirrors RN's `useCreateStarterPackMutation` /
+    /// `createStarterPackList` two-step:
+    ///
+    /// 1. Create a `app.bsky.graph.list` record (purpose `referencelist`).
+    /// 2. Fan out `com.atproto.repo.applyWrites` with the curated members.
+    /// 3. Create the `app.bsky.graph.starterpack` record pointing at the list
+    ///    URI plus optional feeds.
+    ///
+    /// The list and members must exist before the starter pack record can
+    /// reference them, so we cannot land all writes in a single `applyWrites`
+    /// call (the listitem rows need the new list's URI). This matches RN.
+    public func createStarterPackWithProfiles(
+        name: String,
+        description: String?,
+        profileDIDs: [DID],
+        feedURIs: [ATURI]
+    ) async -> Bool {
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("createStarterPackWithProfiles: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            self.error = error.localizedDescription
+            return false
+        }
+        guard let viewerDID else {
+            self.error = "Not signed in"
+            return false
+        }
+
+        // 1) Create the backing list (referencelist purpose, matching RN).
+        let listRecord = ListRecord(
+            name: name,
+            description: description,
+            purpose: "app.bsky.graph.defs#referencelist"
+        )
+        let listURI: ATURI
+        do {
+            let resp: CreateRecordResponse = try await network.post(
+                lexicon: "com.atproto.repo.createRecord",
+                body: CreateRecordRequest(
+                    repo: viewerDID.rawValue,
+                    collection: "app.bsky.graph.list",
+                    record: listRecord
+                )
+            )
+            listURI = resp.uri
+        } catch {
+            logger.error("createStarterPackWithProfiles: list create failed: \(error.localizedDescription, privacy: .public)")
+            self.error = error.localizedDescription
+            return false
+        }
+
+        // 2) Apply writes for each member. Chunk at 50 to stay under server
+        //    limits (matches RN's `chunk(profiles, 50)`).
+        if !profileDIDs.isEmpty {
+            let chunks = stride(from: 0, to: profileDIDs.count, by: 50).map {
+                Array(profileDIDs[$0..<min($0 + 50, profileDIDs.count)])
+            }
+            for batch in chunks {
+                let writes: [WriteOp] = batch.map { did in
+                    .create(WriteCreate(
+                        collection: "app.bsky.graph.listitem",
+                        value: ListItemRecord(list: listURI, subject: did)
+                    ))
+                }
+                do {
+                    let _: ApplyWritesResponse = try await network.post(
+                        lexicon: "com.atproto.repo.applyWrites",
+                        body: ApplyWritesRequest(repo: viewerDID, writes: writes)
+                    )
+                } catch {
+                    logger.error("createStarterPackWithProfiles: applyWrites failed: \(error.localizedDescription, privacy: .public)")
+                    self.error = error.localizedDescription
+                    return false
+                }
+            }
+        }
+
+        // 3) Create the starter-pack record referencing the new list.
+        let feedItems = feedURIs.isEmpty ? nil : feedURIs.map { StarterPackFeedItem(uri: $0) }
+        let packRecord = StarterPackRecord(
+            name: name,
+            description: description,
+            list: listURI,
+            feeds: feedItems
+        )
+        do {
+            let _: CreateRecordResponse = try await network.post(
+                lexicon: "com.atproto.repo.createRecord",
+                body: CreateRecordRequest(
+                    repo: viewerDID.rawValue,
+                    collection: "app.bsky.graph.starterpack",
+                    record: packRecord
+                )
+            )
+            return true
+        } catch {
+            logger.error("createStarterPackWithProfiles: starterpack create failed: \(error.localizedDescription, privacy: .public)")
+            self.error = error.localizedDescription
+            return false
         }
     }
 

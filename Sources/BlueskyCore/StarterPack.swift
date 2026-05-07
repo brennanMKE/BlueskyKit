@@ -73,23 +73,48 @@ public struct StarterPackBasic: Decodable, Sendable {
 
 // MARK: - Starter pack record (app.bsky.graph.starterpack)
 
+/// A reference to a feed inside a starter pack record. The lexicon stores
+/// each entry as `{uri: AT-URI}`; the appview hydrates these into full
+/// `GeneratorView` objects when it returns the `StarterPackView`.
+public struct StarterPackFeedItem: Encodable, Sendable {
+    public let uri: String
+
+    public init(uri: ATURI) {
+        self.uri = uri.rawValue
+    }
+}
+
 /// A starter pack record for use with `com.atproto.repo.createRecord`.
+///
+/// Mirrors the RN client's `app.bsky.graph.starterpack` payload — the record
+/// references the curated list of profiles and an optional set of suggested
+/// feeds. RN reference: `state/queries/starter-packs.ts`
+/// (`useCreateStarterPackMutation`).
 public struct StarterPackRecord: Encodable, Sendable {
     private let type: String = "app.bsky.graph.starterpack"
     public let name: String
     public let description: String?
     /// AT-URI of the list backing this starter pack.
     public let list: String
+    /// Optional curated feeds attached to the pack. Up to three in RN.
+    public let feeds: [StarterPackFeedItem]?
     public let createdAt: Date
 
     private enum CodingKeys: String, CodingKey {
-        case type = "$type", name, description, list, createdAt
+        case type = "$type", name, description, list, feeds, createdAt
     }
 
-    public init(name: String, description: String? = nil, list: ATURI, createdAt: Date = .now) {
+    public init(
+        name: String,
+        description: String? = nil,
+        list: ATURI,
+        feeds: [StarterPackFeedItem]? = nil,
+        createdAt: Date = .now
+    ) {
         self.name = name
         self.description = description
         self.list = list.rawValue
+        self.feeds = feeds
         self.createdAt = createdAt
     }
 }
