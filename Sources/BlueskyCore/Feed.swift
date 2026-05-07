@@ -57,6 +57,87 @@ public struct GetPostsResponse: Decodable, Sendable {
     }
 }
 
+// MARK: - Get likes (app.bsky.feed.getLikes)
+
+/// One entry in `app.bsky.feed.getLikes`'s response — the actor that liked
+/// the subject post plus indexing/creation timestamps. Mirrors the `like`
+/// element in `AppBskyFeedGetLikes.OutputSchema` from the RN client (see
+/// `Bluesky-ReactNative/src/state/queries/post-liked-by.ts`).
+public struct LikeActor: Decodable, Sendable {
+    public let indexedAt: Date?
+    public let createdAt: Date?
+    public let actor: ProfileView
+
+    public init(indexedAt: Date?, createdAt: Date?, actor: ProfileView) {
+        self.indexedAt = indexedAt
+        self.createdAt = createdAt
+        self.actor = actor
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case indexedAt, createdAt, actor
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        indexedAt = try c.decodeIfPresent(Date.self, forKey: .indexedAt)
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
+        actor = try c.decode(ProfileView.self, forKey: .actor)
+    }
+}
+
+/// Response from `app.bsky.feed.getLikes`. Returns the subject `uri` / `cid`
+/// for verification plus a paginated list of `likes`.
+public struct GetLikesResponse: Decodable, Sendable {
+    public let uri: ATURI
+    public let cid: CID?
+    public let likes: [LikeActor]
+    public let cursor: Cursor?
+
+    public init(uri: ATURI, cid: CID?, likes: [LikeActor], cursor: Cursor?) {
+        self.uri = uri
+        self.cid = cid
+        self.likes = likes
+        self.cursor = cursor
+    }
+}
+
+// MARK: - Get reposted by (app.bsky.feed.getRepostedBy)
+
+/// Response from `app.bsky.feed.getRepostedBy`. The lexicon returns a
+/// paginated list of profiles that reposted the subject post.
+public struct GetRepostedByResponse: Decodable, Sendable {
+    public let uri: ATURI
+    public let cid: CID?
+    public let repostedBy: [ProfileView]
+    public let cursor: Cursor?
+
+    public init(uri: ATURI, cid: CID?, repostedBy: [ProfileView], cursor: Cursor?) {
+        self.uri = uri
+        self.cid = cid
+        self.repostedBy = repostedBy
+        self.cursor = cursor
+    }
+}
+
+// MARK: - Get quotes (app.bsky.feed.getQuotes)
+
+/// Response from `app.bsky.feed.getQuotes`. Returns a paginated list of
+/// `PostView`s that quote the subject post.
+public struct GetQuotesResponse: Decodable, Sendable {
+    public let uri: ATURI
+    public let cid: CID?
+    public let posts: [PostView]
+    public let cursor: Cursor?
+
+    public init(uri: ATURI, cid: CID?, posts: [PostView], cursor: Cursor?) {
+        self.uri = uri
+        self.cid = cid
+        self.posts = posts
+        self.cursor = cursor
+    }
+}
+
 // MARK: - Create / delete record (com.atproto.repo.*)
 
 public struct CreateRecordRequest<T: Encodable & Sendable>: Encodable, Sendable {

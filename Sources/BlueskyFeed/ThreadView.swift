@@ -13,6 +13,14 @@ public struct ThreadView: View {
     private let bookmarks: (any BookmarkStoring)?
     private let onAuthorTap: ((ProfileBasic) -> Void)?
     private let onPostTap: ((PostView) -> Void)?
+    /// Tap on the focal post's "X likes" stat — parent pushes `LikedByScreen`.
+    /// Wired through callbacks (rather than internal `navigationDestination`)
+    /// so the destination screens can be hosted next to existing destinations
+    /// in `MainTabView` without `BlueskyFeed` taking a dependency on them.
+    /// The actual stat-row UI that fires these is the responsibility of #0146.
+    private let onLikedByTap: ((ATURI) -> Void)?
+    private let onRepostedByTap: ((ATURI) -> Void)?
+    private let onQuotesTap: ((ATURI) -> Void)?
 
     @State private var viewModel: ThreadViewModel
     @State private var replyTarget: PostView? = nil
@@ -25,7 +33,10 @@ public struct ThreadView: View {
         accountStore: any AccountStore,
         bookmarks: (any BookmarkStoring)? = nil,
         onAuthorTap: ((ProfileBasic) -> Void)? = nil,
-        onPostTap: ((PostView) -> Void)? = nil
+        onPostTap: ((PostView) -> Void)? = nil,
+        onLikedByTap: ((ATURI) -> Void)? = nil,
+        onRepostedByTap: ((ATURI) -> Void)? = nil,
+        onQuotesTap: ((ATURI) -> Void)? = nil
     ) {
         self.uri = uri
         self.network = network
@@ -33,6 +44,9 @@ public struct ThreadView: View {
         self.bookmarks = bookmarks
         self.onAuthorTap = onAuthorTap
         self.onPostTap = onPostTap
+        self.onLikedByTap = onLikedByTap
+        self.onRepostedByTap = onRepostedByTap
+        self.onQuotesTap = onQuotesTap
         _viewModel = State(wrappedValue: ThreadViewModel(network: network, uri: uri))
     }
 
@@ -89,7 +103,10 @@ public struct ThreadView: View {
                 accountStore: accountStore,
                 bookmarks: bookmarks,
                 onAuthorTap: onAuthorTap,
-                onPostTap: onPostTap
+                onPostTap: onPostTap,
+                onLikedByTap: onLikedByTap,
+                onRepostedByTap: onRepostedByTap,
+                onQuotesTap: onQuotesTap
             )
         }
     }
