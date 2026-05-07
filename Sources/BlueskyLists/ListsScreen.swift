@@ -56,29 +56,22 @@ public struct ListsScreen: View {
                     description: Text("Lists you create will appear here.")
                 )
             } else {
-                ForEach(viewModel.lists, id: \.uri) { list in
-                    NavigationLink {
-                        ListDetailScreen(
-                            listURI: list.uri,
-                            network: network,
-                            accountStore: accountStore,
-                            viewerDID: viewerDID,
-                            onProfileTap: onProfileTap
-                        )
-                    } label: {
-                        ListRow(list: list)
-                    }
-                    .onAppear {
-                        if list.uri == viewModel.lists.last?.uri {
-                            Task { await viewModel.loadMore(actorDID: actorDID) }
-                        }
-                    }
+                // "My Lists" — lists the viewer authored. Mirrors RN's
+                // `MyLists filter="curate"` which only fetches lists where
+                // `actor === currentAccount.did`. Owner-only edit / delete
+                // affordances live inside `ListDetailScreen` (#0127).
+                Section("My Lists") {
+                    ownedSection
                 }
-                .onDelete { indexSet in
-                    for index in indexSet {
-                        let list = viewModel.lists[index]
-                        Task { await viewModel.deleteList(uri: list.uri) }
-                    }
+
+                // "Subscribed" — lists the viewer has subscribed to without
+                // owning. RN's curate hub doesn't surface these (they flow
+                // through `getListMutes` for the `mod` filter only); kept
+                // here as a placeholder so the section structure mirrors
+                // mod-list parity expectations. Will be empty in the curate
+                // hub by design — see #0131 notes.
+                Section("Subscribed") {
+                    subscribedSection
                 }
             }
         }
@@ -108,12 +101,84 @@ public struct ListsScreen: View {
         .refreshable { await viewModel.loadLists(actorDID: actorDID) }
         .task {
             // Resolve the signed-in viewer DID once so the detail screen
-            // can surface owner-only edit/delete affordances. We swallow
-            // errors here — failure just means edit/delete stays hidden.
+            // can surface owner-only edit/delete affordances and so the
+            // hub can split owned vs subscribed lists. Swallow errors —
+            // failure just means owner-only affordances stay hidden and
+            // every list lands in "My Lists" (the historical flat view).
+            await viewModel.resolveViewerDID()
             if viewerDID == nil {
-                viewerDID = try? await accountStore.loadCurrentDID()
+                viewerDID = viewModel.viewerDID
             }
             await viewModel.loadLists(actorDID: actorDID)
+        }
+    }
+
+    // MARK: - Sections
+
+    /// Rows for lists the viewer authored. When logged out the view model
+    /// falls back to returning the full list set so we never strand rows.
+    @ViewBuilder
+    private var ownedSection: some View {
+        let owned = viewModel.ownedLists
+        if owned.isEmpty {
+            Text("Lists you create will appear here.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(owned, id: \.uri) { list in
+                NavigationLink {
+                    ListDetailScreen(
+                        listURI: list.uri,
+                        network: network,
+                        accountStore: accountStore,
+                        viewerDID: viewerDID,
+                        onProfileTap: onProfileTap
+                    )
+                } label: {
+                    ListRow(list: list)
+                }
+                .onAppear {
+                    // Paginate against the underlying flat list so the
+                    // tail-of-list trigger fires regardless of which
+                    // section the last row landed in.
+                    if list.uri == viewModel.lists.last?.uri {
+                        Task { await viewModel.loadMore(actorDID: actorDID) }
+                    }
+                }
+            }
+            .onDelete { indexSet in
+                for index in indexSet {
+                    let list = owned[index]
+                    Task { await viewModel.deleteList(uri: list.uri) }
+                }
+            }
+        }
+    }
+
+    /// Rows for lists the viewer is subscribed to without owning. RN's
+    /// curate hub doesn't fetch these — see `subscribedLists` on the
+    /// view model — so the placeholder is the expected steady state.
+    @ViewBuilder
+    private var subscribedSection: some View {
+        let subscribed = viewModel.subscribedLists
+        if subscribed.isEmpty {
+            Text("Subscribed lists will appear here.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(subscribed, id: \.uri) { list in
+                NavigationLink {
+                    ListDetailScreen(
+                        listURI: list.uri,
+                        network: network,
+                        accountStore: accountStore,
+                        viewerDID: viewerDID,
+                        onProfileTap: onProfileTap
+                    )
+                } label: {
+                    ListRow(list: list)
+                }
+            }
         }
     }
 }

@@ -10,6 +10,29 @@ public final class ListsViewModel {
     public var isLoading: Bool { store.isLoading }
     public var error: String? { store.error }
 
+    /// Resolved on first `loadLists` so the computed split arrays don't have
+    /// to hop the actor every read. Stays `nil` when logged out, in which
+    /// case `ownedLists` returns everything (matches the existing flat view).
+    public private(set) var viewerDID: DID?
+
+    /// Lists the signed-in viewer authored. Mirrors RN's `useMyListsQuery`
+    /// with `filter: 'curate'`, which only fetches `getLists({actor: viewerDID})`.
+    public var ownedLists: [ListView] {
+        guard let viewerDID else { return store.lists }
+        return store.lists.filter { $0.creator.did == viewerDID }
+    }
+
+    /// Lists the viewer is subscribed to without owning. RN's curate hub
+    /// (`MyLists filter="curate"`) does not surface subscribed curate lists —
+    /// those flow through `getListMutes`/`getListBlocks` only for the `mod`
+    /// filter (which has its own screen). Kept here so the section header
+    /// renders alongside "My Lists" for symmetry with mod lists; when empty
+    /// the screen shows the placeholder copy.
+    public var subscribedLists: [ListView] {
+        guard let viewerDID else { return [] }
+        return store.lists.filter { $0.creator.did != viewerDID }
+    }
+
     private let store: any ListsStoring
     private let accountStore: any AccountStore
 
@@ -20,6 +43,15 @@ public final class ListsViewModel {
 
     func currentDID() async throws -> String? {
         try await accountStore.loadCurrentDID()?.rawValue
+    }
+
+    /// Resolves the signed-in viewer DID and caches it on the view model.
+    /// The lists hub uses this to split owned vs subscribed lists. Failures
+    /// leave `viewerDID == nil`, which is the same as the logged-out path.
+    public func resolveViewerDID() async {
+        if viewerDID == nil {
+            viewerDID = try? await accountStore.loadCurrentDID()
+        }
     }
 
     public func loadLists(actorDID: String) async { await store.loadLists(actorDID: actorDID) }
