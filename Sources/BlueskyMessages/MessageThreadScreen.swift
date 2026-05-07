@@ -105,11 +105,19 @@ public struct MessageThreadScreen: View {
                         .padding(.vertical, 8)
                     }
                     ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
+                        if shouldShowDateDivider(at: index) {
+                            DateDivider(date: message.sentAt)
+                                .padding(.top, 8)
+                        }
                         MessageBubble(
                             message: message,
                             isOwn: viewModel.isOwn(message),
                             isGroup: isGroup,
                             isFirstInRun: isFirstInRun(at: index),
+                            isLastInRun: isLastInRun(at: index),
+                            timestampLabel: isLastInRun(at: index)
+                                ? Self.bubbleTimestamp(for: message.sentAt, now: Date())
+                                : nil,
                             senderProfile: senderProfile(for: message),
                             onDeleteRequested: { pendingDeleteMessage = message }
                         )
@@ -149,8 +157,59 @@ public struct MessageThreadScreen: View {
         return prev.sender.did != curr.sender.did
     }
 
+    /// Last message in a "run" of consecutive messages from the same sender —
+    /// the bubble that should anchor the per-message timestamp. Mirrors RN's
+    /// `isLastInCluster` from `MessageItem.tsx`.
+    private func isLastInRun(at index: Int) -> Bool {
+        let messages = viewModel.messages
+        guard index + 1 < messages.count else { return true }
+        return messages[index].sender.did != messages[index + 1].sender.did
+    }
+
+    /// Whether a date divider should appear above the message at `index`.
+    /// Always shows for the first message; otherwise only when the calendar
+    /// day differs from the previous message — matching RN's `DateDivider`
+    /// rendering in `MessageItem.tsx`.
+    private func shouldShowDateDivider(at index: Int) -> Bool {
+        let messages = viewModel.messages
+        guard index > 0 else { return true }
+        let prev = messages[index - 1].sentAt
+        let curr = messages[index].sentAt
+        return !Calendar.current.isDate(prev, inSameDayAs: curr)
+    }
+
     private func senderProfile(for message: MessageView) -> ProfileBasic? {
         members.first(where: { $0.did == message.sender.did })
+    }
+
+    /// Per-bubble timestamp matching RN's `niceDate` short-form behaviour.
+    /// - Today: short time only ("3:42 PM")
+    /// - Yesterday: "Yesterday 3:42 PM"
+    /// - Older: short date + time ("Mar 4, 3:42 PM"; year added if not current)
+    /// Public-static so it stays pure and trivially testable.
+    static func bubbleTimestamp(for date: Date, now: Date) -> String {
+        let cal = Calendar.current
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.locale = Locale.current
+        timeFormatter.setLocalizedDateFormatFromTemplate("jm")
+        let time = timeFormatter.string(from: date)
+
+        if cal.isDate(date, inSameDayAs: now) {
+            return time
+        }
+        if cal.isDateInYesterday(date) {
+            return "Yesterday \(time)"
+        }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale.current
+        if cal.component(.year, from: date) == cal.component(.year, from: now) {
+            dateFormatter.setLocalizedDateFormatFromTemplate("MMMd")
+        } else {
+            dateFormatter.setLocalizedDateFormatFromTemplate("MMMdyyyy")
+        }
+        return "\(dateFormatter.string(from: date)) \(time)"
     }
 
     // MARK: - Compose bar
@@ -231,6 +290,12 @@ private struct MessageBubble: View {
     let isOwn: Bool
     var isGroup: Bool = false
     var isFirstInRun: Bool = true
+    /// Whether this is the *last* bubble in a run from the same sender. RN
+    /// anchors the per-message timestamp on the last bubble of the cluster.
+    var isLastInRun: Bool = true
+    /// Pre-formatted timestamp string to render beneath the bubble; only set
+    /// when `isLastInRun` is true (parent decides). `nil` suppresses the row.
+    var timestampLabel: String? = nil
     var senderProfile: ProfileBasic? = nil
     /// Invoked when the user picks "Delete for me" from the context menu.
     /// The parent screen owns the confirmation prompt and the actual delete
@@ -297,6 +362,17 @@ private struct MessageBubble: View {
                         .padding(.vertical, 8)
                         .background(isOwn ? Color.accentColor : Color.secondary.opacity(0.15),
                                     in: RoundedRectangle(cornerRadius: 16))
+                }
+                // Per-message timestamp — RN renders it beneath the *last*
+                // bubble in a same-sender cluster (see MessageItem.tsx →
+                // `effectiveLastInCluster && <MessageItemMetadata …/>`).
+                if isLastInRun, let stamp = timestampLabel {
+                    Text(stamp)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.top, 1)
+                        .accessibilityLabel("Sent \(stamp)")
                 }
             }
 
@@ -403,6 +479,71 @@ private struct MessageBubble: View {
                 .accessibilityLabel(img.alt.isEmpty ? "Image" : img.alt)
             }
         }
+    }
+}
+
+// MARK: - Date divider
+
+/// Centered date pill rendered between groups of messages from different days.
+/// Mirrors RN's `DateDivider` (`components/dms/DateDivider.tsx`) which renders
+/// "Today at 3:42 PM", "Yesterday at 3:42 PM", or "Mon, March 4 at 3:42 PM".
+private struct DateDivider: View {
+    let date: Date
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.25))
+                .frame(height: 1)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
+            Rectangle()
+                .fill(Color.secondary.opacity(0.25))
+                .frame(height: 1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Messages from \(label)")
+    }
+
+    /// "Today at 3:42 PM" / "Yesterday at 3:42 PM" / "Mon, Mar 4 at 3:42 PM".
+    /// Uses the localized "j" hour-cycle template so 12/24-hour follows the
+    /// user's locale, matching RN's `Intl.DateTimeFormat({timeStyle:'short'})`.
+    private var label: String {
+        let now = Date()
+        let cal = Calendar.current
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.locale = Locale.current
+        timeFormatter.setLocalizedDateFormatFromTemplate("jm")
+        let time = timeFormatter.string(from: date)
+
+        let dayString: String
+        if cal.isDateInToday(date) {
+            dayString = "Today"
+        } else if cal.isDateInYesterday(date) {
+            dayString = "Yesterday"
+        } else {
+            let dateFormatter = DateFormatter()
+            dateFormatter.locale = Locale.current
+            // Within a week → weekday only ("Monday"); otherwise short date.
+            // Mirrors RN's branch on `timestamp < oneWeekAgo`.
+            let oneWeekAgo = cal.date(byAdding: .day, value: -7, to: now) ?? now
+            if date >= oneWeekAgo {
+                dateFormatter.setLocalizedDateFormatFromTemplate("EEEE")
+            } else if cal.component(.year, from: date) == cal.component(.year, from: now) {
+                dateFormatter.setLocalizedDateFormatFromTemplate("EEEMMMMd")
+            } else {
+                dateFormatter.setLocalizedDateFormatFromTemplate("EEEMMMMdyyyy")
+            }
+            dayString = dateFormatter.string(from: date)
+        }
+
+        return "\(dayString) at \(time)"
     }
 }
 
