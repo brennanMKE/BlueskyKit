@@ -6,27 +6,42 @@ import BlueskyUI
 public struct SettingsScreen: View {
     @State private var viewModel: SettingsViewModel
     private let network: any NetworkClient
+    private let currentAccount: Account?
     private let onModerationTap: (() -> Void)?
     private let onSignOut: () -> Void
+    /// Called when the user successfully deactivates their account from the
+    /// Account settings hub. The host should sign the user out so the
+    /// RootView gate routes them to `DeactivatedView` on next sign-in
+    /// (mirrors RN's `logoutCurrentAccount('Deactivated')`). Defaults to
+    /// `onSignOut` for callers that don't need a distinct hook.
+    private let onAccountDeactivated: () -> Void
 
     public init(
         preferences: any PreferencesStore,
         accountStore: any AccountStore,
         network: any NetworkClient,
+        currentAccount: Account? = nil,
         onModerationTap: (() -> Void)? = nil,
-        onSignOut: @escaping () -> Void
+        onSignOut: @escaping () -> Void,
+        onAccountDeactivated: (() -> Void)? = nil
     ) {
         _viewModel = State(initialValue: SettingsViewModel(preferences: preferences, accountStore: accountStore))
         self.network = network
+        self.currentAccount = currentAccount
         self.onModerationTap = onModerationTap
         self.onSignOut = onSignOut
+        self.onAccountDeactivated = onAccountDeactivated ?? onSignOut
     }
 
     public var body: some View {
         List {
             Section("Account") {
                 NavigationLink {
-                    AccountSettingsScreen(accountStore: viewModel)
+                    AccountSettingsScreen(
+                        network: network,
+                        account: currentAccount,
+                        onDeactivated: onAccountDeactivated
+                    )
                 } label: {
                     Label("Account", systemImage: "person.circle")
                 }
@@ -112,23 +127,6 @@ public struct SettingsScreen: View {
         }
         .navigationTitle("Settings")
         .onAppear { viewModel.load() }
-    }
-}
-
-// MARK: - AccountSettingsScreen protocol adapter (avoids circular dep)
-
-private struct AccountSettingsScreen: View {
-    let accountStore: SettingsViewModel
-
-    var body: some View {
-        Form {
-            Section("App Preferences") {
-                Text("Account settings like email and password changes require signing in via bsky.app or your PDS directly.")
-                    .foregroundStyle(.secondary)
-                    .font(.subheadline)
-            }
-        }
-        .navigationTitle("Account")
     }
 }
 

@@ -139,6 +139,10 @@ public struct GetPreferencesResponse: Decodable, Sendable {
     public let adultContentEnabled: Bool
     public let contentLabels: [ContentLabelPref]
     public let savedFeeds: [SavedFeed]
+    /// `app.bsky.actor.defs#personalDetailsPref.birthDate`, if the server has
+    /// one stored. Used by the Account settings hub to show / edit the user's
+    /// birthday. Optional because pre-existing accounts may not have it.
+    public let birthDate: Date?
 
     private enum OuterKeys: String, CodingKey { case preferences }
 
@@ -156,8 +160,9 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             let visibility: String?
             let labelerDid: DID?
             let feedItems: [FeedItemHelper]?
+            let birthDate: String?
             private enum CodingKeys: String, CodingKey {
-                case type = "$type", enabled, label, visibility, labelerDid
+                case type = "$type", enabled, label, visibility, labelerDid, birthDate
                 case feedItems = "items"
             }
         }
@@ -181,6 +186,12 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             .feedItems?
             .map { SavedFeed(id: $0.id, type: $0.type, value: $0.value, pinned: $0.pinned) }
             ?? []
+
+        let parser = ISO8601DateFormatter()
+        self.birthDate = items
+            .first { $0.type == "app.bsky.actor.defs#personalDetailsPref" }?
+            .birthDate
+            .flatMap { parser.date(from: $0) }
     }
 }
 
@@ -245,6 +256,26 @@ public struct PutPreferencesRequest: Encodable, Sendable {
             var c = encoder.container(keyedBy: K.self)
             try c.encode("app.bsky.actor.defs#interestsPref", forKey: .type)
             try c.encode(tags, forKey: .tags)
+        }
+    }
+
+    /// Writes a `personalDetailsPref` with the user's birth date. Mirrors the
+    /// `birthDate`-only branch RN takes from `BirthDateSettingsDialog` —
+    /// `agent.setPersonalDetails({birthDate})`. Note that the AT Proto spec
+    /// stores birth date inside `personalDetailsPref`, not as a top-level
+    /// preference; this initializer picks that single field.
+    public init(birthDate: Date) {
+        self.preferences = [AnyEncodable(_PersonalDetailsPref(birthDate: birthDate))]
+    }
+
+    private struct _PersonalDetailsPref: Encodable, Sendable {
+        let birthDate: Date
+        private enum K: String, CodingKey { case type = "$type", birthDate }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: K.self)
+            let fmt = ISO8601DateFormatter()
+            try c.encode("app.bsky.actor.defs#personalDetailsPref", forKey: .type)
+            try c.encode(fmt.string(from: birthDate), forKey: .birthDate)
         }
     }
 }

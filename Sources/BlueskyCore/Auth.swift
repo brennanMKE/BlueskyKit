@@ -156,6 +156,67 @@ public struct GetSessionResponse: Decodable, Sendable {
 /// response. Use `EmptyResponse`-style decoding (or just discard the body).
 public enum ActivateAccount {}
 
+// MARK: - com.atproto.server.requestEmailConfirmation
+//
+// Takes no body, returns an empty body. The PDS sends a verification email to
+// the account's current email address. Used by the Account settings hub when
+// `emailConfirmed == false`.
+public struct EmptyBody: Encodable, Sendable {
+    public init() {}
+}
+
+// MARK: - com.atproto.server.requestEmailUpdate
+//
+// Takes no body. The response indicates whether the PDS will require a token
+// (sent by email) before applying the new email via `updateEmail`.
+public struct RequestEmailUpdateResponse: Decodable, Sendable {
+    public let tokenRequired: Bool
+    public init(tokenRequired: Bool) { self.tokenRequired = tokenRequired }
+}
+
+// MARK: - com.atproto.server.updateEmail
+//
+// Submit the new email address (and optional confirmation token). Empty body
+// on success.
+public struct UpdateEmailRequest: Encodable, Sendable {
+    public let email: String
+    public let token: String?
+    public init(email: String, token: String? = nil) {
+        self.email = email
+        self.token = token
+    }
+}
+
+// MARK: - com.atproto.identity.updateHandle
+//
+// Submit the new handle the user wants to claim. Empty body on success;
+// throws on conflict / unavailable handle. RN posts directly via the agent.
+public struct UpdateHandleRequest: Encodable, Sendable {
+    public let handle: String
+    public init(handle: String) { self.handle = handle }
+}
+
+// MARK: - com.atproto.server.deactivateAccount
+//
+// Optional `deleteAfter` ISO-8601 timestamp. When omitted, deactivation has
+// no time limit. Empty body on success. Mirrors RN's
+// `agent.com.atproto.server.deactivateAccount({})`.
+public struct DeactivateAccountRequest: Encodable, Sendable {
+    public let deleteAfter: Date?
+    public init(deleteAfter: Date? = nil) {
+        self.deleteAfter = deleteAfter
+    }
+
+    private enum CodingKeys: String, CodingKey { case deleteAfter }
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        if let deleteAfter {
+            let fmt = ISO8601DateFormatter()
+            try c.encode(fmt.string(from: deleteAfter), forKey: .deleteAfter)
+        }
+    }
+}
+
 // MARK: - com.atproto.server.requestPasswordReset
 
 /// Request body for `com.atproto.server.requestPasswordReset`. The server
