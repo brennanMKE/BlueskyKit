@@ -229,6 +229,24 @@ public struct PutPreferencesRequest: Encodable, Sendable {
             try c.encode(items, forKey: .items)
         }
     }
+
+    /// Onboarding writes selected interest tags as an
+    /// `app.bsky.actor.defs#interestsPref`. The lexicon carries a single
+    /// `tags: string[]` field (max length 100). Mirrors RN's
+    /// `agent.setInterestsPref({tags})` from `StepFinished/index.tsx`.
+    public init(interests: [String]) {
+        self.preferences = [AnyEncodable(_InterestsPref(tags: interests))]
+    }
+
+    private struct _InterestsPref: Encodable, Sendable {
+        let tags: [String]
+        private enum K: String, CodingKey { case type = "$type", tags }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: K.self)
+            try c.encode("app.bsky.actor.defs#interestsPref", forKey: .type)
+            try c.encode(tags, forKey: .tags)
+        }
+    }
 }
 
 // MARK: - app.bsky.labeler.getServices response

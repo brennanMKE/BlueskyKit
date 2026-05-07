@@ -35,6 +35,19 @@ public struct GetSuggestedFeedsResponse: Decodable, Sendable {
     public let cursor: String?
 }
 
+// MARK: - app.bsky.unspecced.getSuggestedOnboardingUsers
+
+/// Response shape for `app.bsky.unspecced.getSuggestedOnboardingUsers` —
+/// a per-interest, language-aware set of suggested accounts shown during
+/// onboarding. RN reference: `state/queries/trending/useGetSuggestedOnboardingUsersQuery.ts`.
+public struct GetSuggestedOnboardingUsersResponse: Decodable, Sendable {
+    public let actors: [ProfileView]
+    /// Identifier the server returns so client analytics can attribute follows
+    /// back to a specific recommendation batch. Optional — falls back to `nil`
+    /// when omitted.
+    public let recIdStr: String?
+}
+
 // MARK: - app.bsky.unspecced.getTrendingTopics
 
 public struct TrendingTopic: Codable, Sendable {

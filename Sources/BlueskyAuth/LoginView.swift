@@ -10,6 +10,7 @@ public struct LoginView: View {
 
     private let session: SessionManager
     private let onSuccess: () -> Void
+    private let onSignupSuccess: () -> Void
 
     @State private var handle = ""
     @State private var password = ""
@@ -25,9 +26,24 @@ public struct LoginView: View {
 
     private enum Field: Hashable { case handle, password, authFactor, serviceURL }
 
-    public init(session: SessionManager, onSuccess: @escaping () -> Void) {
+    /// Creates a login view.
+    ///
+    /// - Parameters:
+    ///   - session: the live `SessionManager`.
+    ///   - onSuccess: invoked on a successful **sign-in**. Existing accounts.
+    ///   - onSignupSuccess: invoked on a successful **create-account**.
+    ///     Distinguished from `onSuccess` so the host app can route
+    ///     newly-signed-up accounts into the post-signup onboarding flow
+    ///     (`BlueskyOnboarding.OnboardingFlowView`). Defaults to calling
+    ///     `onSuccess` for backwards compatibility with previous call sites.
+    public init(
+        session: SessionManager,
+        onSuccess: @escaping () -> Void,
+        onSignupSuccess: (() -> Void)? = nil
+    ) {
         self.session = session
         self.onSuccess = onSuccess
+        self.onSignupSuccess = onSignupSuccess ?? onSuccess
     }
 
     public var body: some View {
@@ -51,7 +67,7 @@ public struct LoginView: View {
                 session: session,
                 onSuccess: {
                     showSignup = false
-                    onSuccess()
+                    onSignupSuccess()
                 },
                 onCancel: {
                     showSignup = false
