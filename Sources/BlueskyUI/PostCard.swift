@@ -1,5 +1,6 @@
 import SwiftUI
 import BlueskyCore
+import Translation
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -15,6 +16,12 @@ public struct PostCard: View {
     var actions: Actions?
 
     @Environment(\.blueskyTheme) private var theme
+
+    /// Toggles the system Translation popover (`.translationPresentation`).
+    /// Set by the inline "Translate" link and the ellipsis-menu "Translate
+    /// post" item — RN parity (#0143). Mirrors the per-message translate
+    /// pattern from #0106.
+    @State private var isTranslating: Bool = false
 
     public init(item: FeedViewPost, actions: Actions? = nil) {
         self.item = item
@@ -62,6 +69,9 @@ public struct PostCard: View {
                     VStack(alignment: .leading, spacing: Spacing.xs) {
                         authorHeader
                         postBody
+                        if shouldShowInlineTranslate {
+                            translateLink
+                        }
                         if let embed = item.post.embed {
                             embedView(for: embed)
                         }
@@ -77,6 +87,11 @@ public struct PostCard: View {
             .padding(.vertical, Spacing.sm)
         }
         .background(theme.colors.background)
+        // Drives the system Translate sheet (#0143). Mirrors the RN
+        // `TranslatedPost` flow: tapping the inline "Translate" link or the
+        // ellipsis-menu "Translate post" item flips this flag, which presents
+        // Apple's TranslationKit UI on iOS 17.4+ / macOS 14.4+.
+        .translationPresentation(isPresented: $isTranslating, text: item.post.record.text)
     }
 
     /// Render a post embed, with image embeds extended toward the card edge.
@@ -153,6 +168,45 @@ public struct PostCard: View {
         }
     }
 
+    /// Inline "Translate" affordance shown directly below the post body when
+    /// the post's declared language differs from the viewer's current
+    /// language. RN parity (#0143): mirrors `TranslatedPost`'s
+    /// `TranslationLink`. Tapping it flips `isTranslating`, which presents
+    /// the system translation sheet via `.translationPresentation(...)`.
+    private var translateLink: some View {
+        Button {
+            isTranslating = true
+        } label: {
+            Text("Translate")
+                .font(Typography.bodySmall)
+                .foregroundStyle(theme.colors.link)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Translate post")
+    }
+
+    /// `true` when the post body has enough text to warrant translation and
+    /// its declared language differs from the viewer's current language.
+    /// Pragmatic check (per #0143 spec): compares `post.record.langs[0]`
+    /// against `Locale.current.language.languageCode`. A real implementation
+    /// would use the user's content-language preferences from
+    /// `LanguageSettingsViewModel`, but the BCP-47 primary tag check is a
+    /// reasonable first pass that matches RN behavior on monolingual users.
+    private var shouldShowInlineTranslate: Bool {
+        let text = item.post.record.text
+        guard text.count > 20 else { return false }
+        guard let postLang = item.post.record.langs?.first, !postLang.isEmpty else {
+            return false
+        }
+        let viewerLang = Locale.current.language.languageCode?.identifier
+            ?? Locale.current.identifier.split(separator: "-").first.map(String.init)
+            ?? "en"
+        // BCP-47 tags can include region/script subtags (e.g. "en-US",
+        // "zh-Hant"); compare only the primary language subtag.
+        let postPrimary = postLang.split(separator: "-").first.map(String.init)?.lowercased() ?? ""
+        return postPrimary != viewerLang.lowercased()
+    }
+
     private var postBody: some View {
         // Extracted to `PostBodyView` (#0079) so non-feed surfaces — notification
         // rows in particular — can reuse the same font, color, and facet handling.
@@ -223,6 +277,16 @@ public struct PostCard: View {
                 } label: {
                     Label("Copy post text", systemImage: "doc.on.doc")
                 }
+
+                // RN parity (#0143): "Translate post" is offered in the
+                // ellipsis menu regardless of the post's source language.
+                // Disabled when the post body is empty (image-only post).
+                Button {
+                    isTranslating = true
+                } label: {
+                    Label("Translate post", systemImage: "character.bubble")
+                }
+                .disabled(post.record.text.isEmpty)
 
                 Button {
                     actions?.onMore?(post)
