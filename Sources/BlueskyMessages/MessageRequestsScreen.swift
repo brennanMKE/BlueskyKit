@@ -116,6 +116,14 @@ private struct RequestConvoRow: View {
                         .italic()
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                } else if convo.lastMessage?.systemView != nil {
+                    // Group / system event preview — keep the cell informative
+                    // even when the most recent activity isn't a message.
+                    Text("Group updated")
+                        .font(.subheadline)
+                        .italic()
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
             }
             Spacer()

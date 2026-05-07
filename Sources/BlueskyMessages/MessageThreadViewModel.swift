@@ -6,14 +6,17 @@ import BlueskyKit
 @Observable
 public final class MessageThreadViewModel {
 
-    public var messages: [MessageView] { store.messages }
+    /// Discriminated row stream — see `ConvoMessage` for the variants. The
+    /// thread UI iterates this directly and dispatches each row to the right
+    /// cell (bubble, tombstone line, system event line).
+    public var messages: [ConvoMessage] { store.messages }
     public var isLoading: Bool { store.isLoading }
     public var isSending: Bool { store.isSending }
     public var errorMessage: String? { store.errorMessage }
     public var convo: ConvoView? { store.convo }
     public var hasOlderMessages: Bool { store.hasOlderMessages }
 
-    /// ID of the first message that arrived while the user was scrolled away
+    /// ID of the first row that arrived while the user was scrolled away
     /// from the bottom of the thread. RN parity: when set, the message list
     /// renders a centered "New messages" divider above this row so the reader
     /// can see where they left off (`MessagesList.tsx` → `NewMessagesPill` +
@@ -21,7 +24,7 @@ public final class MessageThreadViewModel {
     /// scrolls back to the bottom.
     public var firstUnreadID: String?
 
-    /// Number of messages that have arrived since the user scrolled away from
+    /// Number of rows that have arrived since the user scrolled away from
     /// the bottom — used to optionally surface a count on the floating "Jump
     /// to newest" pill. Reset to zero when `firstUnreadID` is cleared.
     public var unreadCount: Int = 0
@@ -36,9 +39,14 @@ public final class MessageThreadViewModel {
         self.store = MessageThreadStore(network: network)
     }
 
-    public func isOwn(_ message: MessageView) -> Bool {
+    /// Whether a row was authored by the signed-in viewer. System rows are
+    /// never the viewer's "own" message even when they performed the action,
+    /// because the bubble-side affordances (right-aligned, white-on-accent)
+    /// don't apply to a centered system line.
+    public func isOwn(_ message: ConvoMessage) -> Bool {
         guard let viewerDID else { return false }
-        return message.sender.did == viewerDID
+        guard case .message(let view) = message else { return false }
+        return view.sender.did == viewerDID
     }
 
     public func load() async { await store.load(convoId: convoId) }
@@ -82,10 +90,10 @@ public final class MessageThreadViewModel {
         unreadCount = 0
     }
 
-    /// Note that a new message arrived while the reader was scrolled up. If
-    /// no `firstUnreadID` is set yet (i.e. this is the first new message of
+    /// Note that a new row arrived while the reader was scrolled up. If
+    /// no `firstUnreadID` is set yet (i.e. this is the first new row of
     /// the run) we anchor the divider here. Subsequent calls just bump the
-    /// counter so the FAB can show how many messages are queued up.
+    /// counter so the FAB can show how many rows are queued up.
     public func noteNewUnread(messageID: String) {
         if firstUnreadID == nil {
             firstUnreadID = messageID

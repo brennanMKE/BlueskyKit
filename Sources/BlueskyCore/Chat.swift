@@ -31,10 +31,14 @@ public struct ConvoView: Codable, Sendable {
 }
 
 /// Discriminated union covering the variants `chat.bsky.convo.defs` may emit
-/// inside `convoView.lastMessage`.
+/// inside `convoView.lastMessage`. Mirrors `ConvoMessage` (the in-thread
+/// variant) but with its own decoder so the conversation-list row can render
+/// a sensible preview for every shape the server may serve as the most-recent
+/// item — including system events (members added, group renamed, etc.).
 public enum ConvoLastMessage: Codable, Sendable {
     case message(MessageView)
     case deleted(DeletedMessageView)
+    case system(SystemMessageView)
 
     private enum DiscriminatorKeys: String, CodingKey {
         case type = "$type"
@@ -47,6 +51,8 @@ public enum ConvoLastMessage: Codable, Sendable {
         switch type {
         case "chat.bsky.convo.defs#deletedMessageView":
             self = .deleted(try single.decode(DeletedMessageView.self))
+        case "chat.bsky.convo.defs#systemMessageView":
+            self = .system(try single.decode(SystemMessageView.self))
         case "chat.bsky.convo.defs#messageView", nil, "":
             // Default to message variant when the server omits `$type`.
             self = .message(try single.decode(MessageView.self))
@@ -55,6 +61,8 @@ public enum ConvoLastMessage: Codable, Sendable {
             // otherwise treat as deleted so the UI can render a placeholder.
             if let msg = try? single.decode(MessageView.self) {
                 self = .message(msg)
+            } else if let sys = try? single.decode(SystemMessageView.self) {
+                self = .system(sys)
             } else {
                 self = .deleted(try single.decode(DeletedMessageView.self))
             }
@@ -66,6 +74,7 @@ public enum ConvoLastMessage: Codable, Sendable {
         switch self {
         case .message(let m): try single.encode(m)
         case .deleted(let d): try single.encode(d)
+        case .system(let s): try single.encode(s)
         }
     }
 
@@ -81,20 +90,123 @@ public enum ConvoLastMessage: Codable, Sendable {
         return nil
     }
 
-    /// Convenience for sorting / time display — the timestamp of either variant.
+    /// Returns the system-message variant if this is a group/system event,
+    /// otherwise `nil`.
+    public var systemView: SystemMessageView? {
+        if case .system(let s) = self { return s }
+        return nil
+    }
+
+    /// Convenience for sorting / time display — the timestamp of any variant.
     public var sentAt: Date {
         switch self {
         case .message(let m): return m.sentAt
         case .deleted(let d): return d.sentAt
+        case .system(let s): return s.sentAt
         }
     }
 
-    /// The sender of either variant.
+    /// The sender of any variant. For system messages this is the actor that
+    /// performed the action (e.g. the user who added a member).
     public var sender: MessageSender {
         switch self {
         case .message(let m): return m.sender
         case .deleted(let d): return d.sender
+        case .system(let s): return s.sender
         }
+    }
+}
+
+// MARK: - chat.bsky.convo.defs#messageView (in-thread union)
+
+/// Discriminated union covering everything the `chat.bsky.convo.getMessages`
+/// endpoint may return in the `messages` array, plus everything the firehose
+/// streams into a thread. RN parity: `state/messages/convo/agent.ts` walks the
+/// equivalent union of `MessageView | DeletedMessageView | SystemMessageView`
+/// and the chat list itemizer renders a different cell for each variant.
+public enum ConvoMessage: Codable, Sendable, Identifiable {
+    case message(MessageView)
+    case deleted(DeletedMessageView)
+    case system(SystemMessageView)
+
+    private enum DiscriminatorKeys: String, CodingKey {
+        case type = "$type"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: DiscriminatorKeys.self)
+        let type = try container.decodeIfPresent(String.self, forKey: .type)
+        let single = try decoder.singleValueContainer()
+        switch type {
+        case "chat.bsky.convo.defs#deletedMessageView":
+            self = .deleted(try single.decode(DeletedMessageView.self))
+        case "chat.bsky.convo.defs#systemMessageView":
+            self = .system(try single.decode(SystemMessageView.self))
+        case "chat.bsky.convo.defs#messageView", nil, "":
+            self = .message(try single.decode(MessageView.self))
+        default:
+            // Unknown variant — best-effort fallback in this order so any
+            // message-ish payload still renders a bubble before falling back
+            // to a system row, then a tombstone.
+            if let msg = try? single.decode(MessageView.self) {
+                self = .message(msg)
+            } else if let sys = try? single.decode(SystemMessageView.self) {
+                self = .system(sys)
+            } else {
+                self = .deleted(try single.decode(DeletedMessageView.self))
+            }
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var single = encoder.singleValueContainer()
+        switch self {
+        case .message(let m): try single.encode(m)
+        case .deleted(let d): try single.encode(d)
+        case .system(let s): try single.encode(s)
+        }
+    }
+
+    /// Stable identifier — each variant carries its own `id` field.
+    public var id: String {
+        switch self {
+        case .message(let m): return m.id
+        case .deleted(let d): return d.id
+        case .system(let s): return s.id
+        }
+    }
+
+    /// Server-issued sort timestamp. All three variants carry one.
+    public var sentAt: Date {
+        switch self {
+        case .message(let m): return m.sentAt
+        case .deleted(let d): return d.sentAt
+        case .system(let s): return s.sentAt
+        }
+    }
+
+    /// The actor associated with the row. For system events this is the user
+    /// who performed the action (e.g. the member who renamed the group).
+    public var sender: MessageSender {
+        switch self {
+        case .message(let m): return m.sender
+        case .deleted(let d): return d.sender
+        case .system(let s): return s.sender
+        }
+    }
+
+    /// Returns the underlying `MessageView` only when this is a real message —
+    /// callers that want to act on a bubble (delete, react, copy) should drill
+    /// in via this accessor and no-op on the other variants.
+    public var messageView: MessageView? {
+        if case .message(let m) = self { return m }
+        return nil
+    }
+
+    /// Returns the system-event payload, or `nil` for message / deleted rows.
+    public var systemView: SystemMessageView? {
+        if case .system(let s) = self { return s }
+        return nil
     }
 }
 
@@ -111,6 +223,170 @@ public struct DeletedMessageView: Codable, Sendable {
         self.rev = rev
         self.sender = sender
         self.sentAt = sentAt
+    }
+}
+
+// MARK: - chat.bsky.convo.defs#systemMessageView
+
+/// A non-authored system event interleaved with messages in a conversation
+/// (`chat.bsky.convo.defs#systemMessageView`). Examples include "alice added
+/// bob to the group", "alice left the group", "chat title changed", and
+/// invite-link / lock changes. Renders as a centered italic line in the
+/// thread, not as a bubble.
+///
+/// `sender` is the actor who performed the action (RN reads it via the
+/// existing `MessageSender` shape, even when the action is purely
+/// administrative). `data` is the discriminated union describing what
+/// happened — see `SystemMessageData` for the shipped variants.
+public struct SystemMessageView: Codable, Sendable {
+    public let id: String
+    public let rev: String
+    public let sender: MessageSender
+    public let sentAt: Date
+    public let data: SystemMessageData
+
+    public init(
+        id: String,
+        rev: String,
+        sender: MessageSender,
+        sentAt: Date,
+        data: SystemMessageData
+    ) {
+        self.id = id
+        self.rev = rev
+        self.sender = sender
+        self.sentAt = sentAt
+        self.data = data
+    }
+}
+
+/// The actor referenced by a system message (e.g. the user who was added,
+/// removed, or otherwise mentioned). Mirrors
+/// `chat.bsky.convo.defs#systemMessageReferredUser` — the server only
+/// guarantees the DID; the UI resolves it to a profile via `relatedProfiles`
+/// or the convo member list.
+public struct SystemMessageReferredUser: Codable, Sendable, Hashable {
+    public let did: DID
+
+    public init(did: DID) {
+        self.did = did
+    }
+}
+
+/// The discriminated union under `SystemMessageView.data`. Each variant
+/// corresponds to a `chat.bsky.convo.defs#systemMessageData…` lexicon. RN
+/// dispatches on these in `getSystemMessageInfo.ts` to render the appropriate
+/// localized line — Swift mirrors the same set so the parity is 1:1. Any
+/// future variants the server adds fall through to `.unknown` so the UI can
+/// render a generic placeholder instead of dropping the row.
+public enum SystemMessageData: Codable, Sendable {
+    case addMember(member: SystemMessageReferredUser)
+    case removeMember(member: SystemMessageReferredUser)
+    case memberJoin(member: SystemMessageReferredUser)
+    case memberLeave(member: SystemMessageReferredUser)
+    case lockConvo
+    case unlockConvo
+    case lockConvoPermanently
+    case editGroup(newName: String?)
+    case createJoinLink
+    case editJoinLink
+    case enableJoinLink
+    case disableJoinLink
+    case unknown(type: String?)
+
+    private enum DiscriminatorKeys: String, CodingKey {
+        case type = "$type"
+    }
+
+    private enum AddRemovePayloadKeys: String, CodingKey {
+        case member
+    }
+
+    private enum EditGroupPayloadKeys: String, CodingKey {
+        case newName
+    }
+
+    public init(from decoder: Decoder) throws {
+        let typeContainer = try decoder.container(keyedBy: DiscriminatorKeys.self)
+        let type = try typeContainer.decodeIfPresent(String.self, forKey: .type)
+        switch type {
+        case "chat.bsky.convo.defs#systemMessageDataAddMember":
+            let c = try decoder.container(keyedBy: AddRemovePayloadKeys.self)
+            self = .addMember(member: try c.decode(SystemMessageReferredUser.self, forKey: .member))
+        case "chat.bsky.convo.defs#systemMessageDataRemoveMember":
+            let c = try decoder.container(keyedBy: AddRemovePayloadKeys.self)
+            self = .removeMember(member: try c.decode(SystemMessageReferredUser.self, forKey: .member))
+        case "chat.bsky.convo.defs#systemMessageDataMemberJoin":
+            let c = try decoder.container(keyedBy: AddRemovePayloadKeys.self)
+            self = .memberJoin(member: try c.decode(SystemMessageReferredUser.self, forKey: .member))
+        case "chat.bsky.convo.defs#systemMessageDataMemberLeave":
+            let c = try decoder.container(keyedBy: AddRemovePayloadKeys.self)
+            self = .memberLeave(member: try c.decode(SystemMessageReferredUser.self, forKey: .member))
+        case "chat.bsky.convo.defs#systemMessageDataLockConvo":
+            self = .lockConvo
+        case "chat.bsky.convo.defs#systemMessageDataUnlockConvo":
+            self = .unlockConvo
+        case "chat.bsky.convo.defs#systemMessageDataLockConvoPermanently":
+            self = .lockConvoPermanently
+        case "chat.bsky.convo.defs#systemMessageDataEditGroup":
+            let c = try decoder.container(keyedBy: EditGroupPayloadKeys.self)
+            let name = try c.decodeIfPresent(String.self, forKey: .newName)
+            self = .editGroup(newName: name)
+        case "chat.bsky.convo.defs#systemMessageDataCreateJoinLink":
+            self = .createJoinLink
+        case "chat.bsky.convo.defs#systemMessageDataEditJoinLink":
+            self = .editJoinLink
+        case "chat.bsky.convo.defs#systemMessageDataEnableJoinLink":
+            self = .enableJoinLink
+        case "chat.bsky.convo.defs#systemMessageDataDisableJoinLink":
+            self = .disableJoinLink
+        default:
+            self = .unknown(type: type)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var typeContainer = encoder.container(keyedBy: DiscriminatorKeys.self)
+        switch self {
+        case .addMember(let member):
+            try typeContainer.encode("chat.bsky.convo.defs#systemMessageDataAddMember", forKey: .type)
+            var c = encoder.container(keyedBy: AddRemovePayloadKeys.self)
+            try c.encode(member, forKey: .member)
+        case .removeMember(let member):
+            try typeContainer.encode("chat.bsky.convo.defs#systemMessageDataRemoveMember", forKey: .type)
+            var c = encoder.container(keyedBy: AddRemovePayloadKeys.self)
+            try c.encode(member, forKey: .member)
+        case .memberJoin(let member):
+            try typeContainer.encode("chat.bsky.convo.defs#systemMessageDataMemberJoin", forKey: .type)
+            var c = encoder.container(keyedBy: AddRemovePayloadKeys.self)
+            try c.encode(member, forKey: .member)
+        case .memberLeave(let member):
+            try typeContainer.encode("chat.bsky.convo.defs#systemMessageDataMemberLeave", forKey: .type)
+            var c = encoder.container(keyedBy: AddRemovePayloadKeys.self)
+            try c.encode(member, forKey: .member)
+        case .lockConvo:
+            try typeContainer.encode("chat.bsky.convo.defs#systemMessageDataLockConvo", forKey: .type)
+        case .unlockConvo:
+            try typeContainer.encode("chat.bsky.convo.defs#systemMessageDataUnlockConvo", forKey: .type)
+        case .lockConvoPermanently:
+            try typeContainer.encode("chat.bsky.convo.defs#systemMessageDataLockConvoPermanently", forKey: .type)
+        case .editGroup(let newName):
+            try typeContainer.encode("chat.bsky.convo.defs#systemMessageDataEditGroup", forKey: .type)
+            var c = encoder.container(keyedBy: EditGroupPayloadKeys.self)
+            try c.encodeIfPresent(newName, forKey: .newName)
+        case .createJoinLink:
+            try typeContainer.encode("chat.bsky.convo.defs#systemMessageDataCreateJoinLink", forKey: .type)
+        case .editJoinLink:
+            try typeContainer.encode("chat.bsky.convo.defs#systemMessageDataEditJoinLink", forKey: .type)
+        case .enableJoinLink:
+            try typeContainer.encode("chat.bsky.convo.defs#systemMessageDataEnableJoinLink", forKey: .type)
+        case .disableJoinLink:
+            try typeContainer.encode("chat.bsky.convo.defs#systemMessageDataDisableJoinLink", forKey: .type)
+        case .unknown(let type):
+            if let type {
+                try typeContainer.encode(type, forKey: .type)
+            }
+        }
     }
 }
 
@@ -250,11 +526,17 @@ public struct ListConvosResponse: Codable, Sendable {
 
 // MARK: - chat.bsky.convo.getMessages
 
+/// Response shape for `chat.bsky.convo.getMessages`. The server interleaves
+/// regular `messageView`, `deletedMessageView` tombstones, and
+/// `systemMessageView` events into a single `messages` array — `ConvoMessage`
+/// preserves the discrimination so the thread UI can render the right cell
+/// for each row. RN reference: `state/messages/convo/agent.ts` walks the same
+/// union when building the `ConvoItem` list.
 public struct GetMessagesResponse: Codable, Sendable {
-    public let messages: [MessageView]
+    public let messages: [ConvoMessage]
     public let cursor: Cursor?
 
-    public init(messages: [MessageView], cursor: Cursor?) {
+    public init(messages: [ConvoMessage], cursor: Cursor?) {
         self.messages = messages
         self.cursor = cursor
     }

@@ -9,7 +9,11 @@ private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstoo
 // MARK: - MessageThreadStoring
 
 public protocol MessageThreadStoring: AnyObject, Observable, Sendable {
-    var messages: [MessageView] { get }
+    /// Discriminated stream of every row the thread should render — real
+    /// messages (`MessageView`), tombstones (`DeletedMessageView`), and system
+    /// events (`SystemMessageView`). RN parity: `state/messages/convo/agent.ts`
+    /// itemizes the same union into its `ConvoItem[]`.
+    var messages: [ConvoMessage] { get }
     var isLoading: Bool { get }
     var isSending: Bool { get }
     var errorMessage: String? { get }
@@ -23,6 +27,8 @@ public protocol MessageThreadStoring: AnyObject, Observable, Sendable {
     /// Hide a message from the caller's view via `chat.bsky.convo.deleteMessageForSelf`.
     /// Optimistically removes the message from `messages`; on failure the
     /// message is restored at its original index and `errorMessage` is set.
+    /// No-op (returns `false`) if the targeted ID does not refer to a real
+    /// `.message(_)` row.
     @discardableResult
     func deleteMessage(_ messageId: String, convoId: String) async -> Bool
 
@@ -30,13 +36,15 @@ public protocol MessageThreadStoring: AnyObject, Observable, Sendable {
     /// `viewerDID` is the caller's DID, used to construct the optimistic
     /// `ReactionView` so the strip updates immediately. Returns `true` on
     /// success; on failure the optimistic reaction is rolled back and
-    /// `errorMessage` is set. RN reference: agent.ts#addReaction.
+    /// `errorMessage` is set. RN reference: agent.ts#addReaction. No-op on
+    /// non-message rows.
     @discardableResult
     func addReaction(messageId: String, emoji: String, viewerDID: DID?, convoId: String) async -> Bool
 
     /// Remove the caller's emoji reaction from a message
     /// (`chat.bsky.convo.removeReaction`). Optimistically drops the matching
-    /// `(value, sender == viewerDID)` reaction; restored on failure.
+    /// `(value, sender == viewerDID)` reaction; restored on failure. No-op on
+    /// non-message rows.
     @discardableResult
     func removeReaction(messageId: String, emoji: String, viewerDID: DID?, convoId: String) async -> Bool
 }
@@ -46,7 +54,7 @@ public protocol MessageThreadStoring: AnyObject, Observable, Sendable {
 @Observable
 public final class MessageThreadStore: MessageThreadStoring {
 
-    public private(set) var messages: [MessageView] = []
+    public private(set) var messages: [ConvoMessage] = []
     public private(set) var isLoading = false
     public private(set) var isSending = false
     public private(set) var errorMessage: String?
@@ -107,7 +115,7 @@ public final class MessageThreadStore: MessageThreadStoring {
             let sent: MessageView = try await network.post(
                 lexicon: "chat.bsky.convo.sendMessage", body: req
             )
-            messages.append(sent)
+            messages.append(.message(sent))
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -132,7 +140,7 @@ public final class MessageThreadStore: MessageThreadStoring {
             let sent: MessageView = try await network.post(
                 lexicon: "chat.bsky.convo.sendMessage", body: req
             )
-            messages.append(sent)
+            messages.append(.message(sent))
         } catch {
             logger.error("image attachment send error: \(error, privacy: .public)")
             errorMessage = error.localizedDescription
@@ -141,7 +149,7 @@ public final class MessageThreadStore: MessageThreadStoring {
 
     @discardableResult
     public func deleteMessage(_ messageId: String, convoId: String) async -> Bool {
-        guard let index = messages.firstIndex(where: { $0.id == messageId }) else {
+        guard let index = messageIndex(of: messageId) else {
             return false
         }
         // Optimistic removal — restore on failure.
@@ -164,8 +172,8 @@ public final class MessageThreadStore: MessageThreadStoring {
 
     @discardableResult
     public func addReaction(messageId: String, emoji: String, viewerDID: DID?, convoId: String) async -> Bool {
-        guard let index = messages.firstIndex(where: { $0.id == messageId }) else { return false }
-        let original = messages[index]
+        guard let index = messageIndex(of: messageId),
+              case .message(let original) = messages[index] else { return false }
         // Optimistic insertion. Skip if the caller already reacted with this
         // emoji — RN agent.ts mirrors this guard so a duplicate tap is a no-op
         // rather than a server round trip.
@@ -181,7 +189,7 @@ public final class MessageThreadStore: MessageThreadStoring {
             )
             var newReactions = original.reactions ?? []
             newReactions.append(optimistic)
-            messages[index] = MessageView(
+            messages[index] = .message(MessageView(
                 id: original.id,
                 rev: original.rev,
                 text: original.text,
@@ -189,22 +197,22 @@ public final class MessageThreadStore: MessageThreadStoring {
                 sender: original.sender,
                 sentAt: original.sentAt,
                 reactions: newReactions
-            )
+            ))
         }
         do {
             let resp: ReactionResponse = try await network.post(
                 lexicon: "chat.bsky.convo.addReaction",
                 body: AddReactionRequest(convoId: convoId, messageId: messageId, value: emoji)
             )
-            if let i = messages.firstIndex(where: { $0.id == messageId }) {
-                messages[i] = resp.message
+            if let i = messageIndex(of: messageId) {
+                messages[i] = .message(resp.message)
             }
             return true
         } catch {
             logger.error("addReaction failed: \(error, privacy: .public)")
             // Roll back optimistic update.
-            if let i = messages.firstIndex(where: { $0.id == messageId }) {
-                messages[i] = original
+            if let i = messageIndex(of: messageId) {
+                messages[i] = .message(original)
             }
             errorMessage = "Failed to add reaction"
             return false
@@ -213,12 +221,12 @@ public final class MessageThreadStore: MessageThreadStoring {
 
     @discardableResult
     public func removeReaction(messageId: String, emoji: String, viewerDID: DID?, convoId: String) async -> Bool {
-        guard let index = messages.firstIndex(where: { $0.id == messageId }) else { return false }
-        let original = messages[index]
+        guard let index = messageIndex(of: messageId),
+              case .message(let original) = messages[index] else { return false }
         // Optimistic removal of the caller's matching reaction.
         if let viewerDID, let existing = original.reactions {
             let trimmed = existing.filter { !($0.value == emoji && $0.sender.did == viewerDID) }
-            messages[index] = MessageView(
+            messages[index] = .message(MessageView(
                 id: original.id,
                 rev: original.rev,
                 text: original.text,
@@ -226,25 +234,33 @@ public final class MessageThreadStore: MessageThreadStoring {
                 sender: original.sender,
                 sentAt: original.sentAt,
                 reactions: trimmed.isEmpty ? nil : trimmed
-            )
+            ))
         }
         do {
             let resp: ReactionResponse = try await network.post(
                 lexicon: "chat.bsky.convo.removeReaction",
                 body: RemoveReactionRequest(convoId: convoId, messageId: messageId, value: emoji)
             )
-            if let i = messages.firstIndex(where: { $0.id == messageId }) {
-                messages[i] = resp.message
+            if let i = messageIndex(of: messageId) {
+                messages[i] = .message(resp.message)
             }
             return true
         } catch {
             logger.error("removeReaction failed: \(error, privacy: .public)")
-            if let i = messages.firstIndex(where: { $0.id == messageId }) {
-                messages[i] = original
+            if let i = messageIndex(of: messageId) {
+                messages[i] = .message(original)
             }
             errorMessage = "Failed to remove reaction"
             return false
         }
+    }
+
+    /// Look up the row index for a given message ID across all variants. The
+    /// reaction / delete mutators short-circuit on non-message rows once they
+    /// have the index in hand, so a single shared lookup keeps the code paths
+    /// honest.
+    private func messageIndex(of messageId: String) -> Int? {
+        messages.firstIndex(where: { $0.id == messageId })
     }
 
     private func markRead(convoId: String) async {

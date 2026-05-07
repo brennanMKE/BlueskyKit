@@ -224,14 +224,20 @@ private struct ConvoRow: View {
         return Self.shortTimeAgo(from: sentAt, now: Date())
     }
 
-    /// The body text — handles all four variants: regular message, deleted
-    /// placeholder, group sender prefix, and the empty "no messages" case.
+    /// The body text — handles all variants the server may serve as the most
+    /// recent item: regular message, deleted placeholder, system event
+    /// (members added/left, group renamed, lock changes, invite links), the
+    /// group sender prefix, and the empty "no messages" case. RN parity:
+    /// `ChatListItem.tsx` resolves system events through `getSystemMessageInfo`
+    /// for the same preview line.
     private var previewLine: Text {
         switch convo.lastMessage {
         case .none:
             return Text("No messages yet").italic()
         case .deleted:
             return Text("Message deleted").italic()
+        case .system(let view):
+            return Text(systemMessagePreview(view)).italic()
         case .message(let msg):
             let body = msg.text.isEmpty ? "(image)" : msg.text
             if isGroup, let prefix = senderPrefix(for: msg) {
@@ -241,6 +247,38 @@ private struct ConvoRow: View {
                 return Text(body)
             }
         }
+    }
+
+    /// Compact preview text for a system event. Mirrors the wording the
+    /// thread itself uses (`MessageThreadScreen.systemMessageText`) so the
+    /// inbox row and the in-thread line agree on phrasing. Uses the convo
+    /// member list for actor name resolution.
+    private func systemMessagePreview(_ view: SystemMessageView) -> String {
+        let actor = label(for: view.sender.did)
+        switch view.data {
+        case .addMember(let m): return "\(actor) added \(label(for: m.did))"
+        case .removeMember(let m): return "\(actor) removed \(label(for: m.did))"
+        case .memberJoin(let m): return "\(label(for: m.did)) joined the group"
+        case .memberLeave(let m): return "\(label(for: m.did)) left the group"
+        case .lockConvo: return "\(actor) locked the conversation"
+        case .unlockConvo: return "\(actor) unlocked the conversation"
+        case .lockConvoPermanently: return "\(actor) locked the conversation permanently"
+        case .editGroup(let n):
+            if let n, !n.isEmpty { return "\(actor) renamed the group to \(n)" }
+            return "\(actor) changed the group name"
+        case .createJoinLink: return "\(actor) created an invite link"
+        case .editJoinLink: return "\(actor) updated the invite link"
+        case .enableJoinLink: return "\(actor) enabled the invite link"
+        case .disableJoinLink: return "\(actor) disabled the invite link"
+        case .unknown: return "Group updated"
+        }
+    }
+
+    private func label(for did: DID) -> String {
+        if let m = convo.members.first(where: { $0.did == did }) {
+            return "@\(m.handle.rawValue)"
+        }
+        return did.rawValue
     }
 
     /// Returns "@<handle>: " for the sender of a group-chat message, or `nil`

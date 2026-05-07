@@ -38,7 +38,9 @@ public struct MessageThreadScreen: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var imageLoadErrorMessage: String?
     /// The message the user has asked to delete via the context menu, awaiting
-    /// confirmation. `nil` when no confirmation dialog is shown.
+    /// confirmation. `nil` when no confirmation dialog is shown. Only real
+    /// `MessageView` rows are deletable — system / tombstone rows have no
+    /// destructive affordance.
     @State private var pendingDeleteMessage: MessageView?
 
     /// Whether the user is currently parked within `Self.atBottomThreshold` of
@@ -136,45 +138,66 @@ public struct MessageThreadScreen: View {
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 8)
                         }
-                        ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
+                        ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, row in
                             if shouldShowDateDivider(at: index) {
-                                DateDivider(date: message.sentAt)
+                                DateDivider(date: row.sentAt)
                                     .padding(.top, 8)
                             }
                             // RN's `MessagesList.tsx` renders a centered
                             // "New messages" divider above the first
-                            // message that arrived while the user was
+                            // row that arrived while the user was
                             // scrolled away from the bottom. We anchor it
-                            // by message ID so `LazyVStack` can position
-                            // it exactly above the right bubble.
-                            if message.id == viewModel.firstUnreadID {
+                            // by row ID so `LazyVStack` can position
+                            // it exactly above the right bubble or
+                            // system line.
+                            if row.id == viewModel.firstUnreadID {
                                 NewMessagesDivider()
                                     .padding(.top, 8)
                                     .padding(.bottom, 4)
                             }
-                            MessageBubble(
-                                message: message,
-                                isOwn: viewModel.isOwn(message),
-                                isGroup: isGroup,
-                                isFirstInRun: isFirstInRun(at: index),
-                                isLastInRun: isLastInRun(at: index),
-                                timestampLabel: isLastInRun(at: index)
-                                    ? Self.bubbleTimestamp(for: message.sentAt, now: Date())
-                                    : nil,
-                                senderProfile: senderProfile(for: message),
-                                viewerDID: viewerDID,
-                                onDeleteRequested: { pendingDeleteMessage = message },
-                                onPostTap: onPostTap,
-                                onAddReaction: { emoji in
-                                    let id = message.id
-                                    Task { await viewModel.addReaction(messageID: id, emoji: emoji) }
-                                },
-                                onRemoveReaction: { emoji in
-                                    let id = message.id
-                                    Task { await viewModel.removeReaction(messageID: id, emoji: emoji) }
-                                }
-                            )
-                            .id(message.id)
+                            // Dispatch by variant — bubbles for real
+                            // messages, italic centered lines for
+                            // tombstones and system events. RN parity:
+                            // `MessagesList.tsx` renders a different
+                            // component for each `ConvoItem.type`.
+                            switch row {
+                            case .message(let message):
+                                MessageBubble(
+                                    message: message,
+                                    isOwn: viewModel.isOwn(row),
+                                    isGroup: isGroup,
+                                    isFirstInRun: isFirstInRun(at: index),
+                                    isLastInRun: isLastInRun(at: index),
+                                    timestampLabel: isLastInRun(at: index)
+                                        ? Self.bubbleTimestamp(for: message.sentAt, now: Date())
+                                        : nil,
+                                    senderProfile: senderProfile(forSenderDID: message.sender.did),
+                                    viewerDID: viewerDID,
+                                    onDeleteRequested: { pendingDeleteMessage = message },
+                                    onPostTap: onPostTap,
+                                    onAddReaction: { emoji in
+                                        let id = message.id
+                                        Task { await viewModel.addReaction(messageID: id, emoji: emoji) }
+                                    },
+                                    onRemoveReaction: { emoji in
+                                        let id = message.id
+                                        Task { await viewModel.removeReaction(messageID: id, emoji: emoji) }
+                                    }
+                                )
+                                .id(row.id)
+                            case .deleted:
+                                SystemMessageRow(
+                                    icon: "trash",
+                                    text: AttributedString("Message deleted")
+                                )
+                                .id(row.id)
+                            case .system(let view):
+                                SystemMessageRow(
+                                    icon: systemMessageIcon(for: view.data),
+                                    text: systemMessageText(view)
+                                )
+                                .id(row.id)
+                            }
                         }
                         // Bottom sentinel — used by the GeometryReader below
                         // to determine whether the user is "at bottom" by
@@ -340,27 +363,35 @@ public struct MessageThreadScreen: View {
 
     /// First message in a "run" of consecutive messages from the same sender.
     /// Mirrors RN's `isFirstInCluster` (without the 5-minute time gate, which
-    /// our model does not currently surface in the UI).
+    /// our model does not currently surface in the UI). System / tombstone
+    /// rows break the run — the next bubble starts a fresh run regardless of
+    /// who sent it, so the sender header / avatar reappear after any
+    /// interleaved system event.
     private func isFirstInRun(at index: Int) -> Bool {
         guard index > 0 else { return true }
-        let prev = viewModel.messages[index - 1]
-        let curr = viewModel.messages[index]
+        let messages = viewModel.messages
+        guard case .message(let curr) = messages[index] else { return true }
+        guard case .message(let prev) = messages[index - 1] else { return true }
         return prev.sender.did != curr.sender.did
     }
 
     /// Last message in a "run" of consecutive messages from the same sender —
     /// the bubble that should anchor the per-message timestamp. Mirrors RN's
-    /// `isLastInCluster` from `MessageItem.tsx`.
+    /// `isLastInCluster` from `MessageItem.tsx`. A trailing system / tombstone
+    /// row also closes the run so the bubble carries its timestamp.
     private func isLastInRun(at index: Int) -> Bool {
         let messages = viewModel.messages
         guard index + 1 < messages.count else { return true }
-        return messages[index].sender.did != messages[index + 1].sender.did
+        guard case .message(let curr) = messages[index] else { return true }
+        guard case .message(let next) = messages[index + 1] else { return true }
+        return curr.sender.did != next.sender.did
     }
 
-    /// Whether a date divider should appear above the message at `index`.
-    /// Always shows for the first message; otherwise only when the calendar
-    /// day differs from the previous message — matching RN's `DateDivider`
-    /// rendering in `MessageItem.tsx`.
+    /// Whether a date divider should appear above the row at `index`.
+    /// Always shows for the first row; otherwise only when the calendar
+    /// day differs from the previous row — matching RN's `DateDivider`
+    /// rendering in `MessageItem.tsx`. System rows participate in the date
+    /// comparison so a divider still fires across them.
     private func shouldShowDateDivider(at index: Int) -> Bool {
         let messages = viewModel.messages
         guard index > 0 else { return true }
@@ -369,8 +400,98 @@ public struct MessageThreadScreen: View {
         return !Calendar.current.isDate(prev, inSameDayAs: curr)
     }
 
-    private func senderProfile(for message: MessageView) -> ProfileBasic? {
-        members.first(where: { $0.did == message.sender.did })
+    /// Resolve a sender DID to a profile via the convo member list. Used both
+    /// for the bubble's avatar/header lookup and for system events that name
+    /// an actor (e.g. "@alice added @bob").
+    private func senderProfile(forSenderDID did: DID) -> ProfileBasic? {
+        members.first(where: { $0.did == did })
+    }
+
+    // MARK: - System message presentation
+
+    /// Display label for a system-message actor — prefers `@handle`, falls
+    /// back to the truncated DID. RN's `getSystemMessageInfo` uses
+    /// `createSanitizedDisplayName` which favours the display name when
+    /// available; we use the handle here so the line stays compact and the
+    /// preceding "@" is intuitive in the centered italic format.
+    private func actorLabel(for did: DID) -> String {
+        if let profile = senderProfile(forSenderDID: did) {
+            return "@\(profile.handle.rawValue)"
+        }
+        let raw = did.rawValue
+        if raw.count > 12 {
+            return String(raw.prefix(12)) + "…"
+        }
+        return raw
+    }
+
+    /// Build the localized line for a system event. Mirrors RN's
+    /// `getSystemMessageInfo.ts`: the verbs and tense match upstream so users
+    /// switching between clients see the same wording. The actor name is
+    /// resolved via the convo member list (added by #0105) — if the actor is
+    /// not a current member we fall back to a generic phrasing.
+    private func systemMessageText(_ view: SystemMessageView) -> AttributedString {
+        let actor = actorLabel(for: view.sender.did)
+        switch view.data {
+        case .addMember(let member):
+            let added = actorLabel(for: member.did)
+            return AttributedString("\(actor) added \(added) to the group")
+        case .removeMember(let member):
+            let removed = actorLabel(for: member.did)
+            return AttributedString("\(actor) removed \(removed) from the group")
+        case .memberJoin(let member):
+            let joined = actorLabel(for: member.did)
+            return AttributedString("\(joined) joined the group")
+        case .memberLeave(let member):
+            let left = actorLabel(for: member.did)
+            return AttributedString("\(left) left the group")
+        case .lockConvo:
+            return AttributedString("\(actor) locked the conversation")
+        case .unlockConvo:
+            return AttributedString("\(actor) unlocked the conversation")
+        case .lockConvoPermanently:
+            return AttributedString("\(actor) locked the conversation permanently")
+        case .editGroup(let newName):
+            if let newName, !newName.isEmpty {
+                return AttributedString("\(actor) renamed the group to \(newName)")
+            }
+            return AttributedString("\(actor) changed the group name")
+        case .createJoinLink:
+            return AttributedString("\(actor) created an invite link")
+        case .editJoinLink:
+            return AttributedString("\(actor) updated the invite link")
+        case .enableJoinLink:
+            return AttributedString("\(actor) enabled the invite link")
+        case .disableJoinLink:
+            return AttributedString("\(actor) disabled the invite link")
+        case .unknown:
+            return AttributedString("Unsupported event")
+        }
+    }
+
+    /// SF Symbol name for the small leading glyph on a system row. Mirrors
+    /// the icon set RN dispatches in `getSystemMessageInfo.ts` (Join, Leave,
+    /// Lock, Pencil, ChainLink). Falls back to a generic info icon when the
+    /// variant is unknown.
+    private func systemMessageIcon(for data: SystemMessageData) -> String {
+        switch data {
+        case .addMember, .memberJoin:
+            return "arrow.right.to.line.compact"
+        case .removeMember, .memberLeave:
+            return "arrow.left.to.line.compact"
+        case .lockConvo, .lockConvoPermanently:
+            return "lock"
+        case .unlockConvo:
+            return "lock.open"
+        case .editGroup:
+            return "pencil"
+        case .createJoinLink, .editJoinLink, .enableJoinLink:
+            return "link"
+        case .disableJoinLink:
+            return "link.badge.plus"
+        case .unknown:
+            return "info.circle"
+        }
     }
 
     /// Per-bubble timestamp matching RN's `niceDate` short-form behaviour.
@@ -946,6 +1067,38 @@ private struct DateDivider: View {
         }
 
         return "\(dayString) at \(time)"
+    }
+}
+
+// MARK: - System message row
+
+/// Centered, italic, small-text row for system events and tombstones — no
+/// bubble, no avatar. Matches RN's `SystemMessageItem` (`components/dms/
+/// SystemMessageItem.tsx`): a small leading glyph plus a localized line in
+/// the secondary text color, horizontally padded so it sits well on either
+/// side of the bubble column.
+private struct SystemMessageRow: View {
+    let icon: String?
+    let text: AttributedString
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Text(text)
+                .font(.caption)
+                .italic()
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
     }
 }
 
