@@ -738,6 +738,83 @@ public struct GetLabelerServicesResponse: Decodable, Sendable {
     public let views: [LabelerView]
 }
 
+// MARK: - app.bsky.labeler.defs#labelValueDefinition
+
+/// A single label this labeler defines, per
+/// `app.bsky.labeler.defs#labelValueDefinition`. Carries the metadata the
+/// content-filter UI uses to render a row: `identifier` (the value the
+/// labeler will stamp onto records), `severity` (`"alert" | "inform" | "none"`),
+/// `defaultSetting` (the default visibility — `"hide" | "warn" | "ignore"`),
+/// `blurs` (`"content" | "media" | "none"`), and the optional `adultOnly` flag
+/// gating the row behind the user's adult-content toggle.
+///
+/// `locales` is the per-language strings array the appview returns; we
+/// round-trip it but don't currently surface localized strings — the SwiftUI
+/// client falls back to the identifier for display until a translation
+/// pipeline lands.
+public struct LabelValueDefinition: Codable, Sendable, Hashable {
+    public let identifier: String
+    public let severity: String
+    public let blurs: String
+    public let defaultSetting: String?
+    public let adultOnly: Bool?
+    public let locales: [LabelValueDefinitionStrings]
+
+    public init(
+        identifier: String,
+        severity: String,
+        blurs: String,
+        defaultSetting: String? = nil,
+        adultOnly: Bool? = nil,
+        locales: [LabelValueDefinitionStrings] = []
+    ) {
+        self.identifier = identifier
+        self.severity = severity
+        self.blurs = blurs
+        self.defaultSetting = defaultSetting
+        self.adultOnly = adultOnly
+        self.locales = locales
+    }
+}
+
+/// Per-locale strings for a `labelValueDefinition`. RN renders these via
+/// `lookupLabelValueDefinition`; here we round-trip the data so future
+/// localisation work has it on hand.
+public struct LabelValueDefinitionStrings: Codable, Sendable, Hashable {
+    public let lang: String
+    public let name: String
+    public let description: String
+
+    public init(lang: String, name: String, description: String) {
+        self.lang = lang
+        self.name = name
+        self.description = description
+    }
+}
+
+// MARK: - app.bsky.labeler.defs#labelerPolicies
+
+/// Policies bundle returned with a detailed labeler view.
+///
+/// `labelValues` is the list of label *identifiers* this labeler emits —
+/// includes both global Bluesky labels (`"porn"`, `"sexual"`, …) and the
+/// labeler's custom values. `labelValueDefinitions` provides metadata for
+/// the custom values (severity / blurs / defaultSetting / adultOnly).
+/// Together they let the content-filter UI render one row per label and
+/// decide its default state.
+public struct LabelerPolicies: Codable, Sendable {
+    public let labelValues: [String]
+    public let labelValueDefinitions: [LabelValueDefinition]
+
+    public init(
+        labelValues: [String] = [],
+        labelValueDefinitions: [LabelValueDefinition] = []
+    ) {
+        self.labelValues = labelValues
+        self.labelValueDefinitions = labelValueDefinitions
+    }
+}
+
 // MARK: - app.bsky.labeler.defs#labelerView
 
 /// A labeler service view returned by `app.bsky.labeler.getServices`.
@@ -749,6 +826,11 @@ public struct GetLabelerServicesResponse: Decodable, Sendable {
 /// labeler is willing to accept reports about — the Report dialog filters
 /// the list of candidate labelers using these fields. Mirrors the matching
 /// branch in RN's `ReportDialog/index.tsx#supportedLabelers`.
+///
+/// `policies` carries the labeler's `labelValues` and
+/// `labelValueDefinitions`. Present whenever the appview returns the
+/// detailed view (`detailed=true`); the content-filter screen reads it to
+/// render one section per labeler with one row per defined label.
 public struct LabelerView: Codable, Sendable {
     public let uri: ATURI
     public let cid: CID
@@ -765,6 +847,10 @@ public struct LabelerView: Codable, Sendable {
     /// Reason-type strings this labeler will accept (`com.atproto.moderation.defs#reason*`
     /// or the newer Ozone variants). `nil` means "all reason types".
     public let reasonTypes: [String]?
+    /// Policies bundle (`labelValues` + `labelValueDefinitions`). Present
+    /// whenever the lexicon returns the detailed view; consumers like the
+    /// content-filter screen rely on it to render per-label rows.
+    public let policies: LabelerPolicies?
 
     public init(
         uri: ATURI,
@@ -775,7 +861,8 @@ public struct LabelerView: Codable, Sendable {
         indexedAt: Date,
         subjectTypes: [String]? = nil,
         subjectCollections: [String]? = nil,
-        reasonTypes: [String]? = nil
+        reasonTypes: [String]? = nil,
+        policies: LabelerPolicies? = nil
     ) {
         self.uri = uri
         self.cid = cid
@@ -786,5 +873,6 @@ public struct LabelerView: Codable, Sendable {
         self.subjectTypes = subjectTypes
         self.subjectCollections = subjectCollections
         self.reasonTypes = reasonTypes
+        self.policies = policies
     }
 }
