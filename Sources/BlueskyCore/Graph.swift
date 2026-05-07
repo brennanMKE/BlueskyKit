@@ -118,28 +118,60 @@ public struct GetListsResponse: Codable, Sendable {
 
 // MARK: - List record (app.bsky.graph.list)
 
-/// A list record for use with `com.atproto.repo.createRecord`.
-public struct ListRecord: Encodable, Sendable {
-    private let type: String = "app.bsky.graph.list"
+/// A list record for use with `com.atproto.repo.createRecord` /
+/// `com.atproto.repo.putRecord`. Conforms to `Codable` so the edit flow can
+/// `getRecord` an existing list, mutate name/description, and put it back
+/// without dropping the avatar blob — matching RN's
+/// `useListMetadataMutation` (read-modify-write).
+public struct ListRecord: Codable, Sendable {
+    private let type: String
     public let purpose: String
-    public let name: String
-    public let description: String?
+    public var name: String
+    public var description: String?
+    /// Optional avatar blob ref. Preserved across edit round-trips. `nil`
+    /// means "no avatar"; the field is omitted from the JSON when nil.
+    public var avatar: BlobRef?
     public let createdAt: Date
 
     private enum CodingKeys: String, CodingKey {
-        case type = "$type", purpose, name, description, createdAt
+        case type = "$type", purpose, name, description, avatar, createdAt
     }
 
     public init(
         name: String,
         description: String? = nil,
         purpose: String = "app.bsky.graph.defs#curatelist",
+        avatar: BlobRef? = nil,
         createdAt: Date = .now
     ) {
+        self.type = "app.bsky.graph.list"
         self.name = name
         self.description = description
         self.purpose = purpose
+        self.avatar = avatar
         self.createdAt = createdAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // The lexicon `$type` is optional on stored records — older lists may
+        // not include it. Default to the canonical NSID when absent.
+        self.type = (try? c.decode(String.self, forKey: .type)) ?? "app.bsky.graph.list"
+        self.purpose = try c.decode(String.self, forKey: .purpose)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.description = try c.decodeIfPresent(String.self, forKey: .description)
+        self.avatar = try c.decodeIfPresent(BlobRef.self, forKey: .avatar)
+        self.createdAt = try c.decode(Date.self, forKey: .createdAt)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type, forKey: .type)
+        try c.encode(purpose, forKey: .purpose)
+        try c.encode(name, forKey: .name)
+        try c.encodeIfPresent(description, forKey: .description)
+        try c.encodeIfPresent(avatar, forKey: .avatar)
+        try c.encode(createdAt, forKey: .createdAt)
     }
 }
 

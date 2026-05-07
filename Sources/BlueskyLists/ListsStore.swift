@@ -260,6 +260,17 @@ public protocol ListDetailStoring: AnyObject, Observable, Sendable {
     func muteList() async
     /// Unsubscribe a moderation-list mute.
     func unmuteList() async
+
+    /// Edit the loaded list's name/description. Mirrors RN's
+    /// `useListMetadataMutation`: fetch the existing record, mutate the
+    /// fields, then `putRecord` it back so the avatar blob is preserved.
+    /// Optimistically updates the local `list` value on success.
+    /// Returns `true` on success.
+    func editList(name: String, description: String?) async -> Bool
+
+    /// Delete the loaded list record. Returns `true` on success so the
+    /// caller can pop back to the lists hub.
+    func deleteList() async -> Bool
 }
 
 // MARK: - ListDetailStore
@@ -278,9 +289,15 @@ public final class ListDetailStore: ListDetailStoring {
     private var feedCursor: Cursor?
 
     private let network: any NetworkClient
+    /// Optional — required for owner-only mutations (edit / delete). The
+    /// existing read-only call site (`ListDetailScreen` previews) passes
+    /// `nil`; mutations short-circuit when the store cannot resolve a
+    /// viewer DID.
+    private let accountStore: (any AccountStore)?
 
-    public init(network: any NetworkClient) {
+    public init(network: any NetworkClient, accountStore: (any AccountStore)? = nil) {
         self.network = network
+        self.accountStore = accountStore
     }
 
     public func load(listURI: ATURI) async {
@@ -402,6 +419,114 @@ public final class ListDetailStore: ListDetailStoring {
         } catch {
             list = previous
             self.error = error.localizedDescription
+        }
+    }
+
+    // MARK: - Edit / delete
+
+    /// Read-modify-write the list record. Matches RN's
+    /// `useListMetadataMutation`: fetches the canonical record so the avatar
+    /// blob and any unknown fields survive the round-trip, then `putRecord`s
+    /// the mutated record back. Updates `list` optimistically on success.
+    public func editList(name: String, description: String?) async -> Bool {
+        guard let listURI, let rkey = listURI.rkey else { return false }
+        guard let accountStore else {
+            self.error = "Not signed in"
+            return false
+        }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
+        guard let viewerDID else {
+            self.error = "Not signed in"
+            return false
+        }
+        do {
+            // Fetch the existing record so we preserve avatar + createdAt +
+            // anything else stored on the list.
+            let existing: GetRecordResponse<ListRecord> = try await network.get(
+                lexicon: "com.atproto.repo.getRecord",
+                params: [
+                    "repo": viewerDID.rawValue,
+                    "collection": "app.bsky.graph.list",
+                    "rkey": rkey,
+                ]
+            )
+            var record = existing.value
+            record.name = name
+            record.description = description
+            let req = PutRecordRequest(
+                repo: viewerDID.rawValue,
+                collection: "app.bsky.graph.list",
+                rkey: rkey,
+                record: record
+            )
+            let _: EmptyResponse = try await network.post(
+                lexicon: "com.atproto.repo.putRecord",
+                body: req
+            )
+            // Optimistically reflect the new metadata in the loaded view so
+            // the header / About tab update without a refetch.
+            if let current = list {
+                self.list = ListView(
+                    uri: current.uri,
+                    cid: current.cid,
+                    creator: current.creator,
+                    name: name,
+                    purpose: current.purpose,
+                    description: description,
+                    avatar: current.avatar,
+                    labels: current.labels,
+                    indexedAt: current.indexedAt,
+                    listItemCount: current.listItemCount,
+                    viewer: current.viewer
+                )
+            }
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Delete the loaded list record. Mirrors RN's `useListDeleteMutation`'s
+    /// minimal path — RN also bulk-deletes member `listitem` records before
+    /// removing the list, but the appview cleans those up server-side; the
+    /// SwiftUI client removes only the list record and pops to the hub.
+    public func deleteList() async -> Bool {
+        guard let listURI, let rkey = listURI.rkey else { return false }
+        guard let accountStore else {
+            self.error = "Not signed in"
+            return false
+        }
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
+        guard let viewerDID else {
+            self.error = "Not signed in"
+            return false
+        }
+        do {
+            let _: EmptyResponse = try await network.post(
+                lexicon: "com.atproto.repo.deleteRecord",
+                body: DeleteRecordRequest(
+                    repo: viewerDID.rawValue,
+                    collection: "app.bsky.graph.list",
+                    rkey: rkey
+                )
+            )
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            return false
         }
     }
 }

@@ -22,8 +22,13 @@ public struct ListsScreen: View {
 
     @State private var viewModel: ListsViewModel
     @State private var showCreateSheet = false
+    /// Resolved on first appear from `accountStore.loadCurrentDID()`. Drives
+    /// owner-only edit / delete affordances inside `ListDetailScreen`; when
+    /// the signed-in viewer is `nil` (logged out), edit/delete stays hidden.
+    @State private var viewerDID: DID?
     private let actorDID: String
     private let network: any NetworkClient
+    private let accountStore: any AccountStore
     /// Surfaces creator-tap from the list-detail header back to the host so it
     /// can push a `ProfileScreen`. Optional because `BlueskyLists` cannot
     /// import `BlueskyProfile`; the app shell wires the navigation.
@@ -37,6 +42,7 @@ public struct ListsScreen: View {
     ) {
         self.actorDID = actorDID
         self.network = network
+        self.accountStore = accountStore
         self.onProfileTap = onProfileTap
         _viewModel = State(initialValue: ListsViewModel(network: network, accountStore: accountStore))
     }
@@ -55,6 +61,8 @@ public struct ListsScreen: View {
                         ListDetailScreen(
                             listURI: list.uri,
                             network: network,
+                            accountStore: accountStore,
+                            viewerDID: viewerDID,
                             onProfileTap: onProfileTap
                         )
                     } label: {
@@ -98,7 +106,15 @@ public struct ListsScreen: View {
             }
         }
         .refreshable { await viewModel.loadLists(actorDID: actorDID) }
-        .task { await viewModel.loadLists(actorDID: actorDID) }
+        .task {
+            // Resolve the signed-in viewer DID once so the detail screen
+            // can surface owner-only edit/delete affordances. We swallow
+            // errors here — failure just means edit/delete stays hidden.
+            if viewerDID == nil {
+                viewerDID = try? await accountStore.loadCurrentDID()
+            }
+            await viewModel.loadLists(actorDID: actorDID)
+        }
     }
 }
 

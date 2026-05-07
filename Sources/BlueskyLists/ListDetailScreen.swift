@@ -16,8 +16,12 @@ struct ListDetailScreen: View {
     @State private var selectedTab = 0
     @State private var showSubscribeSheet = false
     @State private var showReportSheet = false
+    @State private var showEditSheet = false
+    @State private var showDeleteConfirm = false
+    @Environment(\.dismiss) private var dismiss
     private let listURI: ATURI
     private let network: any NetworkClient
+    private let viewerDID: DID?
     private let onProfileTap: ((DID) -> Void)?
 
     @Environment(\.blueskyTheme) private var theme
@@ -25,12 +29,15 @@ struct ListDetailScreen: View {
     init(
         listURI: ATURI,
         network: any NetworkClient,
+        accountStore: (any AccountStore)? = nil,
+        viewerDID: DID? = nil,
         onProfileTap: ((DID) -> Void)? = nil
     ) {
         self.listURI = listURI
         self.network = network
+        self.viewerDID = viewerDID
         self.onProfileTap = onProfileTap
-        _viewModel = State(initialValue: ListDetailViewModel(network: network))
+        _viewModel = State(initialValue: ListDetailViewModel(network: network, accountStore: accountStore))
     }
 
     /// Whether the loaded list is a curation list (`app.bsky.graph.defs#curatelist`).
@@ -108,6 +115,41 @@ struct ListDetailScreen: View {
                 )
             }
         }
+        .sheet(isPresented: $showEditSheet) {
+            if let list = viewModel.list {
+                ListEditSheet(list: list) { newName, newDescription in
+                    Task {
+                        _ = await viewModel.editList(
+                            name: newName,
+                            description: newDescription
+                        )
+                    }
+                }
+            }
+        }
+        .confirmationDialog(
+            "Delete this list?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    let ok = await viewModel.deleteList()
+                    if ok { dismiss() }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("If you delete this list, you won't be able to recover it.")
+        }
+    }
+
+    /// Whether the signed-in viewer owns the loaded list. Drives visibility
+    /// of the Edit / Delete menu items in the More-options menu — RN gates
+    /// these on `currentAccount?.did === list.creator.did`.
+    private var isOwner: Bool {
+        guard let viewerDID, let list = viewModel.list else { return false }
+        return viewerDID == list.creator.did
     }
 
     // MARK: - Header
@@ -268,18 +310,36 @@ struct ListDetailScreen: View {
 
             Divider()
 
+            // Owner-only edit / delete. RN's MoreOptionsMenu gates these on
+            // `currentAccount?.did === list.creator.did` and shows them in
+            // their own menu group, with Report list replacing them for
+            // non-owners.
+            if isOwner {
+                Button {
+                    showEditSheet = true
+                } label: {
+                    Label("Edit list details", systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Label("Delete list", systemImage: "trash")
+                }
+            } else {
+                Button(role: .destructive) {
+                    showReportSheet = true
+                } label: {
+                    Label("Report list", systemImage: "flag")
+                }
+            }
+
             if isMod && isMuting {
+                Divider()
                 Button {
                     Task { await viewModel.unsubscribeMute() }
                 } label: {
                     Label("Unmute list", systemImage: "speaker.wave.2")
                 }
-            }
-
-            Button(role: .destructive) {
-                showReportSheet = true
-            } label: {
-                Label("Report list", systemImage: "flag")
             }
         } label: {
             Image(systemName: "ellipsis")

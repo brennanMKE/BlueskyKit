@@ -14,8 +14,8 @@ final class ListDetailViewModel {
 
     private let store: any ListDetailStoring
 
-    init(network: any NetworkClient) {
-        self.store = ListDetailStore(network: network)
+    init(network: any NetworkClient, accountStore: (any AccountStore)? = nil) {
+        self.store = ListDetailStore(network: network, accountStore: accountStore)
     }
 
     func load(listURI: ATURI) async { await store.load(listURI: listURI) }
@@ -27,4 +27,14 @@ final class ListDetailViewModel {
     func subscribeMute() async { await store.muteList() }
     /// Unsubscribe a moderation-list mute.
     func unsubscribeMute() async { await store.unmuteList() }
+
+    /// Edit the loaded list. Returns `true` on success.
+    func editList(name: String, description: String?) async -> Bool {
+        await store.editList(name: name, description: description)
+    }
+
+    /// Delete the loaded list. Returns `true` on success.
+    func deleteList() async -> Bool {
+        await store.deleteList()
+    }
 }
