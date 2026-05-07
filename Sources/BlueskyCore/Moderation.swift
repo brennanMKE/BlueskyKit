@@ -202,6 +202,56 @@ public struct FeedViewPref: Sendable, Equatable {
     )
 }
 
+// MARK: - app.bsky.actor.defs#mutedWord
+
+/// A single muted-word entry persisted under
+/// `app.bsky.actor.defs#mutedWordsPref`. Mirrors `AppBskyActorDefs.MutedWord`
+/// from the AT Proto SDK.
+///
+/// `targets` is one or more of `"content"` (match against post text) and
+/// `"tag"` (match against post hashtags). RN's add-form always includes
+/// `"tag"` and conditionally adds `"content"`, so a "Tags only" entry
+/// has `targets == ["tag"]` and a "Text & tags" entry has both.
+///
+/// `actorTarget` defaults to `"all"`; setting it to `"exclude-following"`
+/// exempts users the viewer follows from the mute. Optional in the lexicon
+/// for forward compatibility.
+///
+/// `expiresAt` is an ISO-8601 timestamp. `nil` means "forever". RN renders
+/// expired entries with a "Renew" affordance; this client surfaces an
+/// "Expired" pill and lets the user delete or recreate.
+///
+/// `id` is server-issued and used by the SDK's update path. We round-trip
+/// it but don't generate one client-side; the server will assign one when
+/// the entry is upserted.
+public struct MutedWord: Codable, Sendable, Equatable {
+    public var id: String?
+    public var value: String
+    public var targets: [String]
+    public var actorTarget: String?
+    public var expiresAt: Date?
+
+    public init(
+        id: String? = nil,
+        value: String,
+        targets: [String],
+        actorTarget: String? = nil,
+        expiresAt: Date? = nil
+    ) {
+        self.id = id
+        self.value = value
+        self.targets = targets
+        self.actorTarget = actorTarget
+        self.expiresAt = expiresAt
+    }
+
+    /// `true` if `expiresAt` is in the past (relative to `now`).
+    public func isExpired(now: Date = Date()) -> Bool {
+        guard let expiresAt else { return false }
+        return expiresAt < now
+    }
+}
+
 // MARK: - app.bsky.actor.defs#savedFeed
 
 public struct SavedFeed: Codable, Sendable, Identifiable {
@@ -252,6 +302,10 @@ public struct GetPreferencesResponse: Decodable, Sendable {
     /// → Primary language picker writes that single code as a one-element
     /// array.
     public let postLanguages: [String]
+    /// `app.bsky.actor.defs#mutedWordsPref.items` — the user's curated list
+    /// of muted words and tags. Used by the Moderation → Muted Words & Tags
+    /// screen and by feed-side filtering once wired (see #0132).
+    public let mutedWords: [MutedWord]
 
     private enum OuterKeys: String, CodingKey { case preferences }
 
@@ -262,6 +316,13 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             let value: String
             let pinned: Bool
         }
+        struct MutedWordHelper: Decodable {
+            let id: String?
+            let value: String
+            let targets: [String]
+            let actorTarget: String?
+            let expiresAt: String?
+        }
         struct Item: Decodable {
             let type: String
             let enabled: Bool?
@@ -269,6 +330,7 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             let visibility: String?
             let labelerDid: DID?
             let feedItems: [FeedItemHelper]?
+            let mutedWordItems: [MutedWordHelper]?
             let birthDate: String?
             let sort: String?
             let prioritizeFollowedUsers: Bool?
@@ -283,11 +345,42 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             let languages: [String]?
             private enum CodingKeys: String, CodingKey {
                 case type = "$type", enabled, label, visibility, labelerDid, birthDate
-                case feedItems = "items"
+                case items
                 case sort, prioritizeFollowedUsers
                 case feed, hideReplies, hideRepliesByUnfollowed, hideRepliesByLikeCount,
                      hideReposts, hideQuotePosts
                 case languages
+            }
+
+            init(from decoder: any Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                self.type = try c.decode(String.self, forKey: .type)
+                self.enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled)
+                self.label = try c.decodeIfPresent(String.self, forKey: .label)
+                self.visibility = try c.decodeIfPresent(String.self, forKey: .visibility)
+                self.labelerDid = try c.decodeIfPresent(DID.self, forKey: .labelerDid)
+                self.birthDate = try c.decodeIfPresent(String.self, forKey: .birthDate)
+                self.sort = try c.decodeIfPresent(String.self, forKey: .sort)
+                self.prioritizeFollowedUsers = try c.decodeIfPresent(Bool.self, forKey: .prioritizeFollowedUsers)
+                self.feed = try c.decodeIfPresent(String.self, forKey: .feed)
+                self.hideReplies = try c.decodeIfPresent(Bool.self, forKey: .hideReplies)
+                self.hideRepliesByUnfollowed = try c.decodeIfPresent(Bool.self, forKey: .hideRepliesByUnfollowed)
+                self.hideRepliesByLikeCount = try c.decodeIfPresent(Int.self, forKey: .hideRepliesByLikeCount)
+                self.hideReposts = try c.decodeIfPresent(Bool.self, forKey: .hideReposts)
+                self.hideQuotePosts = try c.decodeIfPresent(Bool.self, forKey: .hideQuotePosts)
+                self.languages = try c.decodeIfPresent([String].self, forKey: .languages)
+                // `items` is shared between savedFeedsPrefV2 (FeedItemHelper)
+                // and mutedWordsPref (MutedWordHelper). Pick decoder by `$type`.
+                if type == "app.bsky.actor.defs#mutedWordsPref" {
+                    self.feedItems = nil
+                    self.mutedWordItems = try c.decodeIfPresent([MutedWordHelper].self, forKey: .items)
+                } else if type == "app.bsky.actor.defs#savedFeedsPrefV2" {
+                    self.feedItems = try c.decodeIfPresent([FeedItemHelper].self, forKey: .items)
+                    self.mutedWordItems = nil
+                } else {
+                    self.feedItems = nil
+                    self.mutedWordItems = nil
+                }
             }
         }
 
@@ -354,6 +447,31 @@ public struct GetPreferencesResponse: Decodable, Sendable {
         self.postLanguages = items
             .first { $0.type == "app.bsky.actor.defs#postLanguagesPref" }?
             .languages
+            ?? []
+
+        let isoFractional: ISO8601DateFormatter = {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return f
+        }()
+        self.mutedWords = items
+            .first { $0.type == "app.bsky.actor.defs#mutedWordsPref" }?
+            .mutedWordItems?
+            .map { helper in
+                let expires: Date?
+                if let raw = helper.expiresAt {
+                    expires = isoFractional.date(from: raw) ?? parser.date(from: raw)
+                } else {
+                    expires = nil
+                }
+                return MutedWord(
+                    id: helper.id,
+                    value: helper.value,
+                    targets: helper.targets,
+                    actorTarget: helper.actorTarget,
+                    expiresAt: expires
+                )
+            }
             ?? []
     }
 }
@@ -524,6 +642,44 @@ public struct PutPreferencesRequest: Encodable, Sendable {
             var c = encoder.container(keyedBy: K.self)
             try c.encode(type, forKey: .type)
             try c.encode(languages, forKey: .languages)
+        }
+    }
+
+    /// Writes a `mutedWordsPref` carrying the supplied list of muted-word
+    /// entries. Mirrors RN's `agent.upsertMutedWords / removeMutedWord`
+    /// pattern: those helpers ultimately re-write the entire `items` array,
+    /// so the SwiftUI client does the same thing — load, mutate locally,
+    /// write the whole list back.
+    public init(mutedWords: [MutedWord]) {
+        self.preferences = [AnyEncodable(_MutedWordsPref(items: mutedWords))]
+    }
+
+    private struct _MutedWordsPref: Encodable, Sendable {
+        let items: [MutedWord]
+        private enum K: String, CodingKey { case type = "$type", items }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: K.self)
+            try c.encode("app.bsky.actor.defs#mutedWordsPref", forKey: .type)
+            try c.encode(items.map { _MutedWordItem($0) }, forKey: .items)
+        }
+    }
+
+    /// Per-entry encoder. Emits ISO-8601 `expiresAt` and omits `nil` fields
+    /// so the appview keeps clients that don't carry them happy.
+    private struct _MutedWordItem: Encodable, Sendable {
+        let word: MutedWord
+        init(_ word: MutedWord) { self.word = word }
+        private enum K: String, CodingKey { case id, value, targets, actorTarget, expiresAt }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: K.self)
+            try c.encodeIfPresent(word.id, forKey: .id)
+            try c.encode(word.value, forKey: .value)
+            try c.encode(word.targets, forKey: .targets)
+            try c.encodeIfPresent(word.actorTarget, forKey: .actorTarget)
+            if let expiresAt = word.expiresAt {
+                let fmt = ISO8601DateFormatter()
+                try c.encode(fmt.string(from: expiresAt), forKey: .expiresAt)
+            }
         }
     }
 }

@@ -57,6 +57,12 @@ public struct ModerationScreen: View {
                 } label: {
                     Label("Content Filters", systemImage: "eye.slash")
                 }
+
+                NavigationLink {
+                    MutedWordsScreen(network: network)
+                } label: {
+                    Label("Muted Words & Tags", systemImage: "text.badge.xmark")
+                }
             } header: {
                 Text("Content")
             }
