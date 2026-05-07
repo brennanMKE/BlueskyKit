@@ -95,16 +95,38 @@ public struct VideoAttachment: Sendable {
     ///
     /// RN models this as `media.video.altText` and consults it both for the
     /// "alt text required" gate (see `ComposerViewModel.altTextWarning`) and
-    /// the `app.bsky.embed.video.alt` field on submit. The composer doesn't
-    /// yet ship a UI for editing this — see #0103 — but the field is here so
-    /// the require-alt-text warning can apply uniformly across images, GIFs,
-    /// and video, matching RN's `Composer.tsx#missingAltError`.
+    /// the `app.bsky.embed.video.alt` field on submit. Wired to the popover
+    /// affordance on the video preview cell in `ComposerSheet.swift`.
     public var altText: String
 
-    public init(data: Data, mimeType: String, altText: String = "") {
+    /// WebVTT captions text for the video, when the user has imported a
+    /// `.vtt` file or pasted captions inline. Stored as the raw VTT string
+    /// so we can defer the blob upload to post time, matching how RN holds
+    /// `media.video.captions[].file` as a `File` until `uploadCaptions` runs
+    /// in `state/queries/video/upload.ts`. `nil` means no captions; an
+    /// empty / whitespace-only string is treated the same as `nil`.
+    public var captionsText: String?
+
+    /// BCP-47 language tag for the captions track. Defaults to `"en"`; the
+    /// composer overrides this with the user's primary language when the
+    /// captions sheet opens. Used to populate
+    /// `app.bsky.embed.video.captions[].lang` on submit. RN allows multiple
+    /// caption tracks (one per language) and bounds the count to
+    /// `MAX_NUM_CAPTIONS = 1`, so we model a single optional track here.
+    public var captionsLang: String
+
+    public init(
+        data: Data,
+        mimeType: String,
+        altText: String = "",
+        captionsText: String? = nil,
+        captionsLang: String = "en"
+    ) {
         self.data = data
         self.mimeType = mimeType
         self.altText = altText
+        self.captionsText = captionsText
+        self.captionsLang = captionsLang
     }
 }
 
@@ -208,7 +230,42 @@ public final class ComposerStore: ComposerStoring {
                     data: video.data,
                     mimeType: video.mimeType
                 )
-                videoEmbed = .video(EmbedVideo(video: resp.blob, captions: nil, alt: nil, aspectRatio: nil))
+
+                // Captions: if the user attached a WebVTT track, upload its
+                // text as a `text/vtt` blob and reference it from
+                // `app.bsky.embed.video.captions`. Mirrors RN's
+                // `uploadCaptions` flow (`state/queries/video/upload.ts`),
+                // which iterates `media.video.captions[]` and uploads each
+                // file blob in turn. We only ship a single track today (RN's
+                // `MAX_NUM_CAPTIONS = 1`), so the array is at most one entry.
+                var captionsList: [VideoCaption]?
+                if let vtt = video.captionsText,
+                   !vtt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let vttData = Data(vtt.utf8)
+                    do {
+                        let captionResp: UploadBlobResponse = try await network.upload(
+                            lexicon: "com.atproto.repo.uploadBlob",
+                            data: vttData,
+                            mimeType: "text/vtt"
+                        )
+                        captionsList = [VideoCaption(lang: video.captionsLang, file: captionResp.blob)]
+                    } catch {
+                        // Captions upload is best-effort: a failure here
+                        // still lets the video post go out without subtitles
+                        // (matches RN's per-file `try/catch` in
+                        // `uploadCaptions`). Surface a non-fatal log so the
+                        // user isn't silently blocked.
+                        logger.error("captions upload failed: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+
+                let altOrNil: String? = video.altText.isEmpty ? nil : video.altText
+                videoEmbed = .video(EmbedVideo(
+                    video: resp.blob,
+                    captions: captionsList,
+                    alt: altOrNil,
+                    aspectRatio: nil
+                ))
             }
 
             // GIFs are posted as `app.bsky.embed.external` with the canonical

@@ -63,6 +63,15 @@ public struct ComposerSheet: View {
     /// drop-cancellation so a stale value can't leave the grid in a
     /// "frozen" highlighted state.
     @State private var draggedImageID: UUID?
+    /// Drives the per-video alt-text popover. Mirrors the image cell's
+    /// `showAltInput` state — kept on the parent because the video preview
+    /// is a single inline section, not a collection cell.
+    @State private var showVideoAltInput = false
+    /// Drives the per-video captions sheet (RN's `SubtitleDialog`). Tapping
+    /// the captions affordance below the video preview presents a sheet on
+    /// iOS / a popover on macOS, mirroring how labels and threadgate are
+    /// surfaced elsewhere in the composer.
+    @State private var showVideoCaptionsSheet = false
     private let initialAttachmentSource: ComposerInitialAttachmentSource
 
     public init(
@@ -447,29 +456,134 @@ public struct ComposerSheet: View {
     @ViewBuilder
     private var videoPreview: some View {
         if viewModel.attachedVideo != nil {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.secondary.opacity(0.15))
-                    .frame(height: 120)
-                HStack(spacing: 12) {
-                    Image(systemName: "play.circle.fill")
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
-                    Text("Video attached")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        viewModel.removeVideo()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
+            VStack(alignment: .leading, spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.secondary.opacity(0.15))
+                        .frame(height: 120)
+                    HStack(spacing: 12) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.largeTitle)
                             .foregroundStyle(.secondary)
+                        Text("Video attached")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            viewModel.removeVideo()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 16)
+                }
+                // Accessibility affordances row — alt text + captions.
+                // Mirrors RN's `SubtitleDialogBtn` which exposes both edits
+                // from the same dialog button on the video preview cell.
+                HStack(spacing: 12) {
+                    Button {
+                        showVideoAltInput = true
+                    } label: {
+                        Label(videoAltLabel, systemImage: "text.alignleft")
+                            .font(.subheadline)
                     }
                     .buttonStyle(.plain)
+                    .popover(isPresented: $showVideoAltInput) {
+                        videoAltPopover
+                    }
+
+                    Button {
+                        showVideoCaptionsSheet = true
+                    } label: {
+                        Label(videoCaptionsLabel, systemImage: "captions.bubble")
+                            .font(.subheadline)
+                    }
+                    .buttonStyle(.plain)
+                    #if os(iOS)
+                    .sheet(isPresented: $showVideoCaptionsSheet) {
+                        captionsSheetContent
+                    }
+                    #else
+                    .popover(isPresented: $showVideoCaptionsSheet, arrowEdge: .top) {
+                        captionsSheetContent
+                            .frame(minWidth: 420, minHeight: 360)
+                    }
+                    #endif
+
+                    Spacer()
                 }
-                .padding(.horizontal, 16)
             }
             .padding(.top, 8)
+        }
+    }
+
+    /// Label for the alt-text affordance under the video preview. Shows
+    /// "Alt text" when empty and "Alt text ✓" when populated, matching the
+    /// "filled" affordance pattern used for labels / threadgate elsewhere in
+    /// the composer.
+    private var videoAltLabel: String {
+        let alt = viewModel.attachedVideo?.altText ?? ""
+        return alt.isEmpty ? "Alt text" : "Alt text \u{2713}"
+    }
+
+    /// Label for the captions affordance under the video preview. Shows the
+    /// language code in parens when a track is attached (e.g. `Captions (en)`).
+    /// Mirrors RN's `SubtitleFileRow` which displays the file name + lang.
+    private var videoCaptionsLabel: String {
+        guard let video = viewModel.attachedVideo,
+              let vtt = video.captionsText,
+              !vtt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "Captions"
+        }
+        return "Captions (\(video.captionsLang))"
+    }
+
+    /// Inline alt-text editor popover. Mirrors the image cell's popover so
+    /// the two media types share affordance shape — small text field, single
+    /// "Done" button, no separate cancel.
+    @ViewBuilder
+    private var videoAltPopover: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Alt text").font(.headline)
+            TextField(
+                "Describe this video…",
+                text: Binding(
+                    get: { viewModel.attachedVideo?.altText ?? "" },
+                    set: { newValue in
+                        if viewModel.attachedVideo != nil {
+                            viewModel.attachedVideo?.altText = newValue
+                        }
+                    }
+                ),
+                axis: .vertical
+            )
+            .textFieldStyle(.roundedBorder)
+            .lineLimit(3)
+            .frame(width: 240)
+            Button("Done") { showVideoAltInput = false }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding()
+    }
+
+    /// Captions sheet/popover content. Pulled out so the iOS sheet and macOS
+    /// popover can share the same body without duplicating layout.
+    @ViewBuilder
+    private var captionsSheetContent: some View {
+        VideoCaptionsSheet(
+            initialText: viewModel.attachedVideo?.captionsText ?? "",
+            initialLang: viewModel.attachedVideo?.captionsLang ?? viewModel.selectedLanguage
+        ) { vttText, lang in
+            if viewModel.attachedVideo != nil {
+                let trimmed = vttText.trimmingCharacters(in: .whitespacesAndNewlines)
+                viewModel.attachedVideo?.captionsText = trimmed.isEmpty ? nil : vttText
+                viewModel.attachedVideo?.captionsLang = lang
+            }
+            showVideoCaptionsSheet = false
+        } onCancel: {
+            showVideoCaptionsSheet = false
         }
     }
 
@@ -1342,6 +1456,164 @@ private struct ThreadgatePicker: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Video captions sheet
+
+/// Captions / subtitles editor for an attached video. Mirrors RN's
+/// `SubtitleDialog` (`view/com/composer/videos/SubtitleDialog.tsx`):
+///
+/// - **Pick file** — `.fileImporter` accepting `text/vtt` (or `.txt` as a
+///   permissive fallback for hosts that mislabel the MIME type, matching the
+///   RN web picker's `endsWith('.vtt')` fallback).
+/// - **Paste inline** — a `TextEditor` so the user can paste WebVTT directly.
+/// - **Language picker** — a small `Picker` defaulting to the post's primary
+///   language; the lang code rides on `app.bsky.embed.video.captions[].lang`.
+///
+/// Calls `onSave(vttText, lang)` with the trimmed payload when the user taps
+/// Save; an empty payload is interpreted by the caller as "no captions".
+private struct VideoCaptionsSheet: View {
+    let initialText: String
+    let initialLang: String
+    let onSave: (String, String) -> Void
+    let onCancel: () -> Void
+
+    @State private var vttText: String
+    @State private var lang: String
+    @State private var showFilePicker = false
+    @State private var importError: String?
+
+    init(
+        initialText: String,
+        initialLang: String,
+        onSave: @escaping (String, String) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.initialText = initialText
+        self.initialLang = initialLang
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _vttText = State(initialValue: initialText)
+        _lang = State(initialValue: initialLang)
+    }
+
+    /// Subset of RN's `LANGUAGES` list — the same five-or-so languages the
+    /// post-language `Picker` already offers, so the captions track lang
+    /// can't drift away from the available post langs.
+    private static let availableLanguages: [(code: String, name: String)] = [
+        ("en", "English"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+        ("pt", "Portuguese"),
+    ]
+
+    /// Permissive content-type list for the importer. Some hosts hand VTT
+    /// files a `text/plain` MIME type, so the importer accepts plain text
+    /// in addition to the dedicated `vtt`/`text` UTTypes — same fallback RN
+    /// uses on web (`endsWith('.vtt')`).
+    private static let captionContentTypes: [UTType] = {
+        var types: [UTType] = [.plainText, .text]
+        if let vtt = UTType(filenameExtension: "vtt") {
+            types.insert(vtt, at: 0)
+        }
+        return types
+    }()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Add captions to make your video accessible. WebVTT (.vtt) format.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Language") {
+                    Picker("Language", selection: $lang) {
+                        ForEach(Self.availableLanguages, id: \.code) { entry in
+                            Text("\(entry.name) (\(entry.code))").tag(entry.code)
+                        }
+                    }
+                    .labelsHidden()
+                }
+
+                Section("Captions (.vtt)") {
+                    Button {
+                        showFilePicker = true
+                    } label: {
+                        Label("Select caption file (.vtt)", systemImage: "doc.badge.plus")
+                    }
+                    if let importError {
+                        Text(importError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    TextEditor(text: $vttText)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(minHeight: 160)
+                }
+
+                if !vttText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Section {
+                        Button(role: .destructive) {
+                            vttText = ""
+                        } label: {
+                            Label("Remove captions", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Captions")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { onSave(vttText, lang) }
+                }
+            }
+            .fileImporter(
+                isPresented: $showFilePicker,
+                allowedContentTypes: Self.captionContentTypes,
+                allowsMultipleSelection: false
+            ) { result in
+                importError = nil
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    // Security-scoped URL: required when the picked file
+                    // lives outside the app sandbox (Files app on iOS,
+                    // arbitrary disk locations on macOS).
+                    let didStart = url.startAccessingSecurityScopedResource()
+                    defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+                    do {
+                        let data = try Data(contentsOf: url)
+                        // VTT is text; UTF-8 is the WebVTT spec encoding.
+                        // Fall back to a tolerant decode so a file with a
+                        // BOM or stray non-UTF-8 byte still imports as
+                        // best-effort text.
+                        if let text = String(data: data, encoding: .utf8) {
+                            vttText = text
+                        } else if let text = String(data: data, encoding: .isoLatin1) {
+                            vttText = text
+                        } else {
+                            importError = "Could not read the selected file as text."
+                        }
+                    } catch {
+                        importError = "Could not open the selected file: \(error.localizedDescription)"
+                    }
+                case .failure(let error):
+                    importError = "Import failed: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 }
 
