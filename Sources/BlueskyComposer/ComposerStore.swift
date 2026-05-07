@@ -18,6 +18,7 @@ public protocol ComposerStoring: AnyObject, Observable, Sendable {
         text: String,
         images: [ComposerImageAttachment],
         attachedVideo: VideoAttachment?,
+        selectedGIF: TenorGif?,
         detectedURL: URL?,
         linkMetadata: LinkMetadata?,
         additionalPosts: [String],
@@ -141,6 +142,7 @@ public final class ComposerStore: ComposerStoring {
         text: String,
         images: [ComposerImageAttachment],
         attachedVideo: VideoAttachment?,
+        selectedGIF: TenorGif?,
         detectedURL: URL?,
         linkMetadata: LinkMetadata?,
         additionalPosts: [String],
@@ -199,6 +201,27 @@ public final class ComposerStore: ComposerStoring {
                 videoEmbed = .video(EmbedVideo(video: resp.blob, captions: nil, alt: nil, aspectRatio: nil))
             }
 
+            // GIFs are posted as `app.bsky.embed.external` with the canonical
+            // gif URL plus a `thumb` blob (the static preview frame). RN
+            // builds this in `lib/api/resolve.ts` (`resolveGif`). The
+            // selected-GIF branch is mutually exclusive with images / video
+            // / link card on the UI side, so we only have to honor it when
+            // those slots are empty.
+            var gifExternalEmbed: Embed?
+            if let selectedGIF, uploadedImages.isEmpty, videoEmbed == nil {
+                do {
+                    gifExternalEmbed = try await buildGIFExternalEmbed(selectedGIF)
+                } catch {
+                    // GIF embed construction is best-effort: a thumb upload
+                    // failure still lets the post go out without the
+                    // attachment, with a non-fatal error surfaced to the
+                    // caller. Matches RN's `resolveGif` failure path.
+                    logger.error("GIF embed build failed: \(error.localizedDescription, privacy: .public)")
+                    errorMessage = "Could not attach the selected GIF: \(error.localizedDescription)"
+                    return updatedImages
+                }
+            }
+
             var embed: Embed?
             if !uploadedImages.isEmpty, let qp = quotedPost {
                 embed = .recordWithMedia(
@@ -209,6 +232,15 @@ public final class ComposerStore: ComposerStoring {
                 embed = .images(uploadedImages)
             } else if let videoEmbed {
                 embed = videoEmbed
+            } else if let gifExternalEmbed, let qp = quotedPost {
+                // GIF + quote → recordWithMedia, mirroring how RN attaches
+                // an external embed to a quote post.
+                embed = .recordWithMedia(
+                    record: EmbedRecordRef(uri: qp.uri, cid: qp.cid),
+                    media: gifExternalEmbed
+                )
+            } else if let gifExternalEmbed {
+                embed = gifExternalEmbed
             } else if let url = detectedURL, quotedPost == nil {
                 // If we have OpenGraph metadata, try to upload the thumbnail blob.
                 var thumb: BlobRef?
@@ -376,6 +408,57 @@ public final class ComposerStore: ComposerStoring {
     }
 
     // MARK: - Helpers
+
+    /// Builds an `EmbedExternal` for a Tenor GIF, matching RN's `resolveGif`
+    /// (`lib/api/resolve.ts`):
+    ///
+    /// - `uri`: `media_formats.gif.url` with `?hh=<H>&ww=<W>` query params so
+    ///   downstream renderers can size the GIF without a network round-trip.
+    /// - `title`: `content_description` (or post title fallback).
+    /// - `description`: `"ALT: <description>"` — RN's `createGIFDescription`
+    ///   prefix that distinguishes a default vs. user-authored alt text.
+    /// - `thumb`: a blob ref of the static preview frame (RN uses
+    ///   `media_formats.preview.url`, falling back to `tinygif` when missing).
+    private func buildGIFExternalEmbed(_ gif: TenorGif) async throws -> Embed {
+        // Append width / height as query params on the gif URL — matches
+        // RN's `resolveGif` so the embed carries layout info.
+        let dims = gif.dims
+        var components = URLComponents(string: gif.gifURL)
+        var items = components?.queryItems ?? []
+        items.append(URLQueryItem(name: "hh", value: String(dims.height)))
+        items.append(URLQueryItem(name: "ww", value: String(dims.width)))
+        components?.queryItems = items
+        let uri = components?.url?.absoluteString ?? gif.gifURL
+
+        let alt = gif.altText
+        // RN's `createGIFDescription` returns `"ALT: <text>"` for the default
+        // case (no user-supplied alt). The picker doesn't expose an alt-text
+        // field yet (RN does — see `GifAltText.tsx`), so we always emit the
+        // default form; a follow-up can wire user-authored alt text through
+        // the same composer surface used for images.
+        let description = "ALT: \(alt)"
+
+        // Download and upload the thumb blob. Best-effort failures throw so
+        // the caller can surface a non-fatal error; the post itself doesn't
+        // need this blob to be valid AT Proto, but Bluesky clients render a
+        // dramatically better preview when it's present.
+        guard let previewURL = URL(string: gif.previewURL) else {
+            throw URLError(.badURL)
+        }
+        let (data, mime) = try await fetchImageData(previewURL)
+        let resp: UploadBlobResponse = try await network.upload(
+            lexicon: "com.atproto.repo.uploadBlob",
+            data: data,
+            mimeType: mime
+        )
+
+        return .external(EmbedExternal(
+            uri: uri,
+            title: alt,
+            description: description,
+            thumb: resp.blob
+        ))
+    }
 
     /// Downloads the image data at `url` and returns its raw bytes plus MIME type.
     /// Caps the payload at 1 MB so a misbehaving server can't stall posting.

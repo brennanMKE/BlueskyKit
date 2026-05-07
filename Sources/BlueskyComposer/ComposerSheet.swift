@@ -48,6 +48,9 @@ public struct ComposerSheet: View {
     /// Drives the threadgate / postgate (interaction restrictions) picker
     /// presentation. Mirrors RN's `ThreadgateBtn` dialog control.
     @State private var showThreadgatePicker = false
+    /// Drives the GIF picker (Tenor) presentation. Mirrors RN's
+    /// `SelectGifBtn` dialog control.
+    @State private var showGIFPicker = false
     private let initialAttachmentSource: ComposerInitialAttachmentSource
 
     public init(
@@ -90,6 +93,7 @@ public struct ComposerSheet: View {
                     }
                     imageGrid
                     videoPreview
+                    gifPreview
                     mediaToolbar
                     // Thread posts
                     threadPosts
@@ -374,18 +378,69 @@ public struct ComposerSheet: View {
         }
     }
 
+    // MARK: - GIF preview
+
+    /// Renders the selected Tenor GIF as a static thumbnail tile with a
+    /// remove affordance. Animated playback is intentionally deferred — see
+    /// issue #0099 Gotchas. The thumbnail uses `tinygif` because it loads
+    /// fast over cellular and looks indistinguishable from `gif` at this
+    /// preview size.
+    @ViewBuilder
+    private var gifPreview: some View {
+        if let gif = viewModel.selectedGIF {
+            ZStack(alignment: .topTrailing) {
+                AsyncImage(url: URL(string: gif.thumbURL)) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    default:
+                        Color.secondary.opacity(0.15)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 200)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                // GIF badge to make the embed type obvious — RN renders a
+                // similar overlay.
+                Text("GIF")
+                    .font(.caption.bold())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                Button {
+                    viewModel.removeGIF()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.white)
+                        .shadow(radius: 2)
+                }
+                .padding(8)
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 8)
+        }
+    }
+
     // MARK: - Media toolbar (image picker + video picker)
 
     @ViewBuilder
     private var mediaToolbar: some View {
         #if os(iOS)
         HStack(spacing: 16) {
-            if viewModel.images.count < 4 && viewModel.attachedVideo == nil {
+            if viewModel.images.count < 4 && viewModel.attachedVideo == nil && viewModel.selectedGIF == nil {
                 ImagePickerButton { data, mimeType in
                     viewModel.addImage(data: data, mimeType: mimeType)
                 }
             }
-            if viewModel.images.isEmpty && viewModel.attachedVideo == nil {
+            if viewModel.images.isEmpty && viewModel.selectedGIF == nil {
+                gifButton
+            }
+            if viewModel.images.isEmpty && viewModel.attachedVideo == nil && viewModel.selectedGIF == nil {
                 PhotosPicker(selection: $selectedVideo, matching: .videos) {
                     Label("Add video", systemImage: "video.badge.plus")
                         .font(.subheadline)
@@ -404,9 +459,14 @@ public struct ComposerSheet: View {
                 quotesEnabled: $viewModel.quotesEnabled
             )
         }
+        .sheet(isPresented: $showGIFPicker) {
+            GIFPickerSheet { gif in
+                viewModel.setGIF(gif)
+            }
+        }
         #elseif os(macOS)
         HStack(spacing: 16) {
-            if viewModel.images.count < 4 && viewModel.attachedVideo == nil {
+            if viewModel.images.count < 4 && viewModel.attachedVideo == nil && viewModel.selectedGIF == nil {
                 Button {
                     pickImagesMac()
                 } label: {
@@ -416,7 +476,10 @@ public struct ComposerSheet: View {
                 .buttonStyle(.plain)
                 .padding(.top, 8)
             }
-            if viewModel.images.isEmpty && viewModel.attachedVideo == nil {
+            if viewModel.images.isEmpty && viewModel.selectedGIF == nil {
+                gifButton
+            }
+            if viewModel.images.isEmpty && viewModel.attachedVideo == nil && viewModel.selectedGIF == nil {
                 Button {
                     pickVideoMac()
                 } label: {
@@ -439,6 +502,12 @@ public struct ComposerSheet: View {
                 quotesEnabled: $viewModel.quotesEnabled
             )
             .frame(minWidth: 360, minHeight: 420)
+        }
+        .sheet(isPresented: $showGIFPicker) {
+            GIFPickerSheet { gif in
+                viewModel.setGIF(gif)
+            }
+            .frame(minWidth: 480, minHeight: 560)
         }
         #endif
     }
@@ -494,6 +563,28 @@ public struct ComposerSheet: View {
         .padding(.top, 8)
         .accessibilityLabel(viewModel.hasInteractionRestrictions ? "Interaction limited" : "Anyone can interact")
         .accessibilityHint("Opens a dialog to choose who can reply to and quote this post")
+    }
+
+    /// GIF picker button mirroring RN's `SelectGifBtn`. RN uses a custom
+    /// `GifSquare` SF-symbol-shaped icon; SF Symbols don't ship that exact
+    /// glyph, so we render a labelled "GIF" pill with `photo.stack` as the
+    /// icon — the bold "GIF" text reads correctly even without the icon and
+    /// matches the visual idiom RN uses elsewhere.
+    private var gifButton: some View {
+        Button {
+            #if os(iOS)
+            dismissKeyboard()
+            #endif
+            showGIFPicker = true
+        } label: {
+            Label("GIF", systemImage: "photo.stack")
+                .font(.subheadline.bold())
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 8)
+        .accessibilityLabel("Select GIF")
+        .accessibilityHint("Opens the Tenor GIF picker")
     }
 
     #if os(iOS)

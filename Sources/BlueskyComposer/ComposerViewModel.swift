@@ -63,6 +63,14 @@ public final class ComposerViewModel {
 
     public var attachedVideo: VideoAttachment?
 
+    // MARK: - GIF attachment
+
+    /// The Tenor GIF the author has selected from `GIFPickerSheet`. Mirrors
+    /// RN's `embedDraft.media` slot for `gif`-kind media. Mutually exclusive
+    /// with images and video — the toolbar hides the conflicting buttons
+    /// when this is non-nil.
+    public var selectedGIF: TenorGif?
+
     // MARK: - Link card
 
     public var detectedURL: URL?
@@ -74,7 +82,7 @@ public final class ComposerViewModel {
 
     /// The URL shown in the link card preview (nil when dismissed or images are attached).
     public var visibleLinkURL: URL? {
-        guard !linkCardDismissed, images.isEmpty, attachedVideo == nil else { return nil }
+        guard !linkCardDismissed, images.isEmpty, attachedVideo == nil, selectedGIF == nil else { return nil }
         return detectedURL
     }
 
@@ -135,6 +143,7 @@ public final class ComposerViewModel {
             text: text,
             images: images,
             attachedVideo: attachedVideo,
+            selectedGIF: selectedGIF,
             detectedURL: visibleLinkURL,
             linkMetadata: visibleLinkMetadata,
             additionalPosts: additionalPosts,
@@ -157,6 +166,7 @@ public final class ComposerViewModel {
             images = []
             additionalPosts = []
             attachedVideo = nil
+            selectedGIF = nil
             linkMetadata = nil
             detectedURL = nil
             mentionPrefix = nil
@@ -231,6 +241,24 @@ public final class ComposerViewModel {
 
     public func removeVideo() {
         attachedVideo = nil
+    }
+
+    // MARK: - GIF attachment
+
+    /// Set the selected GIF. Clearing competing media slots mirrors RN's
+    /// composer state machine: GIF, image, and video are mutually exclusive
+    /// (the toolbar already hides conflicting buttons, but we defensively
+    /// clear here too in case state is set programmatically).
+    public func setGIF(_ gif: TenorGif) {
+        selectedGIF = gif
+        // GIF is mutually exclusive with images, video, and link card.
+        images = []
+        attachedVideo = nil
+        linkCardDismissed = true
+    }
+
+    public func removeGIF() {
+        selectedGIF = nil
     }
 
     // MARK: - Link card
