@@ -19,6 +19,7 @@ public struct LoginView: View {
     @State private var needsAuthFactor = false
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var showSignup = false
 
     @FocusState private var focus: Field?
 
@@ -38,11 +39,25 @@ public struct LoginView: View {
                     errorBanner(error)
                 }
                 signInButton
+                createAccountButton
                 customServerToggle
             }
             .padding(24)
             .frame(maxWidth: 400)
             .frame(maxWidth: .infinity)
+        }
+        .sheet(isPresented: $showSignup) {
+            SignupFlowView(
+                session: session,
+                onSuccess: {
+                    showSignup = false
+                    onSuccess()
+                },
+                onCancel: {
+                    showSignup = false
+                }
+            )
+            .frame(minWidth: 480, minHeight: 640)
         }
     }
 
@@ -169,6 +184,22 @@ public struct LoginView: View {
             Text(showServiceURL ? "Use default server" : "Use a custom server")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var createAccountButton: some View {
+        Button {
+            showSignup = true
+        } label: {
+            HStack(spacing: 4) {
+                Text("New to Bluesky?")
+                    .foregroundStyle(.secondary)
+                Text("Create an account")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.tint)
+            }
+            .font(.subheadline)
         }
         .buttonStyle(.plain)
     }

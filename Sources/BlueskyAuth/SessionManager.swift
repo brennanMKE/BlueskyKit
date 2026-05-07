@@ -74,6 +74,94 @@ public final class SessionManager: SessionManaging {
 
     // MARK: - SessionManaging
 
+    /// Calls `com.atproto.server.describeServer` against the current `serviceURL`
+    /// (or the supplied override). Used by the signup flow to drive the invite-
+    /// code requirement and the available user-domain suffix list.
+    public func describeServer(_ serviceURL: URL? = nil) async throws -> DescribeServerResponse {
+        let target = serviceURL ?? self.serviceURL
+        let url = target.appending(path: "xrpc/com.atproto.server.describeServer")
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        return try await send(req, expecting: DescribeServerResponse.self)
+    }
+
+    /// Creates a new account on the chosen PDS and persists the resulting
+    /// session exactly like `login(identifier:password:authFactorToken:)`.
+    @discardableResult
+    public func createAccount(
+        request: CreateAccountRequest,
+        serviceURL: URL? = nil,
+        birthDate: Date? = nil,
+        email: String? = nil
+    ) async throws -> Account {
+        let target = serviceURL ?? self.serviceURL
+        let url = target.appending(path: "xrpc/com.atproto.server.createAccount")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(request)
+
+        let response: CreateAccountResponse = try await send(req, expecting: CreateAccountResponse.self)
+
+        let account = Account(
+            did: DID(rawValue: response.did),
+            handle: Handle(rawValue: response.handle),
+            displayName: nil,
+            avatarURL: nil,
+            serviceEndpoint: target,
+            email: email ?? request.email,
+            emailConfirmed: false
+        )
+        let stored = StoredAccount(
+            account: account,
+            accessJwt: response.accessJwt,
+            refreshJwt: response.refreshJwt
+        )
+
+        try await accountStore.save(stored)
+        try await accountStore.setCurrentDID(account.did)
+        upsert(account: account)
+        currentAccount = account
+        self.serviceURL = target
+
+        // Best-effort: write birth date as a personal detail. Failure is non-fatal —
+        // matches RN behavior where personal-details writes are fire-and-forget after
+        // createAccount succeeds.
+        if let birthDate {
+            do {
+                try await callPutPreferences(
+                    accessJwt: response.accessJwt,
+                    serviceEndpoint: target,
+                    birthDate: birthDate
+                )
+            } catch {
+                logger.debug("createAccount: failed to set initial birthDate preference: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+
+        return account
+    }
+
+    private func callPutPreferences(accessJwt: String, serviceEndpoint: URL, birthDate: Date) async throws {
+        let url = serviceEndpoint.appending(path: "xrpc/app.bsky.actor.putPreferences")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(accessJwt)", forHTTPHeaderField: "Authorization")
+
+        let formatter = ISO8601DateFormatter()
+        let body: [String: Any] = [
+            "preferences": [[
+                "$type": "app.bsky.actor.defs#personalDetailsPref",
+                "birthDate": formatter.string(from: birthDate)
+            ]]
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validateHTTP(response: response, data: data)
+    }
+
     @discardableResult
     public func login(identifier: String, password: String, authFactorToken: String?) async throws -> Account {
         let response = try await callCreateSession(
