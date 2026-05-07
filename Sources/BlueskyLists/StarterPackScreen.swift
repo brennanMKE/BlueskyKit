@@ -1,7 +1,15 @@
 import SwiftUI
+import CoreImage
+import CoreImage.CIFilterBuiltins
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
+
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
     nonisolated func get<R: Decodable & Sendable>(lexicon: String, params: [String: String]) async throws -> R { throw ATError.unknown("preview") }
@@ -21,6 +29,8 @@ private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
 public struct StarterPackScreen: View {
 
     @State private var viewModel: StarterPackViewModel
+    @State private var showQRSheet = false
+    @State private var showCopiedToast = false
     private let starterPackURI: ATURI
 
     public init(
@@ -36,6 +46,7 @@ public struct StarterPackScreen: View {
         List {
             if let pack = viewModel.starterPack {
                 packHeaderSection(pack)
+                feedsSection(pack)
                 membersSection(pack)
             } else if viewModel.isLoading {
                 ProgressView()
@@ -49,6 +60,37 @@ public struct StarterPackScreen: View {
         .listStyle(.inset)
         #endif
         .navigationTitle(viewModel.starterPack?.list?.name ?? "Starter Pack")
+        .toolbar {
+            if let pack = viewModel.starterPack, let url = shareURL(for: pack) {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        ShareLink(item: url) {
+                            Label("Share starter pack", systemImage: "square.and.arrow.up")
+                        }
+                        Button {
+                            copyToClipboard(url.absoluteString)
+                            showCopiedToast = true
+                        } label: {
+                            Label("Copy link", systemImage: "link")
+                        }
+                        Button {
+                            showQRSheet = true
+                        } label: {
+                            Label("Show QR code", systemImage: "qrcode")
+                        }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .help("Share starter pack")
+                }
+            }
+        }
+        .sheet(isPresented: $showQRSheet) {
+            if let pack = viewModel.starterPack, let url = shareURL(for: pack) {
+                StarterPackQRSheet(url: url, packName: pack.list?.name ?? pack.creator.handle.rawValue)
+            }
+        }
+        .toast(isPresented: $showCopiedToast, message: "Link copied")
         .task { await viewModel.load(uri: starterPackURI) }
         .alert("Error", isPresented: Binding(
             get: { viewModel.error != nil },
@@ -104,6 +146,22 @@ public struct StarterPackScreen: View {
         }
     }
 
+    @ViewBuilder
+    private func feedsSection(_ pack: StarterPackView) -> some View {
+        if let feeds = pack.feeds, !feeds.isEmpty {
+            Section("Feeds") {
+                ForEach(feeds, id: \.uri) { feed in
+                    FeedCard(feed: feed) { _ in
+                        // RN navigates to the feed view; in SwiftUI we leave
+                        // navigation to the host. Match RN behavior of opening
+                        // detail eventually — for now, no-op tap.
+                    }
+                    .listRowInsets(EdgeInsets())
+                }
+            }
+        }
+    }
+
     private func membersSection(_ pack: StarterPackView) -> some View {
         Section("Members") {
             if let sample = pack.listItemsSample, !sample.isEmpty {
@@ -133,6 +191,115 @@ public struct StarterPackScreen: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    // MARK: - Share helpers
+
+    /// Build the canonical Bluesky deep link for a starter pack.
+    /// RN reference: `src/lib/routes/links.ts#makeStarterPackLink` →
+    /// `https://bsky.app/start/<creator-handle>/<rkey>`.
+    private func shareURL(for pack: StarterPackView) -> URL? {
+        guard let rkey = pack.uri.rkey else { return nil }
+        let handle = pack.creator.handle.rawValue.isEmpty
+            ? pack.creator.did.rawValue
+            : pack.creator.handle.rawValue
+        return URL(string: "https://bsky.app/start/\(handle)/\(rkey)")
+    }
+
+    private func copyToClipboard(_ string: String) {
+        #if canImport(UIKit)
+        UIPasteboard.general.string = string
+        #elseif canImport(AppKit)
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(string, forType: .string)
+        #endif
+    }
+}
+
+// MARK: - QR sheet
+
+/// Renders the starter pack deep link as a QR code using CoreImage's
+/// `CIQRCodeGenerator` filter. RN's `QrCodeDialog` shows the same QR plus the
+/// shortened link beneath; we mirror that minus the OG card image (which
+/// requires server-side OG fetching).
+private struct StarterPackQRSheet: View {
+
+    let url: URL
+    let packName: String
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                if let image = qrImage(for: url.absoluteString) {
+                    image
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 280, maxHeight: 280)
+                        .padding()
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                        )
+                } else {
+                    Text("Could not generate QR code")
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(packName)
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+
+                Text(url.absoluteString)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+
+                ShareLink(item: url) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle("Starter Pack QR")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func qrImage(for string: String) -> Image? {
+        let context = CIContext()
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(string.utf8)
+        filter.correctionLevel = "M"
+
+        guard let output = filter.outputImage else { return nil }
+        // Scale up to roughly 512px so the image stays crisp when rendered.
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
+        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else {
+            return nil
+        }
+        #if canImport(UIKit)
+        return Image(uiImage: UIImage(cgImage: cgImage))
+        #elseif canImport(AppKit)
+        let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: scaled.extent.width, height: scaled.extent.height))
+        return Image(nsImage: nsImage)
+        #else
+        return nil
+        #endif
     }
 }
 
