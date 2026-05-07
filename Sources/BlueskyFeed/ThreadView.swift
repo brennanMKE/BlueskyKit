@@ -148,11 +148,27 @@ public struct ThreadView: View {
 
     private func threadList(_ node: ThreadViewPost) -> some View {
         let focalURI = focalPostURI(node)
+        let threadgateAllow = focalThreadgateAllow(node)
         return ScrollView {
             LazyVStack(spacing: 0) {
-                // Ancestors + focal post — flat, no indent.
+                // Ancestors + focal post — flat, no indent. The focal
+                // post itself uses `FocalPostCard` for the larger-avatar,
+                // full-date, tappable-stat-row treatment (#0146); all
+                // other rows in this segment stay on the regular
+                // `PostCard`.
                 ForEach(linearRows(for: node), id: \.post.uri) { item in
-                    PostCard(item: item, actions: actions(for: item.post, focalURI: focalURI))
+                    if item.post.uri == focalURI {
+                        FocalPostCard(
+                            item: item,
+                            actions: actions(for: item.post, focalURI: focalURI),
+                            threadgateAllow: threadgateAllow,
+                            onLikedByTap: onLikedByTap,
+                            onRepostedByTap: onRepostedByTap,
+                            onQuotesTap: onQuotesTap
+                        )
+                    } else {
+                        PostCard(item: item, actions: actions(for: item.post, focalURI: focalURI))
+                    }
                     Divider()
                 }
                 // Replies — recursive tree (#0141).
@@ -179,6 +195,18 @@ public struct ThreadView: View {
     private func focalPostURI(_ node: ThreadViewPost) -> ATURI? {
         guard case .post(let tp) = node else { return nil }
         return tp.post.uri
+    }
+
+    /// Extract the focal post's threadgate `allow` rules, if any. Returns
+    /// `nil` when no threadgate is present (the default — anyone can
+    /// reply); returns the underlying array (which may be empty, meaning
+    /// "nobody can reply") otherwise. `FocalPostCard` uses this to drive
+    /// the "Who can reply" badge.
+    private func focalThreadgateAllow(_ node: ThreadViewPost) -> [ThreadgateAllowRule]? {
+        guard case .post(let tp) = node, let record = tp.threadgate?.record else {
+            return nil
+        }
+        return record.allow
     }
 
     /// Linear (non-tree) rows above the reply list: ancestors (oldest
