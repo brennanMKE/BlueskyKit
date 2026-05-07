@@ -36,17 +36,28 @@ struct AccessibilitySettingsScreen: View {
             }
 
             Section {
-                Toggle("Require Alt Text", isOn: $viewModel.altTextRequired)
+                Toggle("Require alt text before posting", isOn: $viewModel.altTextRequired)
+                Toggle("Display larger alt text badges", isOn: $viewModel.largerAltBadge)
             } header: {
-                Text("Media")
+                Text("Alt text")
             } footer: {
                 Text("When enabled, you must add alt text to images before posting.")
             }
+
+            #if os(iOS)
+            Section {
+                Toggle("Disable haptic feedback", isOn: $viewModel.disableHaptics)
+            } header: {
+                Text("Haptics")
+            }
+            #endif
         }
         .navigationTitle("Accessibility")
         .onChange(of: viewModel.reduceMotion) { _, _ in viewModel.save() }
         .onChange(of: viewModel.openLinksInApp) { _, _ in viewModel.save() }
         .onChange(of: viewModel.altTextRequired) { _, _ in viewModel.save() }
+        .onChange(of: viewModel.largerAltBadge) { _, _ in viewModel.save() }
+        .onChange(of: viewModel.disableHaptics) { _, _ in viewModel.save() }
     }
 }
 

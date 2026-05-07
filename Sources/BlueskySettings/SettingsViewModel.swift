@@ -18,8 +18,10 @@ private enum PrefKey {
     static let autoplayVideo = "settings.autoplayVideo"
     static let externalEmbeds = "settings.externalEmbeds"
     static let altTextRequired = "settings.altTextRequired"
+    static let largerAltBadge = "settings.largerAltBadge"
     static let reduceMotion = "settings.reduceMotion"
     static let openLinksInApp = "settings.openLinksInApp"
+    static let disableHaptics = "settings.disableHaptics"
     static let postLanguages = "settings.postLanguages"
 
     // Legacy single-toggle notification keys (kept for read-side migration; the
@@ -54,6 +56,13 @@ public final class SettingsViewModel {
 
     public var reduceMotion = false
     public var openLinksInApp = true
+    /// Display larger ALT badges on image embeds for low-vision users.
+    /// Mirrors RN's `large_alt_badge` toggle in `AccessibilitySettings.tsx`.
+    public var largerAltBadge = false
+    /// Disable haptic feedback on actions. iOS-only in RN, persisted on all
+    /// platforms here so the preference round-trips even though only iOS
+    /// surfaces the toggle.
+    public var disableHaptics = false
 
     // MARK: - Language
 
@@ -119,8 +128,10 @@ public final class SettingsViewModel {
         autoplayVideo = loadValue(Bool.self, key: PrefKey.autoplayVideo, default: true)
         externalEmbeds = loadValue(Bool.self, key: PrefKey.externalEmbeds, default: true)
         altTextRequired = loadValue(Bool.self, key: PrefKey.altTextRequired, default: false)
+        largerAltBadge = loadValue(Bool.self, key: PrefKey.largerAltBadge, default: false)
         reduceMotion = loadValue(Bool.self, key: PrefKey.reduceMotion, default: false)
         openLinksInApp = loadValue(Bool.self, key: PrefKey.openLinksInApp, default: true)
+        disableHaptics = loadValue(Bool.self, key: PrefKey.disableHaptics, default: false)
         postLanguages = loadValue([String].self, key: PrefKey.postLanguages, default: ["en"])
         notifyLikes = loadValue(Bool.self, key: PrefKey.notifyLikes, default: true)
         notifyReposts = loadValue(Bool.self, key: PrefKey.notifyReposts, default: true)
@@ -134,8 +145,10 @@ public final class SettingsViewModel {
         saveValue(autoplayVideo, key: PrefKey.autoplayVideo)
         saveValue(externalEmbeds, key: PrefKey.externalEmbeds)
         saveValue(altTextRequired, key: PrefKey.altTextRequired)
+        saveValue(largerAltBadge, key: PrefKey.largerAltBadge)
         saveValue(reduceMotion, key: PrefKey.reduceMotion)
         saveValue(openLinksInApp, key: PrefKey.openLinksInApp)
+        saveValue(disableHaptics, key: PrefKey.disableHaptics)
         saveValue(postLanguages, key: PrefKey.postLanguages)
         saveValue(notifyLikes, key: PrefKey.notifyLikes)
         saveValue(notifyReposts, key: PrefKey.notifyReposts)
