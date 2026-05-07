@@ -116,6 +116,61 @@ public struct CreateAccountResponse: Decodable, Sendable {
     public let refreshJwt: String
 }
 
+// MARK: - com.atproto.server.requestPasswordReset
+
+/// Request body for `com.atproto.server.requestPasswordReset`. The server
+/// emails a reset code to the supplied address; the response body is empty
+/// on success (use `EmptyResponse`).
+public struct RequestPasswordResetRequest: Encodable, Sendable {
+    public let email: String
+    public init(email: String) {
+        self.email = email
+    }
+}
+
+// MARK: - com.atproto.server.resetPassword
+
+/// Request body for `com.atproto.server.resetPassword`. Caller supplies the
+/// reset code received by email plus the new password; the response body is
+/// empty on success (use `EmptyResponse`).
+public struct ResetPasswordRequest: Encodable, Sendable {
+    public let token: String
+    public let password: String
+    public init(token: String, password: String) {
+        self.token = token
+        self.password = password
+    }
+}
+
+// MARK: - Password reset helpers
+
+public enum PasswordResetValidation {
+    /// Trims whitespace and uppercases the supplied reset code, then verifies
+    /// it matches the canonical base32 `XXXXX-XXXXX` shape used by Bluesky
+    /// password reset emails. If the user pasted a 10-character code without
+    /// the hyphen, inserts the hyphen automatically. Mirrors RN
+    /// `checkAndFormatResetCode` in `lib/strings/password.ts`.
+    ///
+    /// Returns the formatted code on success, or `nil` if the input is not a
+    /// well-formed reset code.
+    public static func checkAndFormatResetCode(_ value: String) -> String? {
+        var fixed = value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        // Strip any internal whitespace the user may have pasted.
+        fixed = fixed.filter { !$0.isWhitespace }
+        // Insert the hyphen if the user pasted 10 chars without one.
+        if fixed.count == 10 {
+            let mid = fixed.index(fixed.startIndex, offsetBy: 5)
+            fixed = String(fixed[..<mid]) + "-" + String(fixed[mid...])
+        }
+        // Bluesky reset codes are RFC 4648 base32 (A-Z, 2-7).
+        let pattern = #"^[A-Z2-7]{5}-[A-Z2-7]{5}$"#
+        guard fixed.range(of: pattern, options: .regularExpression) != nil else {
+            return nil
+        }
+        return fixed
+    }
+}
+
 // MARK: - Signup helpers
 
 public enum SignupValidation {

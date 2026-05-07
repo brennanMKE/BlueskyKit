@@ -162,6 +162,43 @@ public final class SessionManager: SessionManaging {
         try validateHTTP(response: response, data: data)
     }
 
+    /// Requests a password-reset email for `email` from the chosen PDS.
+    /// The PDS sends an `XXXXX-XXXXX` base32 code to the address; the user
+    /// then completes the flow with `resetPassword(serviceURL:token:password:)`.
+    ///
+    /// Called while signed out, so we go directly via `URLSession` rather than
+    /// the authenticated `NetworkClient`. Throws `ATError.xrpc` on a server
+    /// rejection.
+    public func requestPasswordReset(serviceURL: URL? = nil, email: String) async throws {
+        let target = serviceURL ?? self.serviceURL
+        let url = target.appending(path: "xrpc/com.atproto.server.requestPasswordReset")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(RequestPasswordResetRequest(email: email))
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validateHTTP(response: response, data: data)
+    }
+
+    /// Submits the user's reset code and a new password to the chosen PDS,
+    /// completing the forgot-password flow. Bluesky returns an empty body on
+    /// success.
+    ///
+    /// Called while signed out, so we go directly via `URLSession`. Throws
+    /// `ATError.xrpc` on an invalid token / rejected password.
+    public func resetPassword(serviceURL: URL? = nil, token: String, password: String) async throws {
+        let target = serviceURL ?? self.serviceURL
+        let url = target.appending(path: "xrpc/com.atproto.server.resetPassword")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(ResetPasswordRequest(token: token, password: password))
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validateHTTP(response: response, data: data)
+    }
+
     @discardableResult
     public func login(identifier: String, password: String, authFactorToken: String?) async throws -> Account {
         let response = try await callCreateSession(

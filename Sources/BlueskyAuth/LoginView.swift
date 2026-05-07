@@ -21,6 +21,7 @@ public struct LoginView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showSignup = false
+    @State private var showForgotPassword = false
 
     @FocusState private var focus: Field?
 
@@ -75,6 +76,24 @@ public struct LoginView: View {
             )
             .frame(minWidth: 480, minHeight: 640)
         }
+        .sheet(isPresented: $showForgotPassword) {
+            ForgotPasswordFlowView(
+                session: session,
+                initialEmail: handle.contains("@") ? handle : "",
+                onCompleted: { email in
+                    showForgotPassword = false
+                    // Pre-fill the sign-in form with the email used for the
+                    // reset so the user can sign in immediately.
+                    handle = email
+                    password = ""
+                    focus = .password
+                },
+                onCancel: {
+                    showForgotPassword = false
+                }
+            )
+            .frame(minWidth: 480, minHeight: 560)
+        }
     }
 
     // MARK: - Subviews
@@ -107,7 +126,23 @@ public struct LoginView: View {
 #endif
             }
 
-            fieldRow(label: "Password") {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("Password")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        showForgotPassword = true
+                    } label: {
+                        Text("Forgot?")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tint)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Forgot password?")
+                    .accessibilityHint("Opens the password reset flow")
+                }
                 SecureField("Password", text: $password)
                     .focused($focus, equals: .password)
                     .submitLabel(needsAuthFactor ? .next : .go)
@@ -115,6 +150,9 @@ public struct LoginView: View {
 #if os(iOS)
                     .textContentType(.password)
 #endif
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
             }
 
             if needsAuthFactor {
