@@ -136,22 +136,17 @@ public final class ComposerViewModel {
             && altTextWarning == nil
     }
 
-    // MARK: - Draft key
-
-    private var draftKey: String {
-        if let replyTo {
-            return "composer.draft.reply.\(replyTo.uri.rawValue)"
-        }
-        return "composer.draft.text"
-    }
-
     // MARK: - Drafts list
 
     /// User-facing drafts list (the "Drafts" button + sheet). Backed by a
     /// `DraftsStoring` so previews and tests can substitute a mock store.
-    /// Distinct from the legacy single-slot auto-save under `draftKey` — the
-    /// auto-save remains in place to handle force-quits, while the drafts
-    /// list is populated explicitly via `saveCurrentAsDraft`.
+    /// This is the *only* persistence path now — the legacy single-slot
+    /// auto-save under `composer.draft.text` / `composer.draft.reply.<uri>`
+    /// was removed in #0151 because it was silently re-filling the editor
+    /// with prior-session text on every fresh open. The user's intent to
+    /// keep work in progress is now captured exclusively through the
+    /// explicit Drafts list (Save Draft action on cancel + Drafts sheet
+    /// for resume).
     public var draftsStore: any DraftsStoring
 
     /// `true` when the composer was opened from a draft and should overwrite
@@ -197,8 +192,35 @@ public final class ComposerViewModel {
         // default for new posts. Falls back to `"en"` when the user hasn't
         // visited Settings → Languages yet.
         self.selectedLanguage = Self.loadPrimaryPostLanguage(from: preferences)
-        // Restore saved draft
-        self.text = UserDefaults.standard.string(forKey: draftKey) ?? ""
+        // Fresh open always starts with an empty editor (#0151). The legacy
+        // single-slot auto-save was removed; users restore work explicitly
+        // through the Drafts sheet. Sweep any leftover legacy keys so an
+        // upgrade from a prior build doesn't keep them in `UserDefaults`
+        // forever.
+        Self.purgeLegacyAutoSaveKeysIfNeeded()
+    }
+
+    // MARK: - Legacy auto-save migration
+
+    /// Migration sentinel for the #0151 cleanup. The first time a build
+    /// containing this code runs, we strip the legacy `composer.draft.text`
+    /// slot and any per-reply `composer.draft.reply.*` slot from
+    /// `UserDefaults`. Subsequent constructions skip the sweep — it's a
+    /// once-per-install fix, not a hot-path operation.
+    private static let legacyAutoSavePurgeKey = "composer.draft.legacyAutoSave.purged.v1"
+
+    private static func purgeLegacyAutoSaveKeysIfNeeded() {
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: legacyAutoSavePurgeKey) { return }
+        defaults.removeObject(forKey: "composer.draft.text")
+        // `composer.draft.reply.<uri>` keys are unbounded in count — sweep
+        // every key that matches the prefix so prior-session reply drafts
+        // can't surface either.
+        for key in defaults.dictionaryRepresentation().keys
+            where key.hasPrefix("composer.draft.reply.") {
+            defaults.removeObject(forKey: key)
+        }
+        defaults.set(true, forKey: legacyAutoSavePurgeKey)
     }
 
     /// Read the "Require Alt Text" preference once at composer construction.
@@ -278,7 +300,6 @@ public final class ComposerViewModel {
             quotesEnabled: quotesEnabled
         )
         if store.didPost {
-            clearDraft()
             // If this compose session originated from a saved draft, drop
             // that draft from the drafts list now that the post has gone
             // out — matches RN's `deleteDraftAfterPost` behavior.
@@ -286,11 +307,11 @@ public final class ComposerViewModel {
                 await draftsStore.delete(editingDraftID)
             }
             editingDraftID = nil
-            // Reset transient state so the sheet closes cleanly without leaking
-            // composed content into the next session. Importantly, clear `text`
-            // BEFORE the sheet's onChange/onDisappear hooks fire — otherwise
-            // saveDraft() would re-persist the just-posted text and the next
-            // composer open would restore it.
+            // Reset transient state so the sheet closes cleanly. Even though
+            // a fresh composer open builds a brand-new view-model, this same
+            // instance is still bound to the dismissing sheet view; clearing
+            // here keeps any final render frame from briefly showing the
+            // just-posted content.
             text = ""
             images = []
             additionalPosts = []
@@ -309,7 +330,6 @@ public final class ComposerViewModel {
     // MARK: - Mention autocomplete
 
     public func onTextChange() {
-        saveDraft()
         detectURL()
         let words = text.components(separatedBy: .whitespacesAndNewlines)
         let currentWord = words.last(where: { $0.hasPrefix("@") && $0.count > 1 })
@@ -480,16 +500,6 @@ public final class ComposerViewModel {
         additionalPosts.remove(at: index)
     }
 
-    // MARK: - Draft persistence
-
-    public func saveDraft() {
-        UserDefaults.standard.set(text, forKey: draftKey)
-    }
-
-    public func clearDraft() {
-        UserDefaults.standard.removeObject(forKey: draftKey)
-    }
-
     // MARK: - Drafts list
 
     /// Persist the current composer state as an entry in the drafts list.
@@ -567,7 +577,6 @@ public final class ComposerViewModel {
         linkCardDismissed = false
         detectedURL = nil
         linkMetadata = nil
-        clearDraft()
         editingDraftID = nil
     }
 

@@ -192,8 +192,6 @@ public struct ComposerSheet: View {
                 Text(viewModel.errorMessage ?? "")
             }
         }
-        .onChange(of: viewModel.text) { viewModel.saveDraft() }
-        .onDisappear { viewModel.saveDraft() }
         #if os(iOS)
         .onChange(of: selectedVideo) { item in
             guard let item else { return }
