@@ -3,6 +3,7 @@ import OSLog
 import Observation
 import BlueskyCore
 import BlueskyKit
+import BlueskyModeration
 
 private let logger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "co.sstools.Bluesky",
@@ -33,8 +34,9 @@ private let pwiLabelValue = "!no-unauthenticated"
 ///   row with current state ("Not enabled") and open a sheet that explains
 ///   the email-verification flow and points the user at bsky.app to manage
 ///   it. See gotchas in #0114.
-/// - **Forward-references:** Interaction settings (#0138) is linked but
-///   currently opens a placeholder destination.
+/// - **Functional via dedicated screen:** Interaction settings (#0138)
+///   navigates to `PostInteractionSettingsScreen`, which writes
+///   `app.bsky.actor.defs#postInteractionSettingsPref`.
 /// - **Functional via dedicated screen:** Activity privacy (#0122) navigates
 ///   to `ActivityPrivacySettingsScreen`, which writes
 ///   `app.bsky.notification.declaration`.
@@ -136,20 +138,15 @@ struct PrivacySettingsScreen: View {
             // MARK: Interaction settings
 
             Section {
-                Button {
-                    presentingSheet = .interactionSettingsPlaceholder
+                NavigationLink {
+                    PostInteractionSettingsScreen(network: network)
                 } label: {
-                    HStack {
-                        Label("Who can reply, quote, or DM you", systemImage: "bubble.left.and.bubble.right")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
+                    Label("Who can reply or quote your posts", systemImage: "bubble.left.and.bubble.right")
                 }
-                .buttonStyle(.plain)
             } header: {
                 Text("Interaction settings")
+            } footer: {
+                Text("Sets the defaults applied to new posts. You can also change these per-post in the composer.")
             }
         }
         .navigationTitle("Privacy & Security")
@@ -160,12 +157,6 @@ struct PrivacySettingsScreen: View {
                 TwoFactorReferralSheet(
                     bskyAppURL: externalSettingsURL,
                     isCurrentlyEnabled: model.isTwoFactorEnabled,
-                    dismiss: { presentingSheet = nil }
-                )
-            case .interactionSettingsPlaceholder:
-                PlaceholderSheet(
-                    title: "Interaction settings",
-                    message: "Interaction settings let you choose who can reply, quote, or message you. The full screen is coming in a later release — see issue #0138.",
                     dismiss: { presentingSheet = nil }
                 )
             }
@@ -233,7 +224,6 @@ struct PrivacySettingsScreen: View {
 
 private enum SheetKind: Identifiable, Hashable {
     case twoFactor
-    case interactionSettingsPlaceholder
     var id: Self { self }
 }
 
@@ -457,34 +447,6 @@ private struct TwoFactorReferralSheet: View {
             }
         }
         .frame(minWidth: 380, minHeight: 320)
-    }
-}
-
-// MARK: - Placeholder sheet (forward-references)
-
-private struct PlaceholderSheet: View {
-    let title: String
-    let message: String
-    let dismiss: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Text(message).foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle(title)
-            #if !os(macOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close", action: dismiss)
-                }
-            }
-        }
-        .frame(minWidth: 360, minHeight: 220)
     }
 }
 

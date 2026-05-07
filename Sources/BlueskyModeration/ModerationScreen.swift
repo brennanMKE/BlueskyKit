@@ -35,16 +35,15 @@ private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
 ///   plus a destructive "Remove unavailable" cleanup action when any of the
 ///   subscribed DIDs failed to resolve via `app.bsky.labeler.getServices`.
 ///
-/// Interaction settings and Verification settings are deliberately
-/// forward-references right now: they push placeholder sheets pointing users
-/// at bsky.app until #0138 (interaction settings) and a dedicated Verification
-/// screen ship. The rows exist today so the hub's structure matches RN.
+/// Interaction settings navigates to `PostInteractionSettingsScreen` (#0138),
+/// which writes the user's default `app.bsky.actor.defs#postInteractionSettingsPref`
+/// (reply / quote defaults). Verification settings is still a placeholder
+/// sheet pointing at bsky.app until a dedicated screen ships.
 public struct ModerationScreen: View {
     private let network: any NetworkClient
     private let accountStore: any AccountStore
 
     @State private var viewModel: ModerationViewModel
-    @State private var showInteractionSettingsPlaceholder = false
     @State private var showVerificationSettingsPlaceholder = false
 
     public init(network: any NetworkClient, accountStore: any AccountStore) {
@@ -68,13 +67,6 @@ public struct ModerationScreen: View {
             await viewModel.loadPreferences()
             await viewModel.loadSubscribedLabelers()
         }
-        .sheet(isPresented: $showInteractionSettingsPlaceholder) {
-            placeholderSheet(
-                title: "Interaction Settings",
-                message: "Default reply, quote, and mention controls aren't yet editable in the SwiftUI client. Manage them on bsky.app for now.",
-                isPresented: $showInteractionSettingsPlaceholder
-            )
-        }
         .sheet(isPresented: $showVerificationSettingsPlaceholder) {
             placeholderSheet(
                 title: "Verification Settings",
@@ -88,16 +80,11 @@ public struct ModerationScreen: View {
 
     private var moderationToolsSection: some View {
         Section {
-            Button {
-                showInteractionSettingsPlaceholder = true
+            NavigationLink {
+                PostInteractionSettingsScreen(network: network)
             } label: {
-                hubRow(
-                    title: "Interaction settings",
-                    systemImage: "square.and.pencil",
-                    chevron: true
-                )
+                Label("Interaction settings", systemImage: "square.and.pencil")
             }
-            .buttonStyle(.plain)
 
             NavigationLink {
                 MutedWordsScreen(network: network)

@@ -270,6 +270,42 @@ public struct SavedFeed: Codable, Sendable, Identifiable {
     }
 }
 
+// MARK: - app.bsky.actor.defs#postInteractionSettingsPref
+
+/// User preferences for the **default** threadgate / postgate applied to new
+/// posts. Mirrors `app.bsky.actor.defs#postInteractionSettingsPref`.
+///
+/// `ThreadgateAllowRule` and `PostgateEmbeddingRule` are the same enums used
+/// by the per-post `ThreadgateRecord` / `PostgateRecord` (defined in
+/// `Post.swift`) — the lexicon shares wire types between the prefs and the
+/// per-post records.
+///
+/// - `threadgateAllowRules == nil` means "anyone can reply" (no `allow`
+///   field on the threadgate the composer creates).
+/// - `threadgateAllowRules == []` means "nobody can reply".
+/// - A populated list is the union of conjuncted permissions
+///   (mention OR following OR …).
+///
+/// `postgateEmbeddingRules` matches the same shape. RN treats *any*
+/// `#disableRule` in the list as "quote posts disabled".
+public struct PostInteractionSettingsPref: Sendable, Equatable {
+    public var threadgateAllowRules: [ThreadgateAllowRule]?
+    public var postgateEmbeddingRules: [PostgateEmbeddingRule]
+
+    public init(
+        threadgateAllowRules: [ThreadgateAllowRule]? = nil,
+        postgateEmbeddingRules: [PostgateEmbeddingRule] = []
+    ) {
+        self.threadgateAllowRules = threadgateAllowRules
+        self.postgateEmbeddingRules = postgateEmbeddingRules
+    }
+
+    /// RN's documented default: `threadgateAllowRules: undefined`,
+    /// `postgateEmbeddingRules: []` — i.e. anyone can reply, quote posts
+    /// allowed.
+    public static let defaultPref = PostInteractionSettingsPref()
+}
+
 public struct GetPreferencesResponse: Decodable, Sendable {
     public let adultContentEnabled: Bool
     public let contentLabels: [ContentLabelPref]
@@ -313,6 +349,11 @@ public struct GetPreferencesResponse: Decodable, Sendable {
     /// list, then feeds the DIDs into `app.bsky.labeler.getServices` to
     /// resolve display names + availability (see #0133).
     public let subscribedLabelerDIDs: [DID]
+    /// `app.bsky.actor.defs#postInteractionSettingsPref` — the user's
+    /// default reply / quote rules applied to new posts. `nil` when the
+    /// account has never written the pref; the Post Interaction Settings
+    /// screen treats `nil` and `defaultPref` interchangeably.
+    public let postInteractionSettings: PostInteractionSettingsPref?
 
     private enum OuterKeys: String, CodingKey { case preferences }
 
@@ -354,6 +395,15 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             let hideQuotePosts: Bool?
             // contentLanguagesPref / postLanguagesPref share `languages: [String]`
             let languages: [String]?
+            // postInteractionSettingsPref fields
+            let threadgateAllowRules: [ThreadgateAllowRule]?
+            let postgateEmbeddingRules: [PostgateEmbeddingRule]?
+            /// `true` when the JSON payload carried a `threadgateAllowRules`
+            /// key at all (regardless of whether the value was `null`/empty).
+            /// Used to disambiguate "nobody can reply" (`[]`) from "anyone can
+            /// reply" (key absent) — both decode to a nil-or-empty array
+            /// otherwise.
+            let hasThreadgateAllowRulesKey: Bool
             private enum CodingKeys: String, CodingKey {
                 case type = "$type", enabled, label, visibility, labelerDid, birthDate
                 case items
@@ -362,6 +412,7 @@ public struct GetPreferencesResponse: Decodable, Sendable {
                 case feed, hideReplies, hideRepliesByUnfollowed, hideRepliesByLikeCount,
                      hideReposts, hideQuotePosts
                 case languages
+                case threadgateAllowRules, postgateEmbeddingRules
             }
 
             init(from decoder: any Decoder) throws {
@@ -400,6 +451,23 @@ public struct GetPreferencesResponse: Decodable, Sendable {
                     self.labelerEntries = try c.decodeIfPresent([LabelerEntryHelper].self, forKey: .labelers)
                 } else {
                     self.labelerEntries = nil
+                }
+                // postInteractionSettingsPref fields. Note that
+                // `threadgateAllowRules` distinguishes "anyone can reply" (key
+                // absent) from "nobody can reply" (`allow: []`) — RN treats
+                // them differently, so we record key-presence explicitly.
+                if type == "app.bsky.actor.defs#postInteractionSettingsPref" {
+                    self.hasThreadgateAllowRulesKey = c.contains(.threadgateAllowRules)
+                    self.threadgateAllowRules = try c.decodeIfPresent(
+                        [ThreadgateAllowRule].self, forKey: .threadgateAllowRules
+                    )
+                    self.postgateEmbeddingRules = try c.decodeIfPresent(
+                        [PostgateEmbeddingRule].self, forKey: .postgateEmbeddingRules
+                    )
+                } else {
+                    self.hasThreadgateAllowRulesKey = false
+                    self.threadgateAllowRules = nil
+                    self.postgateEmbeddingRules = nil
                 }
             }
         }
@@ -499,6 +567,20 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             .labelerEntries?
             .map { $0.did }
             ?? []
+
+        if let pref = items.first(where: { $0.type == "app.bsky.actor.defs#postInteractionSettingsPref" }) {
+            // RN distinguishes "anyone can reply" (key absent → nil) from
+            // "nobody can reply" (key present, value []). We mirror that here.
+            let rules: [ThreadgateAllowRule]? = pref.hasThreadgateAllowRulesKey
+                ? (pref.threadgateAllowRules ?? [])
+                : nil
+            self.postInteractionSettings = PostInteractionSettingsPref(
+                threadgateAllowRules: rules,
+                postgateEmbeddingRules: pref.postgateEmbeddingRules ?? []
+            )
+        } else {
+            self.postInteractionSettings = nil
+        }
     }
 }
 
@@ -699,6 +781,36 @@ public struct PutPreferencesRequest: Encodable, Sendable {
             var c = encoder.container(keyedBy: K.self)
             try c.encode("app.bsky.actor.defs#labelersPref", forKey: .type)
             try c.encode(dids.map { Entry(did: $0) }, forKey: .labelers)
+        }
+    }
+
+    /// Writes a `postInteractionSettingsPref` carrying the user's default
+    /// reply / quote rules. Mirrors RN's
+    /// `agent.setPostInteractionSettings({threadgateAllowRules,
+    /// postgateEmbeddingRules})` from
+    /// `state/queries/post-interaction-settings.ts`.
+    ///
+    /// `threadgateAllowRules == nil` is encoded by *omitting* the key (anyone
+    /// can reply); `[]` is encoded as an empty array (nobody can reply).
+    public init(postInteractionSettings: PostInteractionSettingsPref) {
+        self.preferences = [AnyEncodable(_PostInteractionSettingsPref(postInteractionSettings))]
+    }
+
+    private struct _PostInteractionSettingsPref: Encodable, Sendable {
+        let pref: PostInteractionSettingsPref
+        private enum K: String, CodingKey {
+            case type = "$type", threadgateAllowRules, postgateEmbeddingRules
+        }
+        init(_ pref: PostInteractionSettingsPref) { self.pref = pref }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: K.self)
+            try c.encode("app.bsky.actor.defs#postInteractionSettingsPref", forKey: .type)
+            // `nil` rules → omit the key (anyone can reply). `[]` rules →
+            // emit an empty array (nobody can reply).
+            if let rules = pref.threadgateAllowRules {
+                try c.encode(rules, forKey: .threadgateAllowRules)
+            }
+            try c.encode(pref.postgateEmbeddingRules, forKey: .postgateEmbeddingRules)
         }
     }
 
