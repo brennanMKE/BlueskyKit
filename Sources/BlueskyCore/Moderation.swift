@@ -149,6 +149,59 @@ public struct ThreadViewPref: Sendable, Equatable {
     public static let defaultPref = ThreadViewPref(sort: "hotness", prioritizeFollowedUsers: true)
 }
 
+// MARK: - app.bsky.actor.defs#feedViewPref
+
+/// User preferences for how a feed (`feed: 'home'` is the Following timeline)
+/// hides replies, reposts, and quote posts.
+///
+/// Mirrors `app.bsky.actor.defs#feedViewPref` from the AT Proto lexicon. The
+/// preference is keyed by `feed`; the Following-feed settings screen reads /
+/// writes the entry whose `feed == "home"` (renamed from "home" → "Following"
+/// at the product level, but the lexicon key stayed `home`).
+///
+/// The lexicon also defines `hideRepliesByUnfollowed: Bool` and
+/// `hideRepliesByLikeCount: Int`. RN's `DEFAULT_HOME_FEED_PREFS` flags both as
+/// **"Legacy, ignored"** and the live RN screen does not expose either field,
+/// so we model them on the value type for round-tripping but do not surface
+/// them in the SwiftUI Settings UI.
+public struct FeedViewPref: Sendable, Equatable {
+    /// Feed identifier — `"home"` for the Following timeline.
+    public var feed: String
+    public var hideReplies: Bool
+    public var hideRepliesByUnfollowed: Bool
+    public var hideRepliesByLikeCount: Int
+    public var hideReposts: Bool
+    public var hideQuotePosts: Bool
+
+    public init(
+        feed: String,
+        hideReplies: Bool,
+        hideRepliesByUnfollowed: Bool,
+        hideRepliesByLikeCount: Int,
+        hideReposts: Bool,
+        hideQuotePosts: Bool
+    ) {
+        self.feed = feed
+        self.hideReplies = hideReplies
+        self.hideRepliesByUnfollowed = hideRepliesByUnfollowed
+        self.hideRepliesByLikeCount = hideRepliesByLikeCount
+        self.hideReposts = hideReposts
+        self.hideQuotePosts = hideQuotePosts
+    }
+
+    /// Defaults from RN's `DEFAULT_HOME_FEED_PREFS`. `hideRepliesByUnfollowed`
+    /// is `true` and `hideRepliesByLikeCount` is `0` in RN's defaults but both
+    /// are commented as legacy / ignored.
+    public static let defaultHome = FeedViewPref(
+        feed: "home",
+        hideReplies: false,
+        hideRepliesByUnfollowed: true,
+        hideRepliesByLikeCount: 0,
+        hideReposts: false,
+        hideQuotePosts: false
+    )
+}
+
 // MARK: - app.bsky.actor.defs#savedFeed
 
 public struct SavedFeed: Codable, Sendable, Identifiable {
@@ -179,6 +232,15 @@ public struct GetPreferencesResponse: Decodable, Sendable {
     /// Preferences screen reads this to populate sort + prioritization rows;
     /// `ThreadView` reads it later (#0140) to pick the default reply sort.
     public let threadView: ThreadViewPref?
+    /// All `app.bsky.actor.defs#feedViewPref` entries returned by
+    /// `getPreferences`, keyed by their `feed` field. Multiple instances may
+    /// coexist (one per saved feed). The Following-feed Settings screen reads
+    /// `feedViews["home"]`; the home timeline view models can consult the
+    /// same dictionary to honor `hideReplies` / `hideReposts` /
+    /// `hideQuotePosts` globally (cross-cuts #0017).
+    public let feedViews: [String: FeedViewPref]
+    /// Convenience accessor for the Following timeline preferences.
+    public var homeFeedView: FeedViewPref? { feedViews["home"] }
 
     private enum OuterKeys: String, CodingKey { case preferences }
 
@@ -199,10 +261,19 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             let birthDate: String?
             let sort: String?
             let prioritizeFollowedUsers: Bool?
+            // feedViewPref fields
+            let feed: String?
+            let hideReplies: Bool?
+            let hideRepliesByUnfollowed: Bool?
+            let hideRepliesByLikeCount: Int?
+            let hideReposts: Bool?
+            let hideQuotePosts: Bool?
             private enum CodingKeys: String, CodingKey {
                 case type = "$type", enabled, label, visibility, labelerDid, birthDate
                 case feedItems = "items"
                 case sort, prioritizeFollowedUsers
+                case feed, hideReplies, hideRepliesByUnfollowed, hideRepliesByLikeCount,
+                     hideReposts, hideQuotePosts
             }
         }
 
@@ -241,6 +312,25 @@ public struct GetPreferencesResponse: Decodable, Sendable {
         } else {
             self.threadView = nil
         }
+
+        // `feedViewPref` is keyed by `feed`; multiple instances may coexist.
+        // Build a dictionary so callers can pluck `home` (Following timeline)
+        // or any saved-feed key in O(1).
+        var feedViews: [String: FeedViewPref] = [:]
+        for item in items where item.type == "app.bsky.actor.defs#feedViewPref" {
+            guard let feed = item.feed else { continue }
+            feedViews[feed] = FeedViewPref(
+                feed: feed,
+                hideReplies: item.hideReplies ?? FeedViewPref.defaultHome.hideReplies,
+                hideRepliesByUnfollowed: item.hideRepliesByUnfollowed
+                    ?? FeedViewPref.defaultHome.hideRepliesByUnfollowed,
+                hideRepliesByLikeCount: item.hideRepliesByLikeCount
+                    ?? FeedViewPref.defaultHome.hideRepliesByLikeCount,
+                hideReposts: item.hideReposts ?? FeedViewPref.defaultHome.hideReposts,
+                hideQuotePosts: item.hideQuotePosts ?? FeedViewPref.defaultHome.hideQuotePosts
+            )
+        }
+        self.feedViews = feedViews
     }
 }
 
@@ -344,6 +434,39 @@ public struct PutPreferencesRequest: Encodable, Sendable {
             try c.encode("app.bsky.actor.defs#threadViewPref", forKey: .type)
             try c.encode(pref.sort, forKey: .sort)
             try c.encode(pref.prioritizeFollowedUsers, forKey: .prioritizeFollowedUsers)
+        }
+    }
+
+    /// Writes a single `feedViewPref` carrying the supplied flags. Mirrors
+    /// RN's `agent.setFeedViewPrefs('home', prefs)` path used by
+    /// `useSetFeedViewPreferencesMutation`. The lexicon keys these prefs by
+    /// `feed`, so multiple per-feed entries can coexist on the server; this
+    /// initializer puts only the one being edited.
+    public init(feedView: FeedViewPref) {
+        self.preferences = [AnyEncodable(_FeedViewPref(feedView))]
+    }
+
+    private struct _FeedViewPref: Encodable, Sendable {
+        let pref: FeedViewPref
+        private enum K: String, CodingKey {
+            case type = "$type"
+            case feed
+            case hideReplies
+            case hideRepliesByUnfollowed
+            case hideRepliesByLikeCount
+            case hideReposts
+            case hideQuotePosts
+        }
+        init(_ pref: FeedViewPref) { self.pref = pref }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: K.self)
+            try c.encode("app.bsky.actor.defs#feedViewPref", forKey: .type)
+            try c.encode(pref.feed, forKey: .feed)
+            try c.encode(pref.hideReplies, forKey: .hideReplies)
+            try c.encode(pref.hideRepliesByUnfollowed, forKey: .hideRepliesByUnfollowed)
+            try c.encode(pref.hideRepliesByLikeCount, forKey: .hideRepliesByLikeCount)
+            try c.encode(pref.hideReposts, forKey: .hideReposts)
+            try c.encode(pref.hideQuotePosts, forKey: .hideQuotePosts)
         }
     }
 }

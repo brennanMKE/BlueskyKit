@@ -50,6 +50,16 @@ struct ContentSettingsScreen: View {
             if let network {
                 Section {
                     NavigationLink {
+                        FollowingFeedPreferencesScreen(network: network)
+                    } label: {
+                        Label("Following feed preferences", systemImage: "list.bullet.rectangle")
+                    }
+                } header: {
+                    Text("Feeds")
+                }
+
+                Section {
+                    NavigationLink {
                         ThreadPreferencesScreen(network: network)
                     } label: {
                         Label("Thread preferences", systemImage: "bubble.left.and.bubble.right")
