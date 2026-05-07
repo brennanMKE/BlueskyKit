@@ -569,7 +569,7 @@ public final class FeedStore: FeedStoring {
             // The deleteBookmark lexicon takes the post's own AT-URI (not a bookmark record URI).
             let _: EmptyResponse = try await network.post(
                 lexicon: "app.bsky.bookmark.deleteBookmark",
-                body: DeleteBookmarkRequest(bookmarkURI: post.uri)
+                body: DeleteBookmarkRequest(postURI: post.uri)
             )
             logger.debug("unbookmark succeeded for \(post.uri.rawValue, privacy: .public)")
         } catch {

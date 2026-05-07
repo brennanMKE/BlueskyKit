@@ -16,7 +16,7 @@ public protocol BookmarksStoring: AnyObject, Observable, Sendable {
 
     func loadInitial() async
     func loadMore() async
-    func delete(bookmarkURI: ATURI) async
+    func delete(postURI: ATURI) async
     func clearError()
 }
 
@@ -74,12 +74,12 @@ public final class BookmarksStore: BookmarksStoring {
         }
     }
 
-    public func delete(bookmarkURI: ATURI) async {
-        bookmarks.removeAll { $0.uri == bookmarkURI }
+    public func delete(postURI: ATURI) async {
+        bookmarks.removeAll { $0.subject.uri == postURI }
         do {
             let _: EmptyResponse = try await network.post(
                 lexicon: "app.bsky.bookmark.deleteBookmark",
-                body: DeleteBookmarkRequest(bookmarkURI: bookmarkURI)
+                body: DeleteBookmarkRequest(postURI: postURI)
             )
         } catch {
             self.error = error.localizedDescription

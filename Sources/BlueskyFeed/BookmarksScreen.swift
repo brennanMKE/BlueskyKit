@@ -76,17 +76,19 @@ public struct BookmarksScreen: View {
     private var bookmarkList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(store.bookmarks, id: \.uri) { bookmark in
-                    PostCard(
-                        item: FeedViewPost(post: bookmark.item, reply: nil, reason: nil),
-                        actions: actions(for: bookmark)
-                    )
-                    .onAppear {
-                        if bookmark.uri == store.bookmarks.last?.uri {
-                            Task { await store.loadMore() }
+                ForEach(store.bookmarks, id: \.subject.uri) { bookmark in
+                    if let post = bookmark.item {
+                        PostCard(
+                            item: FeedViewPost(post: post, reply: nil, reason: nil),
+                            actions: actions(for: bookmark)
+                        )
+                        .onAppear {
+                            if bookmark.subject.uri == store.bookmarks.last?.subject.uri {
+                                Task { await store.loadMore() }
+                            }
                         }
+                        Divider()
                     }
-                    Divider()
                 }
                 if store.isLoadingMore {
                     HStack { Spacer(); ProgressView(); Spacer() }
@@ -105,7 +107,7 @@ public struct BookmarksScreen: View {
         a.onAuthorTap = onAuthorTap
         a.isBookmarked = true
         a.onBookmark = { _ in
-            Task { await store.delete(bookmarkURI: bookmark.uri) }
+            Task { await store.delete(postURI: bookmark.subject.uri) }
         }
         return a
     }
@@ -120,7 +122,7 @@ private final class PreviewBookmarksStore: BookmarksStoring {
     var error: String? = nil
     func loadInitial() async {}
     func loadMore() async {}
-    func delete(bookmarkURI: ATURI) async {}
+    func delete(postURI: ATURI) async {}
     func clearError() {}
 }
 

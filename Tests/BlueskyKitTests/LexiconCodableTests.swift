@@ -395,3 +395,74 @@ struct PostgateCodableTests {
         #expect(decoded.post.rawValue == "at://did:plc:abc/app.bsky.feed.post/rkey1")
     }
 }
+
+// MARK: - Bookmark
+
+@Suite("Bookmark lexicon")
+struct BookmarkCodableTests {
+    /// Wire shape captured from `app.bsky.bookmark.getBookmarks` and confirmed
+    /// against `Bluesky-ReactNative/src/state/queries/bookmarks/useBookmarksQuery.ts`.
+    /// The bookmarked post URI lives under `subject.uri` — never at the
+    /// top level. (Issue #0152.)
+    private static let sampleJSON = """
+    {
+        "bookmarks": [
+            {
+                "subject": {
+                    "uri": "at://did:plc:abc/app.bsky.feed.post/rkey1",
+                    "cid": "bafy123"
+                },
+                "createdAt": "2026-05-07T12:00:00Z"
+            }
+        ],
+        "cursor": "next-cursor"
+    }
+    """.data(using: .utf8)!
+
+    @Test("GetBookmarksResponse decodes nested subject.uri (issue #0152)")
+    func decodeGetBookmarksResponse() throws {
+        let response = try iso8601.decode(GetBookmarksResponse.self, from: Self.sampleJSON)
+        #expect(response.bookmarks.count == 1)
+        let b = response.bookmarks[0]
+        #expect(b.subject.uri.rawValue == "at://did:plc:abc/app.bsky.feed.post/rkey1")
+        #expect(b.subject.cid == "bafy123")
+        // Convenience accessors mirror the nested ref.
+        #expect(b.uri == b.subject.uri)
+        #expect(b.cid == b.subject.cid)
+        #expect(b.item == nil)
+        #expect(response.cursor == "next-cursor")
+    }
+
+    @Test("Top-level uri/cid (the broken pre-#0152 shape) fails to decode")
+    func rejectsLegacyFlatShape() {
+        let badJSON = """
+        {
+            "bookmarks": [
+                {"uri": "at://did:plc:abc/app.bsky.feed.post/rkey1", "cid": "bafy123"}
+            ]
+        }
+        """.data(using: .utf8)!
+        #expect(throws: DecodingError.self) {
+            _ = try iso8601.decode(GetBookmarksResponse.self, from: badJSON)
+        }
+    }
+
+    @Test("BookmarkView round-trips through Codable")
+    func roundTripBookmarkView() throws {
+        let original = try iso8601.decode(GetBookmarksResponse.self, from: Self.sampleJSON)
+        let bookmark = original.bookmarks[0]
+        let data = try iso8601Encoder.encode(bookmark)
+        let decoded = try iso8601.decode(BookmarkView.self, from: data)
+        #expect(decoded.subject.uri == bookmark.subject.uri)
+        #expect(decoded.subject.cid == bookmark.subject.cid)
+        #expect(decoded.createdAt == bookmark.createdAt)
+    }
+
+    @Test("DeleteBookmarkRequest encodes the post URI as `uri`")
+    func encodeDeleteBookmarkRequest() throws {
+        let req = DeleteBookmarkRequest(postURI: ATURI(rawValue: "at://did:plc:abc/app.bsky.feed.post/rkey1"))
+        let data = try JSONEncoder().encode(req)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(json["uri"] as? String == "at://did:plc:abc/app.bsky.feed.post/rkey1")
+    }
+}
