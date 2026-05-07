@@ -77,18 +77,12 @@ public struct BookmarksScreen: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(store.bookmarks, id: \.subject.uri) { bookmark in
-                    if let post = bookmark.item {
-                        PostCard(
-                            item: FeedViewPost(post: post, reply: nil, reason: nil),
-                            actions: actions(for: bookmark)
-                        )
+                    row(for: bookmark)
                         .onAppear {
                             if bookmark.subject.uri == store.bookmarks.last?.subject.uri {
                                 Task { await store.loadMore() }
                             }
                         }
-                        Divider()
-                    }
                 }
                 if store.isLoadingMore {
                     HStack { Spacer(); ProgressView(); Spacer() }
@@ -97,6 +91,57 @@ public struct BookmarksScreen: View {
             }
         }
         .refreshable { await store.loadInitial() }
+    }
+
+    @ViewBuilder
+    private func row(for bookmark: BookmarkView) -> some View {
+        switch bookmark.item {
+        case .post(let post):
+            PostCard(
+                item: FeedViewPost(post: post, reply: nil, reason: nil),
+                actions: actions(for: bookmark)
+            )
+            Divider()
+        case .notFound:
+            // RN copy: "This post was deleted by its author".
+            // See `Bluesky-ReactNative/src/screens/Bookmarks/index.tsx`
+            // (`BookmarkNotFound`).
+            tombstone(text: "This post was deleted by its author", bookmark: bookmark)
+            Divider()
+        case .blocked:
+            tombstone(text: "This post is from a blocked account", bookmark: bookmark)
+            Divider()
+        case .unknown:
+            tombstone(text: "Unsupported bookmark", bookmark: bookmark)
+            Divider()
+        case .none:
+            // Server didn't hydrate this bookmark — keep the previous
+            // skip-row behavior so the list stays compact.
+            EmptyView()
+        }
+    }
+
+    /// Compact tombstone row for non-`postView` bookmark items. Shows the
+    /// reason and offers a "Remove" affordance so the user can clear the
+    /// dead bookmark — mirrors RN's `BookmarkNotFound` component.
+    private func tombstone(text: String, bookmark: BookmarkView) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 22))
+                .foregroundStyle(theme.colors.textSecondary)
+            Text(text)
+                .font(.subheadline)
+                .italic()
+                .foregroundStyle(theme.colors.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button("Remove") {
+                Task { await store.delete(postURI: bookmark.subject.uri) }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Helpers

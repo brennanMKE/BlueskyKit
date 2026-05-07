@@ -465,4 +465,220 @@ struct BookmarkCodableTests {
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         #expect(json["uri"] as? String == "at://did:plc:abc/app.bsky.feed.post/rkey1")
     }
+
+    // MARK: - issue #0154 — bookmarkView.item is a discriminated union
+
+    /// A canonical `app.bsky.feed.defs#postView` JSON envelope used to populate
+    /// `bookmarkView.item` in mixed-variant fixtures below.
+    private static let postViewJSON = """
+    {
+        "$type": "app.bsky.feed.defs#postView",
+        "uri": "at://did:plc:author/app.bsky.feed.post/rkey-post",
+        "cid": "bafyPost",
+        "author": {
+            "did": "did:plc:author",
+            "handle": "alice.bsky.social",
+            "displayName": "Alice",
+            "avatar": null,
+            "labels": []
+        },
+        "record": {
+            "text": "hello bookmarks",
+            "createdAt": "2026-05-07T11:30:00Z"
+        },
+        "replyCount": 0,
+        "repostCount": 0,
+        "likeCount": 0,
+        "quoteCount": 0,
+        "indexedAt": "2026-05-07T11:35:00Z",
+        "labels": []
+    }
+    """
+
+    @Test("bookmarkView.item decodes the postView variant")
+    func decodeItemPostView() throws {
+        let json = """
+        {
+            "bookmarks": [
+                {
+                    "subject": {"uri": "at://did:plc:author/app.bsky.feed.post/rkey-post", "cid": "bafyPost"},
+                    "createdAt": "2026-05-07T12:00:00Z",
+                    "item": \(Self.postViewJSON)
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+        let response = try iso8601.decode(GetBookmarksResponse.self, from: json)
+        #expect(response.bookmarks.count == 1)
+        guard case .post(let post) = response.bookmarks[0].item else {
+            Issue.record("expected .post variant")
+            return
+        }
+        #expect(post.uri.rawValue == "at://did:plc:author/app.bsky.feed.post/rkey-post")
+        #expect(post.cid == "bafyPost")
+    }
+
+    @Test("bookmarkView.item decodes the notFoundPost variant (no `cid`)")
+    func decodeItemNotFound() throws {
+        let json = """
+        {
+            "bookmarks": [
+                {
+                    "subject": {"uri": "at://did:plc:gone/app.bsky.feed.post/rkey-x", "cid": "bafyX"},
+                    "createdAt": "2026-05-07T12:00:00Z",
+                    "item": {
+                        "$type": "app.bsky.feed.defs#notFoundPost",
+                        "uri": "at://did:plc:gone/app.bsky.feed.post/rkey-x",
+                        "notFound": true
+                    }
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+        let response = try iso8601.decode(GetBookmarksResponse.self, from: json)
+        guard case .notFound(let nf) = response.bookmarks[0].item else {
+            Issue.record("expected .notFound variant")
+            return
+        }
+        #expect(nf.uri.rawValue == "at://did:plc:gone/app.bsky.feed.post/rkey-x")
+        #expect(nf.notFound == true)
+    }
+
+    @Test("bookmarkView.item decodes the blockedPost variant (no `cid`)")
+    func decodeItemBlocked() throws {
+        let json = """
+        {
+            "bookmarks": [
+                {
+                    "subject": {"uri": "at://did:plc:blocked/app.bsky.feed.post/rkey-y", "cid": "bafyY"},
+                    "createdAt": "2026-05-07T12:00:00Z",
+                    "item": {
+                        "$type": "app.bsky.feed.defs#blockedPost",
+                        "uri": "at://did:plc:blocked/app.bsky.feed.post/rkey-y",
+                        "blocked": true,
+                        "author": {
+                            "did": "did:plc:blocked",
+                            "handle": "blocked.bsky.social",
+                            "displayName": null,
+                            "avatar": null,
+                            "labels": []
+                        }
+                    }
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+        let response = try iso8601.decode(GetBookmarksResponse.self, from: json)
+        guard case .blocked(let bl) = response.bookmarks[0].item else {
+            Issue.record("expected .blocked variant")
+            return
+        }
+        #expect(bl.uri.rawValue == "at://did:plc:blocked/app.bsky.feed.post/rkey-y")
+        #expect(bl.blocked == true)
+        #expect(bl.author?.handle.rawValue == "blocked.bsky.social")
+    }
+
+    @Test("bookmarkView.item absorbs unknown $type as .unknown")
+    func decodeItemUnknown() throws {
+        let json = """
+        {
+            "bookmarks": [
+                {
+                    "subject": {"uri": "at://did:plc:future/app.bsky.feed.post/rkey-f", "cid": "bafyF"},
+                    "createdAt": "2026-05-07T12:00:00Z",
+                    "item": {
+                        "$type": "app.bsky.feed.defs#someFutureVariant",
+                        "uri": "at://did:plc:future/app.bsky.feed.post/rkey-f"
+                    }
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+        let response = try iso8601.decode(GetBookmarksResponse.self, from: json)
+        guard case .unknown(let t) = response.bookmarks[0].item else {
+            Issue.record("expected .unknown variant")
+            return
+        }
+        #expect(t == "app.bsky.feed.defs#someFutureVariant")
+    }
+
+    @Test("Mixed page (post + notFound + blocked + unknown) decodes end-to-end (issue #0154)")
+    func decodeMixedPage() throws {
+        let json = """
+        {
+            "bookmarks": [
+                {
+                    "subject": {"uri": "at://did:plc:author/app.bsky.feed.post/rkey-post", "cid": "bafyPost"},
+                    "createdAt": "2026-05-07T12:00:00Z",
+                    "item": \(Self.postViewJSON)
+                },
+                {
+                    "subject": {"uri": "at://did:plc:gone/app.bsky.feed.post/rkey-x", "cid": "bafyX"},
+                    "createdAt": "2026-05-07T12:01:00Z",
+                    "item": {
+                        "$type": "app.bsky.feed.defs#notFoundPost",
+                        "uri": "at://did:plc:gone/app.bsky.feed.post/rkey-x",
+                        "notFound": true
+                    }
+                },
+                {
+                    "subject": {"uri": "at://did:plc:blocked/app.bsky.feed.post/rkey-y", "cid": "bafyY"},
+                    "createdAt": "2026-05-07T12:02:00Z",
+                    "item": {
+                        "$type": "app.bsky.feed.defs#blockedPost",
+                        "uri": "at://did:plc:blocked/app.bsky.feed.post/rkey-y",
+                        "blocked": true,
+                        "author": {
+                            "did": "did:plc:blocked",
+                            "handle": "blocked.bsky.social",
+                            "displayName": null,
+                            "avatar": null,
+                            "labels": []
+                        }
+                    }
+                },
+                {
+                    "subject": {"uri": "at://did:plc:future/app.bsky.feed.post/rkey-f", "cid": "bafyF"},
+                    "createdAt": "2026-05-07T12:03:00Z",
+                    "item": {"$type": "app.bsky.feed.defs#someFutureVariant"}
+                }
+            ],
+            "cursor": "next"
+        }
+        """.data(using: .utf8)!
+        let response = try iso8601.decode(GetBookmarksResponse.self, from: json)
+        #expect(response.bookmarks.count == 4)
+        if case .post = response.bookmarks[0].item {} else { Issue.record("[0] expected .post") }
+        if case .notFound = response.bookmarks[1].item {} else { Issue.record("[1] expected .notFound") }
+        if case .blocked = response.bookmarks[2].item {} else { Issue.record("[2] expected .blocked") }
+        if case .unknown = response.bookmarks[3].item {} else { Issue.record("[3] expected .unknown") }
+        #expect(response.cursor == "next")
+    }
+
+    @Test("Per-item defensive decode skips a malformed bookmark envelope (issue #0154)")
+    func decodeSkipsMalformedItem() throws {
+        // Second entry is missing `subject` entirely — its decode must fail
+        // and be skipped, but the first and third entries should survive.
+        let json = """
+        {
+            "bookmarks": [
+                {
+                    "subject": {"uri": "at://did:plc:author/app.bsky.feed.post/rkey-1", "cid": "bafy1"},
+                    "createdAt": "2026-05-07T12:00:00Z"
+                },
+                {
+                    "createdAt": "2026-05-07T12:01:00Z"
+                },
+                {
+                    "subject": {"uri": "at://did:plc:author/app.bsky.feed.post/rkey-3", "cid": "bafy3"},
+                    "createdAt": "2026-05-07T12:02:00Z"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+        let response = try iso8601.decode(GetBookmarksResponse.self, from: json)
+        #expect(response.bookmarks.count == 2)
+        #expect(response.bookmarks[0].subject.cid == "bafy1")
+        #expect(response.bookmarks[1].subject.cid == "bafy3")
+    }
 }
