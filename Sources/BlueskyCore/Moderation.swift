@@ -741,6 +741,14 @@ public struct GetLabelerServicesResponse: Decodable, Sendable {
 // MARK: - app.bsky.labeler.defs#labelerView
 
 /// A labeler service view returned by `app.bsky.labeler.getServices`.
+///
+/// `subjectTypes`, `subjectCollections`, and `reasonTypes` are present when
+/// the lexicon returns the *detailed* view (`detailed=true` query parameter)
+/// or whenever the labeler service record declares them. They drive which
+/// subjects (account, chat, record) and which Ozone reason types a given
+/// labeler is willing to accept reports about — the Report dialog filters
+/// the list of candidate labelers using these fields. Mirrors the matching
+/// branch in RN's `ReportDialog/index.tsx#supportedLabelers`.
 public struct LabelerView: Codable, Sendable {
     public let uri: ATURI
     public let cid: CID
@@ -748,6 +756,15 @@ public struct LabelerView: Codable, Sendable {
     public let likeCount: Int?
     public let labels: [Label]
     public let indexedAt: Date
+    /// Subject types this labeler accepts (`"account"`, `"chat"`, `"record"`).
+    /// `nil` means "no restriction", per RN's filter rule.
+    public let subjectTypes: [String]?
+    /// NSIDs of record collections this labeler accepts (e.g.
+    /// `"app.bsky.feed.post"`). `nil` means "all collections".
+    public let subjectCollections: [String]?
+    /// Reason-type strings this labeler will accept (`com.atproto.moderation.defs#reason*`
+    /// or the newer Ozone variants). `nil` means "all reason types".
+    public let reasonTypes: [String]?
 
     public init(
         uri: ATURI,
@@ -755,7 +772,10 @@ public struct LabelerView: Codable, Sendable {
         creator: ProfileView,
         likeCount: Int?,
         labels: [Label] = [],
-        indexedAt: Date
+        indexedAt: Date,
+        subjectTypes: [String]? = nil,
+        subjectCollections: [String]? = nil,
+        reasonTypes: [String]? = nil
     ) {
         self.uri = uri
         self.cid = cid
@@ -763,5 +783,8 @@ public struct LabelerView: Codable, Sendable {
         self.likeCount = likeCount
         self.labels = labels
         self.indexedAt = indexedAt
+        self.subjectTypes = subjectTypes
+        self.subjectCollections = subjectCollections
+        self.reasonTypes = reasonTypes
     }
 }

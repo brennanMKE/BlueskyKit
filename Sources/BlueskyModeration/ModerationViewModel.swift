@@ -47,7 +47,17 @@ public final class ModerationViewModel {
     public func setLabelVisibility(label: String, labelerDid: DID?, visibility: String) async {
         await store.setLabelVisibility(label: label, labelerDid: labelerDid, visibility: visibility)
     }
-    public func report(subject: some Encodable & Sendable, reasonType: String, reason: String?) async throws {
-        try await store.report(subject: subject, reasonType: reasonType, reason: reason)
+    public func report(
+        subject: some Encodable & Sendable,
+        reasonType: String,
+        reason: String?,
+        labelerDID: DID? = nil
+    ) async throws {
+        try await store.report(
+            subject: subject,
+            reasonType: reasonType,
+            reason: reason,
+            labelerDID: labelerDID
+        )
     }
 }

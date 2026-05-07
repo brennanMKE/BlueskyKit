@@ -39,7 +39,7 @@ public protocol ModerationStoring: AnyObject, Observable, Sendable {
     func unmuteList(_ listURI: ATURI) async
     func setAdultContent(enabled: Bool) async
     func setLabelVisibility(label: String, labelerDid: DID?, visibility: String) async
-    func report(subject: some Encodable & Sendable, reasonType: String, reason: String?) async throws
+    func report(subject: some Encodable & Sendable, reasonType: String, reason: String?, labelerDID: DID?) async throws
 }
 
 // MARK: - ModerationStore
@@ -239,9 +239,14 @@ public final class ModerationStore: ModerationStoring {
             // `dids` accepts repeated query params. Joined with comma is what
             // RN's bsky-agent helper does too — the appview parses both forms.
             let didsParam = subscribedLabelerDIDs.map { $0.rawValue }.joined(separator: ",")
+            // `detailed=true` returns `subjectTypes`, `subjectCollections`,
+            // and `reasonTypes` on each labeler — needed by the Report
+            // dialog to filter candidate labelers per subject + reason
+            // (matches RN's `useMyLabelersQuery` which always asks for the
+            // detailed view).
             let resp: GetLabelerServicesResponse = try await network.get(
                 lexicon: "app.bsky.labeler.getServices",
-                params: ["dids": didsParam, "detailed": "false"]
+                params: ["dids": didsParam, "detailed": "true"]
             )
             subscribedLabelers = resp.views
             let returned = Set(resp.views.map { $0.creator.did })
@@ -367,10 +372,17 @@ public final class ModerationStore: ModerationStoring {
 
     // MARK: - Report
 
-    public func report(subject: some Encodable & Sendable, reasonType: String, reason: String?) async throws {
+    public func report(
+        subject: some Encodable & Sendable,
+        reasonType: String,
+        reason: String?,
+        labelerDID: DID?
+    ) async throws {
         let req = CreateReportRequest(reasonType: reasonType, reason: reason, subject: subject)
         let _: CreateReportResponse = try await network.post(
-            lexicon: "com.atproto.moderation.createReport", body: req
+            lexicon: "com.atproto.moderation.createReport",
+            body: req,
+            proxyDID: labelerDID
         )
     }
 }

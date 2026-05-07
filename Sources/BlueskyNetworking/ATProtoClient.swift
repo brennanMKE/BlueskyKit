@@ -47,7 +47,19 @@ public actor ATProtoClient: NetworkClient {
         lexicon: String,
         body: Body
     ) async throws -> Response {
-        try await performPost(lexicon: lexicon, body: body)
+        try await performPost(lexicon: lexicon, body: body, proxyDID: nil)
+    }
+
+    /// Per-call proxied POST. Attaches `atproto-proxy: <did>#atproto_labeler`
+    /// when `proxyDID` is non-nil, otherwise behaves identically to the
+    /// non-proxied `post`. Mirrors RN's `agent.createModerationReport(..., {
+    /// headers: { 'atproto-proxy': '<did>#atproto_labeler' }})`.
+    nonisolated public func post<Body: Encodable & Sendable, Response: Decodable & Sendable>(
+        lexicon: String,
+        body: Body,
+        proxyDID: DID?
+    ) async throws -> Response {
+        try await performPost(lexicon: lexicon, body: body, proxyDID: proxyDID)
     }
 
     nonisolated public func upload<Response: Decodable & Sendable>(
@@ -99,15 +111,16 @@ public actor ATProtoClient: NetworkClient {
 
     private func performPost<Body: Encodable & Sendable, Response: Decodable & Sendable>(
         lexicon: String,
-        body: Body
+        body: Body,
+        proxyDID: DID?
     ) async throws -> Response {
         let stored = try await currentStoredAccount()
-        let request = try buildPostRequest(stored: stored, lexicon: lexicon, body: body)
+        let request = try buildPostRequest(stored: stored, lexicon: lexicon, body: body, proxyDID: proxyDID)
         let (data, response) = try await rawSend(request)
 
         if (response as? HTTPURLResponse)?.statusCode == 401 {
             let refreshed = try await refreshTokens(stored: stored)
-            let retryRequest = try buildPostRequest(stored: refreshed, lexicon: lexicon, body: body)
+            let retryRequest = try buildPostRequest(stored: refreshed, lexicon: lexicon, body: body, proxyDID: proxyDID)
             let (retryData, retryResponse) = try await rawSend(retryRequest)
             return try decode(Response.self, from: retryData, response: retryResponse)
         }
@@ -139,7 +152,8 @@ public actor ATProtoClient: NetworkClient {
     private func buildPostRequest<Body: Encodable>(
         stored: StoredAccount,
         lexicon: String,
-        body: Body
+        body: Body,
+        proxyDID: DID? = nil
     ) throws -> URLRequest {
         let url = stored.account.serviceEndpoint.appending(path: "xrpc/\(lexicon)")
         var req = URLRequest(url: url)
@@ -147,7 +161,14 @@ public actor ATProtoClient: NetworkClient {
         req.setValue("Bearer \(stored.accessJwt)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try encoder.encode(body)
-        applyProxyHeader(&req, lexicon: lexicon)
+        if let proxyDID {
+            // Per-call proxy override (e.g. moderation report routed to a
+            // specific labeler). Takes precedence over the lexicon-prefix rule
+            // below — the caller knows which service should handle the call.
+            req.setValue("\(proxyDID.rawValue)#atproto_labeler", forHTTPHeaderField: "atproto-proxy")
+        } else {
+            applyProxyHeader(&req, lexicon: lexicon)
+        }
         return req
     }
 
