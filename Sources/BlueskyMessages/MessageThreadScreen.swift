@@ -41,6 +41,26 @@ public struct MessageThreadScreen: View {
     /// confirmation. `nil` when no confirmation dialog is shown.
     @State private var pendingDeleteMessage: MessageView?
 
+    /// Whether the user is currently parked within `Self.atBottomThreshold` of
+    /// the bottom of the message list. Drives the conditional auto-scroll
+    /// behaviour (RN's `isAtBottom` shared value in `MessagesList.tsx`):
+    /// when true we pull new messages into view; when false we leave the
+    /// reader's scroll position alone and surface a "Jump to newest" pill.
+    @State private var isAtBottom: Bool = true
+
+    /// The latest message ID we've already auto-scrolled to. Used so that
+    /// `onChange(of: viewModel.messages.count)` only triggers exactly once per
+    /// new message — without this guard, a `messages` mutation that reuses
+    /// the same final ID (e.g. an optimistic-then-replaced send) can fire the
+    /// scroll twice.
+    @State private var lastAutoScrolledMessageID: String?
+
+    /// Distance, in points, from the bottom of the message list within which
+    /// the reader is considered "at bottom" for auto-scroll purposes. Matches
+    /// the order of magnitude of RN's 100pt threshold (we use 50pt to feel
+    /// snappier on the smaller iOS message column).
+    private static let atBottomThreshold: CGFloat = 50
+
     public init(
         convo: ConvoView,
         network: any NetworkClient,
@@ -105,46 +125,196 @@ public struct MessageThreadScreen: View {
 
     private var messageScrollView: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 4) {
-                    if viewModel.hasOlderMessages {
-                        Button("Load older messages") {
-                            Task { await viewModel.loadOlder() }
+            ZStack(alignment: .bottom) {
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        if viewModel.hasOlderMessages {
+                            Button("Load older messages") {
+                                Task { await viewModel.loadOlder() }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 8)
                         }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 8)
+                        ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
+                            if shouldShowDateDivider(at: index) {
+                                DateDivider(date: message.sentAt)
+                                    .padding(.top, 8)
+                            }
+                            // RN's `MessagesList.tsx` renders a centered
+                            // "New messages" divider above the first
+                            // message that arrived while the user was
+                            // scrolled away from the bottom. We anchor it
+                            // by message ID so `LazyVStack` can position
+                            // it exactly above the right bubble.
+                            if message.id == viewModel.firstUnreadID {
+                                NewMessagesDivider()
+                                    .padding(.top, 8)
+                                    .padding(.bottom, 4)
+                            }
+                            MessageBubble(
+                                message: message,
+                                isOwn: viewModel.isOwn(message),
+                                isGroup: isGroup,
+                                isFirstInRun: isFirstInRun(at: index),
+                                isLastInRun: isLastInRun(at: index),
+                                timestampLabel: isLastInRun(at: index)
+                                    ? Self.bubbleTimestamp(for: message.sentAt, now: Date())
+                                    : nil,
+                                senderProfile: senderProfile(for: message),
+                                onDeleteRequested: { pendingDeleteMessage = message },
+                                onPostTap: onPostTap
+                            )
+                            .id(message.id)
+                        }
+                        // Bottom sentinel — used by the GeometryReader below
+                        // to determine whether the user is "at bottom" by
+                        // comparing this row's frame to the scroll view's
+                        // bounds. Zero-height so it doesn't add visual space.
+                        Color.clear
+                            .frame(height: 1)
+                            .id(Self.bottomSentinelID)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: BottomSentinelOffsetKey.self,
+                                        value: geo.frame(in: .named(Self.scrollCoordinateSpace)).maxY
+                                    )
+                                }
+                            )
                     }
-                    ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
-                        if shouldShowDateDivider(at: index) {
-                            DateDivider(date: message.sentAt)
-                                .padding(.top, 8)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: ScrollViewportHeightKey.self,
+                                value: geo.size.height
+                            )
                         }
-                        MessageBubble(
-                            message: message,
-                            isOwn: viewModel.isOwn(message),
-                            isGroup: isGroup,
-                            isFirstInRun: isFirstInRun(at: index),
-                            isLastInRun: isLastInRun(at: index),
-                            timestampLabel: isLastInRun(at: index)
-                                ? Self.bubbleTimestamp(for: message.sentAt, now: Date())
-                                : nil,
-                            senderProfile: senderProfile(for: message),
-                            onDeleteRequested: { pendingDeleteMessage = message },
-                            onPostTap: onPostTap
+                    )
+                }
+                .coordinateSpace(name: Self.scrollCoordinateSpace)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: ScrollViewportHeightKey.self,
+                            value: geo.size.height
                         )
-                        .id(message.id)
                     }
+                )
+                .onPreferenceChange(BottomSentinelOffsetKey.self) { sentinelMaxY in
+                    updateAtBottom(sentinelMaxY: sentinelMaxY)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .onPreferenceChange(ScrollViewportHeightKey.self) { height in
+                    viewportHeight = height
+                }
+                .onChange(of: viewModel.messages.count) { oldCount, newCount in
+                    handleMessageCountChange(
+                        oldCount: oldCount,
+                        newCount: newCount,
+                        proxy: proxy
+                    )
+                }
+
+                // Floating "Jump to newest" pill — RN's `NewMessagesPill`
+                // anchored at the bottom-right of the scroll view, above
+                // the compose bar. Only visible when the reader is
+                // scrolled away from the bottom.
+                if !isAtBottom {
+                    JumpToNewestPill(
+                        unreadCount: viewModel.unreadCount,
+                        action: { jumpToBottom(proxy: proxy) }
+                    )
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 8)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
             }
-            .onChange(of: viewModel.messages.count) { _, _ in
-                if let last = viewModel.messages.last {
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                }
+            .animation(.easeInOut(duration: 0.18), value: isAtBottom)
+        }
+    }
+
+    // MARK: - Scroll-state plumbing
+
+    /// Stable ID for the zero-height sentinel row at the very bottom of the
+    /// message stack. Used both for `proxy.scrollTo` and as the anchor we
+    /// measure against in the GeometryReader to detect "at bottom".
+    private static let bottomSentinelID = "__bottom_sentinel__"
+
+    /// Coordinate space name used by the scroll-position GeometryReader so
+    /// that bubble frames are reported relative to the scroll view's own
+    /// content area, not the screen.
+    private static let scrollCoordinateSpace = "messageScroll"
+
+    /// The most recent measured viewport height for the message list. Stored
+    /// in a `@State` so `updateAtBottom` can compare the bottom sentinel's
+    /// position against it without re-laying out.
+    @State private var viewportHeight: CGFloat = 0
+
+    /// Recalculates `isAtBottom` whenever the bottom sentinel's offset
+    /// inside the scroll view changes. The sentinel sits at the very end of
+    /// the `LazyVStack`, so when the user is scrolled to the bottom its
+    /// `maxY` (in scroll-view coords) sits within `atBottomThreshold` of the
+    /// viewport height. When the user has scrolled up, `maxY` exceeds the
+    /// viewport height by the amount of off-screen content.
+    private func updateAtBottom(sentinelMaxY: CGFloat) {
+        guard viewportHeight > 0 else { return }
+        let distanceFromBottom = sentinelMaxY - viewportHeight
+        let nowAtBottom = distanceFromBottom <= Self.atBottomThreshold
+        if nowAtBottom != isAtBottom {
+            isAtBottom = nowAtBottom
+        }
+        if nowAtBottom {
+            // Reader caught up — clear the divider/pill state so a fresh
+            // run of unread messages starts a new divider next time.
+            if viewModel.firstUnreadID != nil || viewModel.unreadCount != 0 {
+                viewModel.clearUnread()
             }
         }
+    }
+
+    /// Reacts to a change in `viewModel.messages.count`. Auto-scrolls to the
+    /// newest message only when the reader is already at the bottom; when
+    /// they are scrolled up, records the first unread message so the divider
+    /// and pill appear instead of yanking them out of context.
+    private func handleMessageCountChange(
+        oldCount: Int,
+        newCount: Int,
+        proxy: ScrollViewProxy
+    ) {
+        guard let last = viewModel.messages.last else { return }
+        // Older-page prepend or no-op: don't auto-scroll, don't mark unread.
+        guard newCount > oldCount, last.id != lastAutoScrolledMessageID else {
+            // Update anchor even if we skip scroll, so an immediate user-sent
+            // message (which we *do* want to follow) doesn't get suppressed.
+            return
+        }
+
+        if isAtBottom || viewModel.isOwn(last) {
+            // RN parity: a message *the viewer just sent* always pulls them
+            // to the bottom regardless of where they were scrolled, so the
+            // input doesn't appear to swallow the message.
+            withAnimation { proxy.scrollTo(Self.bottomSentinelID, anchor: .bottom) }
+            lastAutoScrolledMessageID = last.id
+            // Sender messages count as catching up.
+            if viewModel.isOwn(last) {
+                viewModel.clearUnread()
+            }
+        } else {
+            // Reader is scrolled up — surface the new-messages affordances
+            // and leave their position alone.
+            viewModel.noteNewUnread(messageID: last.id)
+        }
+    }
+
+    /// Scrolls to the bottom and clears unread state. Bound to the FAB pill.
+    private func jumpToBottom(proxy: ScrollViewProxy) {
+        withAnimation { proxy.scrollTo(Self.bottomSentinelID, anchor: .bottom) }
+        viewModel.clearUnread()
+        lastAutoScrolledMessageID = viewModel.messages.last?.id
+        isAtBottom = true
     }
 
     // MARK: - Run clustering / member lookup
@@ -604,6 +774,100 @@ private struct DateDivider: View {
         }
 
         return "\(dayString) at \(time)"
+    }
+}
+
+// MARK: - New messages divider
+
+/// Centered "New messages" divider rendered above the first message that
+/// arrived while the reader was scrolled away from the bottom. Matches the
+/// affordance RN renders inside its message list (paired with the
+/// `NewMessagesPill` floating button) so the reader can see exactly where
+/// they left off when they catch up.
+private struct NewMessagesDivider: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.accentColor.opacity(0.5))
+                .frame(height: 1)
+            Text("New messages")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundStyle(Color.accentColor)
+                .lineLimit(1)
+                .fixedSize()
+            Rectangle()
+                .fill(Color.accentColor.opacity(0.5))
+                .frame(height: 1)
+        }
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("New messages")
+    }
+}
+
+// MARK: - Jump to newest pill
+
+/// Floating "Jump to newest" pill anchored to the bottom-right of the
+/// message scroll view. Mirrors RN's `NewMessagesPill` (`components/dms/
+/// NewMessagesPill.tsx`) — a small rounded pill that surfaces only when
+/// the reader is scrolled away from the bottom and a new message arrives.
+/// Tapping it scrolls the list back to the latest message and dismisses
+/// the pill.
+private struct JumpToNewestPill: View {
+    let unreadCount: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 13, weight: .semibold))
+                if unreadCount > 0 {
+                    Text("\(unreadCount)")
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                }
+            }
+            .foregroundStyle(Color.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                Capsule()
+                    .fill(.regularMaterial)
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5)
+            )
+            .shadow(color: Color.black.opacity(0.12), radius: 6, x: 0, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(unreadCount > 0
+                            ? "Jump to newest, \(unreadCount) new"
+                            : "Jump to newest")
+    }
+}
+
+// MARK: - Scroll preference keys
+
+/// Reports the bottom sentinel row's `maxY` (in scroll-view-local coords)
+/// up to the parent so it can compute "is the reader at the bottom?". The
+/// reducer takes the last value seen in a given pass — there is only one
+/// sentinel row, so the choice is moot, but `nextValue()` is required.
+private struct BottomSentinelOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// Reports the scroll view's viewport height up to the parent so the
+/// at-bottom calculation has both numbers it needs in one place.
+private struct ScrollViewportHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

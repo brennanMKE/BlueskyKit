@@ -13,6 +13,19 @@ public final class MessageThreadViewModel {
     public var convo: ConvoView? { store.convo }
     public var hasOlderMessages: Bool { store.hasOlderMessages }
 
+    /// ID of the first message that arrived while the user was scrolled away
+    /// from the bottom of the thread. RN parity: when set, the message list
+    /// renders a centered "New messages" divider above this row so the reader
+    /// can see where they left off (`MessagesList.tsx` → `NewMessagesPill` +
+    /// the inline divider rendered by `MessageItem`). Cleared once the user
+    /// scrolls back to the bottom.
+    public var firstUnreadID: String?
+
+    /// Number of messages that have arrived since the user scrolled away from
+    /// the bottom — used to optionally surface a count on the floating "Jump
+    /// to newest" pill. Reset to zero when `firstUnreadID` is cleared.
+    public var unreadCount: Int = 0
+
     public let convoId: String
     private let viewerDID: DID?
     private let store: any MessageThreadStoring
@@ -40,5 +53,23 @@ public final class MessageThreadViewModel {
     @discardableResult
     public func deleteMessage(_ messageId: String) async -> Bool {
         await store.deleteMessage(messageId, convoId: convoId)
+    }
+
+    /// Mark the unread-state cleared. Called when the user scrolls back to the
+    /// bottom of the thread or taps the "Jump to newest" pill.
+    public func clearUnread() {
+        firstUnreadID = nil
+        unreadCount = 0
+    }
+
+    /// Note that a new message arrived while the reader was scrolled up. If
+    /// no `firstUnreadID` is set yet (i.e. this is the first new message of
+    /// the run) we anchor the divider here. Subsequent calls just bump the
+    /// counter so the FAB can show how many messages are queued up.
+    public func noteNewUnread(messageID: String) {
+        if firstUnreadID == nil {
+            firstUnreadID = messageID
+        }
+        unreadCount += 1
     }
 }
