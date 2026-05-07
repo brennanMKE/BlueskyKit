@@ -27,6 +27,11 @@ public struct MessageThreadScreen: View {
     private let convo: ConvoView
     private let network: any NetworkClient
     private let viewerDID: DID?
+    /// Invoked when the user taps an embedded quoted post inside a message
+    /// bubble. Routed up to the host so the existing `threadURI` navigation
+    /// destination can push a `ThreadView`. RN parity: tapping a quote post
+    /// inside a DM opens the post.
+    private let onPostTap: ((ATURI) -> Void)?
 
     @State private var viewModel: MessageThreadViewModel
     @State private var draftText: String = ""
@@ -36,10 +41,16 @@ public struct MessageThreadScreen: View {
     /// confirmation. `nil` when no confirmation dialog is shown.
     @State private var pendingDeleteMessage: MessageView?
 
-    public init(convo: ConvoView, network: any NetworkClient, viewerDID: DID? = nil) {
+    public init(
+        convo: ConvoView,
+        network: any NetworkClient,
+        viewerDID: DID? = nil,
+        onPostTap: ((ATURI) -> Void)? = nil
+    ) {
         self.convo = convo
         self.network = network
         self.viewerDID = viewerDID
+        self.onPostTap = onPostTap
         _viewModel = State(wrappedValue: MessageThreadViewModel(
             convoId: convo.id, viewerDID: viewerDID, network: network
         ))
@@ -119,7 +130,8 @@ public struct MessageThreadScreen: View {
                                 ? Self.bubbleTimestamp(for: message.sentAt, now: Date())
                                 : nil,
                             senderProfile: senderProfile(for: message),
-                            onDeleteRequested: { pendingDeleteMessage = message }
+                            onDeleteRequested: { pendingDeleteMessage = message },
+                            onPostTap: onPostTap
                         )
                         .id(message.id)
                     }
@@ -301,9 +313,19 @@ private struct MessageBubble: View {
     /// The parent screen owns the confirmation prompt and the actual delete
     /// call; this closure simply surfaces the request upwards.
     var onDeleteRequested: (() -> Void)? = nil
+    /// Invoked when the user taps an embedded quoted post inside the bubble.
+    /// The parent screen routes this to the host's `threadURI` navigation
+    /// destination so the existing `ThreadView` push reuses the same plumbing
+    /// as feed/profile post taps.
+    var onPostTap: ((ATURI) -> Void)? = nil
 
     /// Whether the system Translate sheet is currently presented for this bubble.
     @State private var isTranslating: Bool = false
+
+    /// System link opener — used to launch link-card URLs from `external`
+    /// embeds. Mirrors RN's behaviour of handing off external links to the
+    /// platform browser/in-app browser.
+    @Environment(\.openURL) private var openURL
 
     private static let avatarSize: CGFloat = 24
     private static let avatarGutter: CGFloat = 6
@@ -353,6 +375,21 @@ private struct MessageBubble: View {
                 }
                 if let images = embeddedImages, !images.isEmpty {
                     imageStack(images)
+                }
+                // Rich embed — link card (`external`) or quoted post
+                // (`record` / `recordWithMedia`). RN renders these with the
+                // same component used by feed posts (see `MessageItemEmbed.tsx`
+                // → `<Embed …/>`); we reuse `PostEmbedView` from BlueskyUI for
+                // parity. The images half of `recordWithMedia` is already
+                // drawn above by `imageStack`, so we only render the quote
+                // half here to avoid showing the same images twice.
+                if let richEmbed = richEmbedForRender {
+                    PostEmbedView(
+                        embed: richEmbed,
+                        onLinkTap: { url in openURL(url) },
+                        onRecordTap: { uri in onPostTap?(uri) }
+                    )
+                    .frame(maxWidth: 280, alignment: .leading)
                 }
                 if !message.text.isEmpty {
                     Text(message.text)
@@ -448,6 +485,29 @@ private struct MessageBubble: View {
             if case .images(let images) = media { return images }
             return nil
         default:
+            return nil
+        }
+    }
+
+    /// The portion of `message.embed` that should flow through `PostEmbedView`
+    /// rather than the bubble's own `imageStack`. For pure image embeds we
+    /// return nil (the bubble draws those itself with rounded chat-styled
+    /// frames). For `recordWithMedia` we strip the media half and just hand
+    /// `PostEmbedView` the quoted record so the images are not rendered
+    /// twice. Returns nil for `video` (deferred — DMs cannot send videos in
+    /// RN today) and `unknown`.
+    private var richEmbedForRender: BlueskyCore.EmbedView? {
+        guard let embed = message.embed else { return nil }
+        switch embed {
+        case .external:
+            return embed
+        case .record:
+            return embed
+        case .recordWithMedia(let record, _):
+            // Drop the media half — `imageStack` already drew it. Render the
+            // quote post inline beneath.
+            return .record(record)
+        case .images, .video, .unknown:
             return nil
         }
     }
