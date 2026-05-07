@@ -241,6 +241,17 @@ public struct GetPreferencesResponse: Decodable, Sendable {
     public let feedViews: [String: FeedViewPref]
     /// Convenience accessor for the Following timeline preferences.
     public var homeFeedView: FeedViewPref? { feedViews["home"] }
+    /// `app.bsky.actor.defs#contentLanguagesPref.languages` — BCP-47 codes
+    /// for the languages the user wants to see in their feeds. Empty array
+    /// (or missing pref) means "show all languages". The Languages settings
+    /// screen reads / writes this list as a multi-select.
+    public let contentLanguages: [String]
+    /// `app.bsky.actor.defs#postLanguagesPref.languages` — BCP-47 codes the
+    /// composer pre-fills as the language(s) for new posts. RN treats the
+    /// first entry as the "primary post language"; the Settings → Languages
+    /// → Primary language picker writes that single code as a one-element
+    /// array.
+    public let postLanguages: [String]
 
     private enum OuterKeys: String, CodingKey { case preferences }
 
@@ -268,12 +279,15 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             let hideRepliesByLikeCount: Int?
             let hideReposts: Bool?
             let hideQuotePosts: Bool?
+            // contentLanguagesPref / postLanguagesPref share `languages: [String]`
+            let languages: [String]?
             private enum CodingKeys: String, CodingKey {
                 case type = "$type", enabled, label, visibility, labelerDid, birthDate
                 case feedItems = "items"
                 case sort, prioritizeFollowedUsers
                 case feed, hideReplies, hideRepliesByUnfollowed, hideRepliesByLikeCount,
                      hideReposts, hideQuotePosts
+                case languages
             }
         }
 
@@ -331,6 +345,16 @@ public struct GetPreferencesResponse: Decodable, Sendable {
             )
         }
         self.feedViews = feedViews
+
+        self.contentLanguages = items
+            .first { $0.type == "app.bsky.actor.defs#contentLanguagesPref" }?
+            .languages
+            ?? []
+
+        self.postLanguages = items
+            .first { $0.type == "app.bsky.actor.defs#postLanguagesPref" }?
+            .languages
+            ?? []
     }
 }
 
@@ -467,6 +491,39 @@ public struct PutPreferencesRequest: Encodable, Sendable {
             try c.encode(pref.hideRepliesByLikeCount, forKey: .hideRepliesByLikeCount)
             try c.encode(pref.hideReposts, forKey: .hideReposts)
             try c.encode(pref.hideQuotePosts, forKey: .hideQuotePosts)
+        }
+    }
+
+    /// Writes a `contentLanguagesPref` carrying the user's selected feed
+    /// languages (BCP-47 codes). Empty array means "show all languages",
+    /// matching RN's `useLanguagePrefsApi.setContentLanguages` semantics.
+    public init(contentLanguages: [String]) {
+        self.preferences = [AnyEncodable(_LanguagesPref(
+            type: "app.bsky.actor.defs#contentLanguagesPref",
+            languages: contentLanguages
+        ))]
+    }
+
+    /// Writes a `postLanguagesPref` carrying the user's preferred composer
+    /// languages (BCP-47 codes). The Settings → Languages → Primary language
+    /// picker passes a single code as a one-element array; this matches RN's
+    /// `useLanguagePrefsApi.setPrimaryLanguage` which writes a one-element
+    /// array via `agent.setPostLanguagesPref`.
+    public init(postLanguages: [String]) {
+        self.preferences = [AnyEncodable(_LanguagesPref(
+            type: "app.bsky.actor.defs#postLanguagesPref",
+            languages: postLanguages
+        ))]
+    }
+
+    private struct _LanguagesPref: Encodable, Sendable {
+        let type: String
+        let languages: [String]
+        private enum K: String, CodingKey { case type = "$type", languages }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: K.self)
+            try c.encode(type, forKey: .type)
+            try c.encode(languages, forKey: .languages)
         }
     }
 }

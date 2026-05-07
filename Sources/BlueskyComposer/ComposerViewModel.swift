@@ -192,6 +192,11 @@ public final class ComposerViewModel {
         self.quotedPostView = quotedPostView
         self.draftsStore = draftsStore ?? UserDefaultsDraftsStore()
         self.requireAltText = Self.loadRequireAltText(from: preferences)
+        // Seed the composer's language from the user's "Primary post language"
+        // setting (#0120). Mirrors RN's `useLanguagePrefs().primaryLanguage`
+        // default for new posts. Falls back to `"en"` when the user hasn't
+        // visited Settings → Languages yet.
+        self.selectedLanguage = Self.loadPrimaryPostLanguage(from: preferences)
         // Restore saved draft
         self.text = UserDefaults.standard.string(forKey: draftKey) ?? ""
     }
@@ -223,6 +228,32 @@ public final class ComposerViewModel {
         } catch {
             logger.warning("Could not decode requireAltText from UserDefaults: \(error.localizedDescription, privacy: .public). Defaulting to false.")
             return false
+        }
+    }
+
+    /// Read the user's "Primary post language" preference once at composer
+    /// construction. The Languages settings screen writes this to
+    /// `settings.primaryPostLanguage` after a successful `putPreferences`
+    /// round-trip; the composer pulls it here so new posts inherit the
+    /// user's choice (parity with RN's
+    /// `useLanguagePrefs().primaryLanguage`). Falls back to `"en"` when
+    /// nothing is stored or the read fails.
+    private static func loadPrimaryPostLanguage(from preferences: (any PreferencesStore)?) -> String {
+        let key = "settings.primaryPostLanguage"
+        if let preferences {
+            do {
+                return try preferences.get(String.self, for: key) ?? "en"
+            } catch {
+                logger.warning("Could not read primaryPostLanguage from PreferencesStore: \(error.localizedDescription, privacy: .public). Defaulting to en.")
+                return "en"
+            }
+        }
+        guard let data = UserDefaults.standard.data(forKey: key) else { return "en" }
+        do {
+            return try JSONDecoder().decode(String.self, from: data)
+        } catch {
+            logger.warning("Could not decode primaryPostLanguage from UserDefaults: \(error.localizedDescription, privacy: .public). Defaulting to en.")
+            return "en"
         }
     }
 

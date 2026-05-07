@@ -75,7 +75,7 @@ public struct SettingsScreen: View {
 
             Section("Preferences") {
                 NavigationLink {
-                    LanguageSettingsScreen(viewModel: viewModel)
+                    LanguageSettingsScreen(viewModel: viewModel, network: network)
                 } label: {
                     Label("Languages", systemImage: "globe")
                 }
