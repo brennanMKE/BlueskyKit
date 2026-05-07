@@ -195,6 +195,25 @@ public struct SendMessageRequest: Encodable, Sendable {
     }
 }
 
+// MARK: - chat.bsky.convo.deleteMessageForSelf
+
+/// Request body for `chat.bsky.convo.deleteMessageForSelf`. Hides a message
+/// from the caller's view of the conversation only; other participants still
+/// see it. RN reference: `state/messages/convo/agent.ts#deleteMessage`.
+public struct DeleteMessageForSelfRequest: Encodable, Sendable {
+    public let convoId: String
+    public let messageId: String
+
+    public init(convoId: String, messageId: String) {
+        self.convoId = convoId
+        self.messageId = messageId
+    }
+}
+
+/// The endpoint returns a `DeletedMessageView` (a tombstone) — we reuse the
+/// existing type from the convo defs.
+public typealias DeleteMessageForSelfResponse = DeletedMessageView
+
 // MARK: - chat.bsky.convo.leaveConvo / muteConvo / unmuteConvo / updateRead
 
 public struct ConvoIDRequest: Encodable, Sendable {

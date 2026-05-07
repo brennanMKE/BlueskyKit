@@ -20,6 +20,11 @@ public protocol MessageThreadStoring: AnyObject, Observable, Sendable {
     func loadOlder(convoId: String) async
     func sendMessage(_ text: String, convoId: String) async
     func sendImageAttachment(data: Data, mimeType: String, convoId: String) async
+    /// Hide a message from the caller's view via `chat.bsky.convo.deleteMessageForSelf`.
+    /// Optimistically removes the message from `messages`; on failure the
+    /// message is restored at its original index and `errorMessage` is set.
+    @discardableResult
+    func deleteMessage(_ messageId: String, convoId: String) async -> Bool
 }
 
 // MARK: - MessageThreadStore
@@ -117,6 +122,29 @@ public final class MessageThreadStore: MessageThreadStoring {
         } catch {
             logger.error("image attachment send error: \(error, privacy: .public)")
             errorMessage = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    public func deleteMessage(_ messageId: String, convoId: String) async -> Bool {
+        guard let index = messages.firstIndex(where: { $0.id == messageId }) else {
+            return false
+        }
+        // Optimistic removal — restore on failure.
+        let removed = messages.remove(at: index)
+        do {
+            let _: DeleteMessageForSelfResponse = try await network.post(
+                lexicon: "chat.bsky.convo.deleteMessageForSelf",
+                body: DeleteMessageForSelfRequest(convoId: convoId, messageId: messageId)
+            )
+            return true
+        } catch {
+            logger.error("delete message failed: \(error, privacy: .public)")
+            // Re-insert at original position so ordering is preserved.
+            let insertAt = min(index, messages.count)
+            messages.insert(removed, at: insertAt)
+            errorMessage = "Failed to delete message"
+            return false
         }
     }
 

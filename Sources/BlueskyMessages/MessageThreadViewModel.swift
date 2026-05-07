@@ -34,4 +34,11 @@ public final class MessageThreadViewModel {
     public func sendImageAttachment(data: Data, mimeType: String = "image/jpeg") async {
         await store.sendImageAttachment(data: data, mimeType: mimeType, convoId: convoId)
     }
+
+    /// Hide a message from the caller's view (`chat.bsky.convo.deleteMessageForSelf`).
+    /// Returns `true` on success. Optimistic — restores the message locally on failure.
+    @discardableResult
+    public func deleteMessage(_ messageId: String) async -> Bool {
+        await store.deleteMessage(messageId, convoId: convoId)
+    }
 }

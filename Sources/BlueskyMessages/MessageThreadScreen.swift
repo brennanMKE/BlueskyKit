@@ -4,6 +4,14 @@ import PhotosUI
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
+#if canImport(Translation)
+import Translation
+#endif
 
 private let messageThreadScreenLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstools.Bluesky", category: "MessageThreadScreen")
 
@@ -24,6 +32,9 @@ public struct MessageThreadScreen: View {
     @State private var draftText: String = ""
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var imageLoadErrorMessage: String?
+    /// The message the user has asked to delete via the context menu, awaiting
+    /// confirmation. `nil` when no confirmation dialog is shown.
+    @State private var pendingDeleteMessage: MessageView?
 
     public init(convo: ConvoView, network: any NetworkClient, viewerDID: DID? = nil) {
         self.convo = convo
@@ -55,6 +66,28 @@ public struct MessageThreadScreen: View {
         } message: {
             Text(imageLoadErrorMessage ?? "")
         }
+        // Delete-for-me confirmation, mirrors RN's `Prompt.Basic` in
+        // `MessageContextMenu.tsx`. Title and body match the upstream copy.
+        .confirmationDialog(
+            "Delete message",
+            isPresented: Binding(
+                get: { pendingDeleteMessage != nil },
+                set: { if !$0 { pendingDeleteMessage = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDeleteMessage
+        ) { message in
+            Button("Delete", role: .destructive) {
+                let id = message.id
+                pendingDeleteMessage = nil
+                Task { await viewModel.deleteMessage(id) }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteMessage = nil
+            }
+        } message: { _ in
+            Text("Are you sure you want to delete this message? The message will be deleted for you, but not for the other participants.")
+        }
     }
 
     // MARK: - Message scroll view
@@ -77,7 +110,8 @@ public struct MessageThreadScreen: View {
                             isOwn: viewModel.isOwn(message),
                             isGroup: isGroup,
                             isFirstInRun: isFirstInRun(at: index),
-                            senderProfile: senderProfile(for: message)
+                            senderProfile: senderProfile(for: message),
+                            onDeleteRequested: { pendingDeleteMessage = message }
                         )
                         .id(message.id)
                     }
@@ -198,6 +232,13 @@ private struct MessageBubble: View {
     var isGroup: Bool = false
     var isFirstInRun: Bool = true
     var senderProfile: ProfileBasic? = nil
+    /// Invoked when the user picks "Delete for me" from the context menu.
+    /// The parent screen owns the confirmation prompt and the actual delete
+    /// call; this closure simply surfaces the request upwards.
+    var onDeleteRequested: (() -> Void)? = nil
+
+    /// Whether the system Translate sheet is currently presented for this bubble.
+    @State private var isTranslating: Bool = false
 
     private static let avatarSize: CGFloat = 24
     private static let avatarGutter: CGFloat = 6
@@ -261,6 +302,53 @@ private struct MessageBubble: View {
 
             if !isOwn { Spacer(minLength: 60) }
         }
+        // Per-message context menu — long-press on iOS, right-click on macOS.
+        // Mirrors RN's `MessageContextMenu.tsx` ordering: Translate, Copy,
+        // (divider), Delete, Report. Reactions are deferred to #0110; the
+        // message-subject Report wiring is deferred (`ReportDialog` does not
+        // accept a chat-message subject yet — see issue Gotchas).
+        .contextMenu {
+            messageContextMenu
+        }
+        .translationPresentation(isPresented: $isTranslating, text: message.text)
+    }
+
+    @ViewBuilder
+    private var messageContextMenu: some View {
+        if !message.text.isEmpty {
+            Button {
+                isTranslating = true
+            } label: {
+                Label("Translate", systemImage: "character.bubble")
+            }
+
+            Button {
+                copyToPasteboard(message.text)
+            } label: {
+                Label("Copy message text", systemImage: "doc.on.doc")
+            }
+
+            Divider()
+        }
+
+        if isOwn {
+            Button(role: .destructive) {
+                onDeleteRequested?()
+            } label: {
+                Label("Delete for me", systemImage: "trash")
+            }
+        }
+        // Report wiring is deferred — see issue 0106 Gotchas.
+    }
+
+    private func copyToPasteboard(_ text: String) {
+        #if canImport(UIKit)
+        UIPasteboard.general.string = text
+        #elseif canImport(AppKit)
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+        #endif
     }
 
     @ViewBuilder
