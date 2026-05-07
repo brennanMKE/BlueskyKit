@@ -5,7 +5,24 @@ import BlueskyUI
 
 /// RN parity: `HELP_DESK_URL` from `Bluesky-ReactNative/src/lib/constants.ts`.
 /// The Help row in the Settings hub opens this URL in the system browser.
-private let helpDeskURL = URL(string: "https://blueskyweb.zendesk.com/hc/en-us")!
+///
+/// Public so other entry points (e.g. the iOS sidebar drawer's footer Help
+/// pill button — #0150) can share the same constant rather than redeclaring
+/// it. Wrapping the URL in a `BlueskyHelpURLs` enum keeps the namespace
+/// tidy and leaves room for the legal-link URLs the drawer also needs.
+public enum BlueskyHelpURLs {
+    /// `HELP_DESK_URL` — the Zendesk help-desk landing page.
+    public static let helpDesk = URL(string: "https://blueskyweb.zendesk.com/hc/en-us")!
+    /// Terms of Service — RN's `ExtraLinks` in `Drawer.tsx` links to this URL.
+    public static let termsOfService = URL(string: "https://bsky.social/about/support/tos")!
+    /// Privacy Policy — RN's `ExtraLinks` in `Drawer.tsx` links to this URL.
+    public static let privacyPolicy = URL(string: "https://bsky.social/about/support/privacy-policy")!
+}
+
+/// Backwards-compatible alias preserved so the rest of `SettingsScreen` still
+/// compiles unchanged. Remove once every call site has migrated to the
+/// `BlueskyHelpURLs` namespace.
+private let helpDeskURL = BlueskyHelpURLs.helpDesk
 
 public struct SettingsScreen: View {
     @State private var viewModel: SettingsViewModel
