@@ -101,6 +101,11 @@ public struct FeedView: View {
     /// user's saved-feed set live (#0074 acceptance).
     @State private var savedFeedsStore: SavedFeedsStore?
 
+    /// Resolves real `GeneratorView` metadata (display name, avatar, …) for
+    /// each pinned feed AT-URI so the tab strip can render the human-readable
+    /// feed name instead of leaking the AT-URI rkey as a label (#0149).
+    @State private var pinnedFeedsResolver: SuggestedFeedsStore?
+
     /// Wrapped in a reference-type box so that SwiftUI preserves the same
     /// dictionary even when `FeedView` is reconstructed by its parent (e.g.
     /// during auth-state re-renders in `MainTabView`).  A plain
@@ -152,6 +157,14 @@ public struct FeedView: View {
         return HomeFeedTab.builtIns + pinned
     }
 
+    /// Snapshot of the AT-URIs we currently care about resolving so the
+    /// `.onChange` modifier can re-fire whenever the saved-feed set mutates.
+    private var pinnedFeedURIs: [String] {
+        (savedFeedsStore?.feeds ?? [])
+            .filter { $0.pinned && $0.type == "feed" }
+            .map { $0.value }
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             FeedSwitcherView(
@@ -183,17 +196,29 @@ public struct FeedView: View {
             if savedFeedsStore == nil {
                 savedFeedsStore = SavedFeedsStore(network: network, cache: cache)
             }
+            if pinnedFeedsResolver == nil {
+                pinnedFeedsResolver = SuggestedFeedsStore(network: network)
+            }
             await savedFeedsStore?.load()
+            // Resolve metadata for all pinned feeds so the tab strip shows
+            // real display names instead of the "Feed" placeholder (#0149).
+            await pinnedFeedsResolver?.resolve(uris: pinnedFeedURIs)
             #if os(iOS)
             if showsInlineComposerPrompt {
                 await refreshViewerProfile()
             }
             #endif
         }
+        .onChange(of: pinnedFeedURIs) { _, newURIs in
+            Task { await pinnedFeedsResolver?.resolve(uris: newURIs) }
+        }
         .onReceive(
             NotificationCenter.default.publisher(for: .savedFeedsChanged)
         ) { _ in
-            Task { await savedFeedsStore?.load() }
+            Task {
+                await savedFeedsStore?.load()
+                await pinnedFeedsResolver?.resolve(uris: pinnedFeedURIs)
+            }
         }
         .sheet(isPresented: Binding(
             get: { replyTarget != nil },
@@ -340,12 +365,18 @@ public struct FeedView: View {
         }
     }
 
-    /// Render-time fallback name for a pinned feed when we don't have its
-    /// resolved `GeneratorView` metadata. Falls back to the rkey portion of
-    /// the AT-URI so the strip never shows an empty label, even before the
-    /// `My Feeds` screen has resolved metadata.
+    /// Render-time display name for a pinned feed. Prefers the resolved
+    /// `GeneratorView.displayName` from `pinnedFeedsResolver` when available;
+    /// otherwise returns a generic placeholder so the strip never leaks the
+    /// AT-URI rkey as user-visible text (#0149). The placeholder is replaced
+    /// the moment `getFeedGenerator` returns, so users only ever see it for
+    /// the brief window between session start and metadata resolution.
     private func pinnedFeedDisplayName(_ feed: SavedFeed) -> String {
-        feed.value.components(separatedBy: "/").last ?? feed.value
+        if let resolved = pinnedFeedsResolver?.resolvedFeeds[feed.value]?.displayName,
+           !resolved.isEmpty {
+            return resolved
+        }
+        return "Feed"
     }
 
     /// Notification name posted by the iOS custom tab bar when the user taps

@@ -113,9 +113,11 @@ public struct SavedFeedsScreen: View {
     }
 
     private func displayName(for feed: SavedFeed) -> String {
-        if feed.type == "timeline" { return "Following" }
-        // AT-URI last path component is the rkey (human-readable feed slug)
-        return feed.value.components(separatedBy: "/").last ?? feed.value
+        switch feed.type {
+        case "timeline": return "Following"
+        case "list":     return "List"
+        default:         return "Feed"
+        }
     }
 
     private func movePinned(from: IndexSet, to: Int) {

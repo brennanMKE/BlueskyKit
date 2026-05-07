@@ -428,8 +428,11 @@ public struct MyFeedsScreen: View {
     }
 
     private func displayName(for feed: SavedFeed) -> String {
-        if feed.type == "timeline" { return "Following" }
-        return feed.value.components(separatedBy: "/").last ?? feed.value
+        switch feed.type {
+        case "timeline": return "Following"
+        case "list":     return "List"
+        default:         return "Feed"
+        }
     }
 
     private func movePinned(id: String, by offset: Int) {
