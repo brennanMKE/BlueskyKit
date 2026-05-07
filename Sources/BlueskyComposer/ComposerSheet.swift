@@ -508,10 +508,11 @@ public struct ComposerSheet: View {
                     .scrollContentBackground(.hidden)
 
                     HStack {
-                        let remaining = 300 - viewModel.additionalPosts[index].unicodeScalars.count
-                        Text("\(remaining)")
-                            .font(.caption).monospacedDigit()
-                            .foregroundStyle(remaining < 0 ? .red : remaining < 20 ? .orange : .secondary)
+                        CharProgressRing(
+                            count: viewModel.additionalPosts[index].unicodeScalars.count,
+                            max: 300,
+                            size: 20
+                        )
                         Spacer()
                         Button {
                             viewModel.removePost(at: index)
@@ -567,10 +568,7 @@ public struct ComposerSheet: View {
     }
 
     private var charCounter: some View {
-        let remaining = 300 - viewModel.characterCount
-        return Text("\(remaining)")
-            .font(.subheadline).monospacedDigit()
-            .foregroundStyle(remaining < 0 ? .red : remaining < 20 ? .orange : .secondary)
+        CharProgressRing(count: viewModel.characterCount, max: 300)
     }
 }
 
