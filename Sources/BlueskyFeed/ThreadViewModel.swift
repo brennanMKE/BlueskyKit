@@ -154,6 +154,22 @@ public final class ThreadViewModel {
         return Self.sort(replies, by: sort, randomSeed: randomSeed)
     }
 
+    /// URIs of replies the OP has explicitly hidden via the focal post's
+    /// threadgate (`record.hiddenReplies`). Drives the "Hidden replies"
+    /// divider in `ThreadView`. Mirrors RN's
+    /// `useMergedThreadgateHiddenReplies` (minus the optimistic
+    /// add/remove overlay, which lives in the threadgate-edit flow). Only
+    /// the focal post's threadgate is consulted — nested posts in a
+    /// thread can carry their own threadgates, but for hide-replies UX
+    /// we follow RN and use the root.
+    public var hiddenReplyURIs: Set<ATURI> {
+        guard case .post(let tp) = thread,
+              let uris = tp.threadgate?.record?.hiddenReplies else {
+            return []
+        }
+        return Set(uris)
+    }
+
     // MARK: - Internals
 
     private func hydrateDefaultSort() async {

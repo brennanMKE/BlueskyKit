@@ -39,6 +39,69 @@ public struct ThreadPost: Decodable, Sendable {
     public let post: PostView
     public let parent: ThreadViewPost?
     public let replies: [ThreadViewPost]?
+    /// Threadgate attached to the focal post (only populated on the root
+    /// `threadViewPost` of a `getPostThread` response). Carries the
+    /// `record.hiddenReplies` URI list the OP has hidden, plus the active
+    /// allow-rule lists. RN reads this off the response to drive both the
+    /// "Hidden by author" visual and the OP-side hide/unhide actions.
+    /// Mirrors the optional `threadgate?: threadgateView` field on the
+    /// `app.bsky.feed.defs#threadViewPost` lexicon.
+    public let threadgate: ThreadgateView?
+
+    public init(
+        post: PostView,
+        parent: ThreadViewPost? = nil,
+        replies: [ThreadViewPost]? = nil,
+        threadgate: ThreadgateView? = nil
+    ) {
+        self.post = post
+        self.parent = parent
+        self.replies = replies
+        self.threadgate = threadgate
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case post, parent, replies, threadgate
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        post = try c.decode(PostView.self, forKey: .post)
+        parent = try c.decodeIfPresent(ThreadViewPost.self, forKey: .parent)
+        replies = try c.decodeIfPresent([ThreadViewPost].self, forKey: .replies)
+        threadgate = try c.decodeIfPresent(ThreadgateView.self, forKey: .threadgate)
+    }
+}
+
+/// `app.bsky.feed.defs#threadgateView` — the appview-resolved view of a
+/// post's threadgate. Wraps the underlying `ThreadgateRecord` plus the
+/// list views referenced by `listRule` allow-entries. We only need the
+/// embedded `record` (specifically its `hiddenReplies`) for the thread
+/// view's "Hidden replies" divider, but `uri` / `cid` are kept so the OP
+/// can identify their own threadgate when they edit it later.
+public struct ThreadgateView: Decodable, Sendable {
+    public let uri: ATURI?
+    public let cid: CID?
+    public let record: ThreadgateRecord?
+
+    public init(uri: ATURI? = nil, cid: CID? = nil, record: ThreadgateRecord? = nil) {
+        self.uri = uri
+        self.cid = cid
+        self.record = record
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case uri, cid, record
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        uri = try c.decodeIfPresent(ATURI.self, forKey: .uri)
+        cid = try c.decodeIfPresent(CID.self, forKey: .cid)
+        // Tolerate a missing or malformed embedded record — older posts can
+        // ship a `threadgateView` envelope without a usable record value.
+        record = try? c.decodeIfPresent(ThreadgateRecord.self, forKey: .record)
+    }
 }
 
 public struct GetPostThreadResponse: Decodable, Sendable {

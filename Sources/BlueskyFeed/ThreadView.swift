@@ -51,6 +51,10 @@ public struct ThreadView: View {
     @State private var replyTarget: PostView? = nil
     /// URI of a non-focal post (ancestor or reply) tapped by the user; drives in-thread navigation.
     @State private var selectedReplyURI: ATURI? = nil
+    /// Whether the "Hidden replies" section is expanded. Collapsed by
+    /// default — RN treats threadgate-hidden replies as opt-in for the
+    /// reader, since the OP has explicitly chosen to suppress them.
+    @State private var showHiddenReplies: Bool = false
 
     public init(
         uri: ATURI,
@@ -200,22 +204,87 @@ public struct ThreadView: View {
 
     /// Top-level entry into the recursive reply walker. Uses
     /// `viewModel.sortedReplies` so the toolbar's reply-sort selection
-    /// drives row order without a refetch (#0140).
+    /// drives row order without a refetch (#0140). Replies whose URI
+    /// appears in the focal post's `threadgate.record.hiddenReplies`
+    /// list are partitioned out and rendered below a collapsed
+    /// "Hidden replies" divider (#0145).
     @ViewBuilder
     private func replyTree(of node: ThreadViewPost, focalURI: ATURI?) -> some View {
-        ForEach(Array(viewModel.sortedReplies.enumerated()), id: \.offset) { _, reply in
+        let hiddenURIs = viewModel.hiddenReplyURIs
+        let partitioned = partitionReplies(viewModel.sortedReplies, hidden: hiddenURIs)
+        ForEach(Array(partitioned.visible.enumerated()), id: \.offset) { _, reply in
             replyRow(reply, depth: 1, focalURI: focalURI)
         }
+        if !partitioned.hidden.isEmpty {
+            hiddenRepliesDivider(count: partitioned.hidden.count)
+            if showHiddenReplies {
+                ForEach(Array(partitioned.hidden.enumerated()), id: \.offset) { _, reply in
+                    replyRow(reply, depth: 1, focalURI: focalURI, dimmed: true)
+                }
+            }
+        }
+    }
+
+    /// Split the focal post's direct replies into the rows that should
+    /// render normally and the rows whose URI appears in the OP's
+    /// `hiddenReplies` list. Non-`.post` sentinels are treated as
+    /// visible — they render their own tombstone in `PostCard`.
+    private func partitionReplies(
+        _ replies: [ThreadViewPost],
+        hidden: Set<ATURI>
+    ) -> (visible: [ThreadViewPost], hidden: [ThreadViewPost]) {
+        guard !hidden.isEmpty else { return (replies, []) }
+        var visible: [ThreadViewPost] = []
+        var hiddenList: [ThreadViewPost] = []
+        for reply in replies {
+            if case .post(let tp) = reply, hidden.contains(tp.post.uri) {
+                hiddenList.append(reply)
+            } else {
+                visible.append(reply)
+            }
+        }
+        return (visible, hiddenList)
+    }
+
+    /// "Hidden replies" divider — small centered tappable label. Mirrors
+    /// the visual weight of RN's collapsed-section dividers (centered
+    /// secondary text with a chevron) so the "Hidden by author" badge on
+    /// the dimmed rows below has a clear group header.
+    private func hiddenRepliesDivider(count: Int) -> some View {
+        Button {
+            showHiddenReplies.toggle()
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: showHiddenReplies ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(count == 1 ? "Hidden reply" : "Hidden replies")
+                    .font(Typography.bodySmall)
+                    .fontWeight(.semibold)
+            }
+            .foregroundStyle(Color.secondary)
+            .padding(.vertical, Spacing.sm)
+            .padding(.horizontal, Spacing.md)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .top) { Divider() }
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     /// Recursive renderer. `depth` is 1-based — the focal post's direct
     /// replies sit at depth 1. Indentation grows with depth up to
     /// `ThreadTree.maxDepth`, then flattens. Returns `AnyView` to break
     /// the self-referential `some View` recursion.
+    /// `dimmed` is set for direct replies the OP has hidden via
+    /// threadgate; the row paints at reduced opacity with a "Hidden by
+    /// author" badge above it. Nested children inherit the dimming so a
+    /// hidden subtree reads as a single muted block.
     private func replyRow(
         _ node: ThreadViewPost,
         depth: Int,
-        focalURI: ATURI?
+        focalURI: ATURI?,
+        dimmed: Bool = false
     ) -> AnyView {
         guard case .post(let tp) = node else {
             return AnyView(EmptyView())
@@ -233,17 +302,21 @@ public struct ThreadView: View {
 
         return AnyView(
             VStack(spacing: 0) {
+                if dimmed {
+                    hiddenByAuthorBadge(depth: cappedDepth)
+                }
                 TreeReplyRow(
                     item: item,
                     depth: cappedDepth,
                     actions: actions(for: post, focalURI: focalURI)
                 )
+                .opacity(dimmed ? 0.55 : 1.0)
                 Divider()
                 // Render direct children when not at the cap, or the
                 // user has expanded this subtree past the cap.
                 if !isAtCap || isExpanded {
                     ForEach(Array(nestedReplies.enumerated()), id: \.offset) { _, child in
-                        replyRow(child, depth: depth + 1, focalURI: focalURI)
+                        replyRow(child, depth: depth + 1, focalURI: focalURI, dimmed: dimmed)
                     }
                 }
                 // "Show N more replies" — appears when:
@@ -265,6 +338,26 @@ public struct ThreadView: View {
                 }
             }
         )
+    }
+
+    /// Small "Hidden by author" badge rendered above a reply the OP has
+    /// suppressed via threadgate. Aligned to the row's left rail so the
+    /// badge sits over the same column as the post body. Mirrors the
+    /// copy from RN's `ModerationDetailsDialog` ("The author of this
+    /// thread has hidden this reply.") in a one-line condensed form
+    /// suited for an inline badge.
+    private func hiddenByAuthorBadge(depth: Int) -> some View {
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: "eye.slash")
+                .font(.system(size: 11, weight: .semibold))
+            Text("Hidden by author")
+                .font(Typography.footnote)
+                .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.secondary)
+        .padding(.vertical, Spacing._2xs)
+        .padding(.leading, ThreadTree.indentUnit * CGFloat(depth) + Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func showMoreButton(depth: Int, count: Int, action: @escaping () -> Void) -> some View {
