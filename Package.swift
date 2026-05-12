@@ -45,7 +45,13 @@ let package = Package(
         // and its private Decodable helpers must be nonisolated.
         .target(name: "BlueskyNetworking", dependencies: ["BlueskyKit", "BlueskyCore"]),
         .target(name: "BlueskyFeed", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI", "BlueskyComposer"], swiftSettings: swiftSettings),
-        .target(name: "BlueskyProfile", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
+        // BlueskyProfile depends on BlueskyComposer so the Profile screen can
+        // present the reply composer for post rows in its tabs (#0159), without
+        // needing to import BlueskyFeed (which would form a Layer-3 ↔ Layer-3
+        // cycle as soon as Feed needs to navigate back into Profile). Composer
+        // is a sibling Layer-3 module that does not depend on Profile, so this
+        // edge is acyclic.
+        .target(name: "BlueskyProfile", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI", "BlueskyComposer"], swiftSettings: swiftSettings),
         .target(name: "BlueskySearch", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
         .target(name: "BlueskyNotifications", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),
         .target(name: "BlueskyMessages", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyUI"], swiftSettings: swiftSettings),

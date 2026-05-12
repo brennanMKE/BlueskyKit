@@ -51,6 +51,24 @@ public protocol ProfileStoring: AnyObject, Observable, Sendable {
     func mute() async
     func unmute() async
     func updateProfile(displayName: String?, description: String?) async throws
+
+    // MARK: Per-post interactions (#0159)
+    //
+    // Mirror the like / repost / bookmark mutation surface of `FeedStore` so
+    // that post rows on the Profile screen tabs (Posts / Replies / Media /
+    // Videos / Likes) get functional action-bar callbacks instead of the
+    // previous no-op `PostCard.Actions()`. Implementation is a leaner
+    // duplicate of `FeedStore`'s logic: we don't currently freshen viewer
+    // state from `getPosts` before toggling — the profile feed is re-fetched
+    // on tab switch which is usually enough, and adding the freshener here
+    // would require lifting the `freshenedPost` helper into a shared
+    // location. Acceptable trade-off per the issue spec; revisit if the
+    // staleness-revert behavior in #0041 starts surfacing on profile rows
+    // too.
+    func toggleLike(post: PostView) async
+    func toggleRepost(post: PostView) async
+    func bookmark(post: PostView) async
+    func unbookmark(post: PostView) async
 }
 
 // MARK: - ProfileStore
@@ -68,6 +86,14 @@ public final class ProfileStore: ProfileStoring {
     private var tabPosts: [ProfileTab: [FeedViewPost]] = [:]
     private var tabCursors: [ProfileTab: String?] = [:]
     private var tabLoading: [ProfileTab: Bool] = [:]
+
+    /// Post URIs whose like state is currently being mutated.
+    /// Mirrors `FeedStore`'s double-tap guard.
+    private var likeInFlight: Set<ATURI> = []
+    /// Post URIs whose repost state is currently being mutated.
+    private var repostInFlight: Set<ATURI> = []
+    /// Post URIs whose bookmark state is currently being mutated.
+    private var bookmarkInFlight: Set<ATURI> = []
 
     private let network: any NetworkClient
     private let accountStore: any AccountStore
@@ -376,6 +402,177 @@ public final class ProfileStore: ProfileStoring {
         }
     }
 
+    // MARK: - Per-post interactions (#0159)
+
+    public func toggleLike(post: PostView) async {
+        guard likeInFlight.insert(post.uri).inserted else { return }
+        defer { likeInFlight.remove(post.uri) }
+        let live = currentPost(for: post.uri) ?? post
+        if live.viewer?.like != nil {
+            await performUnlike(post: live)
+        } else {
+            await performLike(post: live)
+        }
+    }
+
+    public func toggleRepost(post: PostView) async {
+        guard repostInFlight.insert(post.uri).inserted else { return }
+        defer { repostInFlight.remove(post.uri) }
+        let live = currentPost(for: post.uri) ?? post
+        if live.viewer?.repost != nil {
+            await performUnrepost(post: live)
+        } else {
+            await performRepost(post: live)
+        }
+    }
+
+    public func bookmark(post: PostView) async {
+        guard bookmarkInFlight.insert(post.uri).inserted else { return }
+        defer { bookmarkInFlight.remove(post.uri) }
+        let live = currentPost(for: post.uri) ?? post
+        guard live.viewer?.bookmarked != true else { return }
+        updatePost(uri: post.uri) { $0.withBookmarked(true) }
+        do {
+            let _: EmptyResponse = try await network.post(
+                lexicon: "app.bsky.bookmark.createBookmark",
+                body: CreateBookmarkRequest(post: live)
+            )
+        } catch {
+            logger.error("bookmark failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
+            updatePost(uri: post.uri) { $0.withBookmarked(false) }
+        }
+    }
+
+    public func unbookmark(post: PostView) async {
+        guard bookmarkInFlight.insert(post.uri).inserted else { return }
+        defer { bookmarkInFlight.remove(post.uri) }
+        updatePost(uri: post.uri) { $0.withBookmarked(false) }
+        do {
+            let _: EmptyResponse = try await network.post(
+                lexicon: "app.bsky.bookmark.deleteBookmark",
+                body: DeleteBookmarkRequest(postURI: post.uri)
+            )
+        } catch {
+            logger.error("unbookmark failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
+            updatePost(uri: post.uri) { $0.withBookmarked(true) }
+        }
+    }
+
+    private func performLike(post: PostView) async {
+        guard let did = await loadCurrentDID() else { return }
+        guard post.viewer?.like == nil else { return }
+        updatePost(uri: post.uri) { $0.withLike(ATURI(rawValue: "pending://like")) }
+        do {
+            let req = CreateRecordRequest(
+                repo: did.rawValue,
+                collection: "app.bsky.feed.like",
+                record: LikeRecord(subject: PostRef(uri: post.uri, cid: post.cid))
+            )
+            let resp: CreateRecordResponse = try await network.post(
+                lexicon: "com.atproto.repo.createRecord", body: req
+            )
+            updatePost(uri: post.uri) { $0.withLike(resp.uri) }
+        } catch {
+            logger.error("like failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
+            updatePost(uri: post.uri) { $0.withLike(nil) }
+        }
+    }
+
+    private func performUnlike(post: PostView) async {
+        guard let likeURI = post.viewer?.like,
+              let did = await loadCurrentDID(),
+              let rkey = likeURI.rkey else { return }
+        updatePost(uri: post.uri) { $0.withLike(nil) }
+        do {
+            let req = DeleteRecordRequest(repo: did.rawValue, collection: "app.bsky.feed.like", rkey: rkey)
+            let _: EmptyResponse = try await network.post(lexicon: "com.atproto.repo.deleteRecord", body: req)
+        } catch {
+            logger.error("unlike failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
+            updatePost(uri: post.uri) { $0.withLike(likeURI) }
+        }
+    }
+
+    public func repost(post: PostView) async {
+        guard repostInFlight.insert(post.uri).inserted else { return }
+        defer { repostInFlight.remove(post.uri) }
+        await performRepost(post: post)
+    }
+
+    private func performRepost(post: PostView) async {
+        guard let did = await loadCurrentDID() else { return }
+        guard post.viewer?.repost == nil else { return }
+        updatePost(uri: post.uri) { $0.withRepost(ATURI(rawValue: "pending://repost")) }
+        do {
+            let req = CreateRecordRequest(
+                repo: did.rawValue,
+                collection: "app.bsky.feed.repost",
+                record: RepostRecord(subject: PostRef(uri: post.uri, cid: post.cid))
+            )
+            let resp: CreateRecordResponse = try await network.post(
+                lexicon: "com.atproto.repo.createRecord", body: req
+            )
+            updatePost(uri: post.uri) { $0.withRepost(resp.uri) }
+        } catch {
+            logger.error("repost failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
+            updatePost(uri: post.uri) { $0.withRepost(nil) }
+        }
+    }
+
+    private func performUnrepost(post: PostView) async {
+        guard let repostURI = post.viewer?.repost,
+              let did = await loadCurrentDID(),
+              let rkey = repostURI.rkey else { return }
+        updatePost(uri: post.uri) { $0.withRepost(nil) }
+        do {
+            let req = DeleteRecordRequest(repo: did.rawValue, collection: "app.bsky.feed.repost", rkey: rkey)
+            let _: EmptyResponse = try await network.post(lexicon: "com.atproto.repo.deleteRecord", body: req)
+        } catch {
+            logger.error("unrepost failed for \(post.uri.rawValue, privacy: .public): \(error, privacy: .public)")
+            updatePost(uri: post.uri) { $0.withRepost(repostURI) }
+        }
+    }
+
+    /// Returns the most recent `PostView` we have cached for `uri` across any
+    /// tab. The same post can appear in multiple tabs (e.g. a media post
+    /// shows up under both Posts and Media); we don't try to deduplicate, but
+    /// the per-tab `tabPosts` arrays are kept in sync via `updatePost` below.
+    private func currentPost(for uri: ATURI) -> PostView? {
+        for items in tabPosts.values {
+            if let match = items.first(where: { $0.post.uri == uri }) {
+                return match.post
+            }
+        }
+        return nil
+    }
+
+    /// Apply `transform` to every occurrence of `uri` across every tab so the
+    /// optimistic UI flip is visible no matter which tab the user is looking
+    /// at when they tap. The same post appearing under both Posts and Media
+    /// keeps a consistent like/repost/bookmark state.
+    private func updatePost(uri: ATURI, transform: (PostView) -> PostView) {
+        for tab in tabPosts.keys {
+            guard var items = tabPosts[tab] else { continue }
+            var changed = false
+            for idx in items.indices where items[idx].post.uri == uri {
+                let old = items[idx]
+                items[idx] = FeedViewPost(post: transform(old.post), reply: old.reply, reason: old.reason)
+                changed = true
+            }
+            if changed {
+                tabPosts[tab] = items
+            }
+        }
+    }
+
+    private func loadCurrentDID() async -> DID? {
+        do {
+            return try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("loadCurrentDID failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
     // MARK: - Edit profile
 
     public func updateProfile(displayName: String?, description: String?) async throws {
@@ -390,6 +587,74 @@ public final class ProfileStore: ProfileStoring {
             lexicon: "com.atproto.repo.putRecord", body: req
         )
         await loadProfile(actorDID: viewerDID)
+    }
+}
+
+// MARK: - PostView mutation helpers (#0159, optimistic updates)
+//
+// These mirror the file-private helpers in `BlueskyFeed/FeedViewModel.swift`.
+// Duplicated rather than shared because moving them into BlueskyCore would
+// require BlueskyCore to take on optimistic-UI vocabulary that doesn't
+// belong in a pure data-model layer, and lifting them into BlueskyKit was
+// rejected — the helpers are tied to a specific PostView shape rather than a
+// generic protocol. If a third Layer-3 module ends up needing them, fold
+// them into a shared `BlueskyUI` extension.
+
+private extension PostView {
+    func withLike(_ likeURI: ATURI?) -> PostView {
+        let wasLiked = viewer?.like != nil
+        let newCount = wasLiked && likeURI == nil ? max(0, likeCount - 1)
+                     : !wasLiked && likeURI != nil ? likeCount + 1
+                     : likeCount
+        let v = PostViewerState(
+            like: likeURI,
+            repost: viewer?.repost,
+            threadMuted: viewer?.threadMuted,
+            replyDisabled: viewer?.replyDisabled,
+            bookmarked: viewer?.bookmarked
+        )
+        return PostView(
+            uri: uri, cid: cid, author: author, record: record, embed: embed,
+            replyCount: replyCount, repostCount: repostCount,
+            likeCount: newCount, quoteCount: quoteCount,
+            indexedAt: indexedAt, labels: labels, viewer: v
+        )
+    }
+
+    func withRepost(_ repostURI: ATURI?) -> PostView {
+        let wasReposted = viewer?.repost != nil
+        let newCount = wasReposted && repostURI == nil ? max(0, repostCount - 1)
+                     : !wasReposted && repostURI != nil ? repostCount + 1
+                     : repostCount
+        let v = PostViewerState(
+            like: viewer?.like,
+            repost: repostURI,
+            threadMuted: viewer?.threadMuted,
+            replyDisabled: viewer?.replyDisabled,
+            bookmarked: viewer?.bookmarked
+        )
+        return PostView(
+            uri: uri, cid: cid, author: author, record: record, embed: embed,
+            replyCount: replyCount, repostCount: newCount,
+            likeCount: likeCount, quoteCount: quoteCount,
+            indexedAt: indexedAt, labels: labels, viewer: v
+        )
+    }
+
+    func withBookmarked(_ bookmarked: Bool) -> PostView {
+        let v = PostViewerState(
+            like: viewer?.like,
+            repost: viewer?.repost,
+            threadMuted: viewer?.threadMuted,
+            replyDisabled: viewer?.replyDisabled,
+            bookmarked: bookmarked
+        )
+        return PostView(
+            uri: uri, cid: cid, author: author, record: record, embed: embed,
+            replyCount: replyCount, repostCount: repostCount,
+            likeCount: likeCount, quoteCount: quoteCount,
+            indexedAt: indexedAt, labels: labels, viewer: v
+        )
     }
 }
 

@@ -38,4 +38,16 @@ public final class ProfileViewModel {
     public func updateProfile(displayName: String?, description: String?) async throws {
         try await store.updateProfile(displayName: displayName, description: description)
     }
+
+    // MARK: - Per-post interactions (#0159)
+
+    public func toggleLike(post: PostView) async { await store.toggleLike(post: post) }
+    public func toggleRepost(post: PostView) async { await store.toggleRepost(post: post) }
+    public func bookmark(post: PostView) async {
+        if post.viewer?.bookmarked == true {
+            await store.unbookmark(post: post)
+        } else {
+            await store.bookmark(post: post)
+        }
+    }
 }

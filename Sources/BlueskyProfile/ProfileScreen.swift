@@ -3,6 +3,7 @@ import OSLog
 import BlueskyCore
 import BlueskyKit
 import BlueskyUI
+import BlueskyComposer
 
 private let profileScreenLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstools.Bluesky", category: "ProfileScreen")
 
@@ -26,6 +27,14 @@ public struct ProfileScreen: View {
     @State private var showEditProfile = false
     @State private var threadURI: ATURI?
     @State private var updateProfileErrorMessage: String?
+
+    // #0159: per-post action targets — drive the reply / repost-or-quote
+    // confirmation dialog the same way `FeedView` does on the home tab. Kept
+    // local to `ProfileScreen` because BlueskyProfile cannot import
+    // BlueskyFeed without forming a Layer-3 ↔ Layer-3 cycle.
+    @State private var replyTarget: PostView?
+    @State private var repostMenuTarget: PostView?
+    @State private var quoteTarget: PostView?
 
     public init(
         actorDID: DID,
@@ -134,6 +143,54 @@ public struct ProfileScreen: View {
             Button("OK") { updateProfileErrorMessage = nil }
         } message: {
             Text(updateProfileErrorMessage ?? "")
+        }
+        // #0159: reply composer for post rows on Profile tabs.
+        .sheet(isPresented: Binding(
+            get: { replyTarget != nil },
+            set: { if !$0 { replyTarget = nil } }
+        )) {
+            if let post = replyTarget {
+                ComposerSheet(
+                    network: network,
+                    accountStore: accountStore,
+                    replyTo: PostRef(uri: post.uri, cid: post.cid),
+                    replyToView: post
+                )
+            }
+        }
+        // #0159: quote-post composer, opened from the repost confirmation dialog.
+        .sheet(isPresented: Binding(
+            get: { quoteTarget != nil },
+            set: { if !$0 { quoteTarget = nil } }
+        )) {
+            if let post = quoteTarget {
+                ComposerSheet(
+                    network: network,
+                    accountStore: accountStore,
+                    quotedPost: PostRef(uri: post.uri, cid: post.cid),
+                    quotedPostView: post
+                )
+            }
+        }
+        // #0159: Repost / Quote chooser, mirrors `FeedView`'s confirmation
+        // dialog. Shown only when the post is not yet reposted; the toggle
+        // path in `postActions(for:)` handles the unrepost case directly.
+        .confirmationDialog("", isPresented: Binding(
+            get: { repostMenuTarget != nil },
+            set: { if !$0 { repostMenuTarget = nil } }
+        ), titleVisibility: .hidden) {
+            Button("Repost") {
+                guard let post = repostMenuTarget else { return }
+                repostMenuTarget = nil
+                Task { await viewModel.toggleRepost(post: post) }
+            }
+            Button("Quote Post") {
+                quoteTarget = repostMenuTarget
+                repostMenuTarget = nil
+            }
+            Button("Cancel", role: .cancel) {
+                repostMenuTarget = nil
+            }
         }
     }
 
@@ -268,9 +325,38 @@ public struct ProfileScreen: View {
         }
     }
 
+    /// Wire up the per-post action callbacks the same way `FeedView` does for
+    /// the home feed (#0159). Reply / repost-or-quote are routed through the
+    /// local sheet/confirmation dialog state above; like, repost-via-toggle
+    /// (when already reposted), and bookmark go straight to the view model's
+    /// optimistic-update mutation methods. Share and the ellipsis menu are
+    /// fully owned by `PostCard` itself — `ShareLink` and the system `Menu` —
+    /// so they don't need callbacks here.
     private func postActions(for item: FeedViewPost) -> PostCard.Actions {
         var a = PostCard.Actions()
         a.onTap = { post in threadURI = post.uri }
+        a.onReply = { post in replyTarget = post }
+        a.onLike = { post in
+            // Use the freshest local snapshot as the basis so a re-render
+            // between tap and dispatch doesn't cause us to act on a stale
+            // viewer state. Mirrors `FeedView.actions(for:vm:)`.
+            let current = viewModel.posts(for: selectedTab)
+                .first(where: { $0.post.uri == post.uri })?.post ?? post
+            Task { await viewModel.toggleLike(post: current) }
+        }
+        a.onRepost = { post in
+            let current = viewModel.posts(for: selectedTab)
+                .first(where: { $0.post.uri == post.uri })?.post ?? post
+            // If the post is already reposted, jump straight to unrepost.
+            // Otherwise show the Repost / Quote chooser.
+            if current.viewer?.repost != nil {
+                Task { await viewModel.toggleRepost(post: current) }
+            } else {
+                repostMenuTarget = current
+            }
+        }
+        a.isBookmarked = item.post.viewer?.bookmarked ?? false
+        a.onBookmark = { post in Task { await viewModel.bookmark(post: post) } }
         return a
     }
 
