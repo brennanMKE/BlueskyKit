@@ -55,8 +55,8 @@ public struct GroupedNotification: Identifiable, Sendable {
 /// Reason values for which we should fetch and render an inline post-text
 /// preview on the notification row (#0079).
 ///
-/// `reply`/`mention`/`quote` preview the actor's new post (notification's
-/// own `uri`); `like`/`repost`/`subscribed-post`/`like-via-repost`/
+/// `reply`/`mention`/`quote`/`subscribed-post` preview the actor's new post
+/// (notification's own `uri`); `like`/`repost`/`like-via-repost`/
 /// `repost-via-repost` preview the viewer's original post (`reasonSubject`).
 private let postPreviewReasons: Set<String> = [
     "reply", "mention", "quote",
@@ -67,7 +67,16 @@ private let postPreviewReasons: Set<String> = [
 
 /// Reasons whose preview source is the notification's own `uri` (the actor's
 /// new post). All other post-preview reasons fall back to `reasonSubject`.
-private let actorPostReasons: Set<String> = ["reply", "mention", "quote"]
+///
+/// `subscribed-post` belongs here (not in the `reasonSubject` bucket): the
+/// notification fires when an account you've subscribed to publishes a new
+/// post, and the post URI is `notif.uri`. RN does the same in
+/// `state/queries/notifications/util.ts:getSubjectUri` (#0158). Without
+/// this, `previewURI` resolves to a usually-nil `reasonSubject` and the row
+/// renders only the actor + reason label with no post body.
+private let actorPostReasons: Set<String> = [
+    "reply", "mention", "quote", "subscribed-post"
+]
 
 // MARK: - NotificationsViewModel
 

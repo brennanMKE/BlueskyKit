@@ -620,13 +620,18 @@ private struct GroupedNotificationRow: View {
 
     private var reasonText: String {
         switch group.reason {
-        case "like":    return "liked your post"
-        case "repost":  return "reposted your post"
-        case "follow":  return "followed you"
-        case "mention": return "mentioned you"
-        case "reply":   return "replied to your post"
-        case "quote":   return "quoted your post"
-        default:        return group.reason
+        case "like":            return "liked your post"
+        case "repost":          return "reposted your post"
+        case "follow":          return "followed you"
+        case "mention":         return "mentioned you"
+        case "reply":           return "replied to your post"
+        case "quote":           return "quoted your post"
+        // Subscribed-post: actor name already leads on the line above, so a
+        // bare "posted" reads naturally as "Matt Massicotte / posted". The
+        // full friendly mapping for every remaining reason (with proper
+        // RN-matching copy and stacked-actor pluralization) lands in #0063.
+        case "subscribed-post": return "posted"
+        default:                return group.reason
         }
     }
 }
