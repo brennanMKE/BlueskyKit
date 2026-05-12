@@ -634,27 +634,52 @@ private struct GroupedNotificationRow: View {
 
     private var iconName: String {
         switch group.reason {
-        case "like":    return "heart.fill"
-        case "repost":  return "arrow.2.squarepath"
-        case "follow":  return "person.fill.badge.plus"
-        case "mention": return "at"
-        case "reply":   return "bubble.left.fill"
-        case "quote":   return "quote.bubble.fill"
+        case "like", "like-via-repost", "feedgen-like":
+            return "heart.fill"
+        case "repost", "repost-via-repost":
+            return "arrow.2.squarepath"
+        case "follow":
+            return "person.fill.badge.plus"
+        case "mention":
+            return "at"
+        case "reply":
+            return "bubble.left.fill"
+        case "quote":
+            return "quote.bubble.fill"
+        case "starterpack-joined":
+            return "person.2.fill"
+        case "subscribed-post":
+            return "bell.badge.fill"
+        case "contact-match":
+            return "person.crop.circle.badge.checkmark"
+        case "verified":
+            return "checkmark.seal.fill"
+        case "unverified":
+            return "xmark.seal.fill"
         // Catch-all bell — flips between filled (unread) and outlined
-        // (seen) per #0082, mirroring the RN reference. Reason-specific
-        // icons above stay as-is; their colors already convey meaning.
-        default:        return group.isRead ? "bell" : "bell.fill"
+        // (seen) per #0082, mirroring the RN reference.
+        default:
+            return group.isRead ? "bell" : "bell.fill"
         }
     }
 
     private var iconColor: Color {
         switch group.reason {
-        case "like":    return .pink
-        case "repost":  return .green
-        case "follow":  return .blue
+        case "like", "like-via-repost", "feedgen-like":
+            return .pink
+        case "repost", "repost-via-repost":
+            return .green
+        case "follow", "starterpack-joined", "contact-match":
+            return .blue
+        case "verified":
+            return .blue
+        case "unverified":
+            return .orange
+        case "subscribed-post":
+            return .accentColor
         // Brand-blue when unread, secondary grey when seen (#0082).
-        // Other reason icons keep their fixed colors above.
-        default:        return group.isRead ? .secondary : theme.colors.link
+        default:
+            return group.isRead ? .secondary : theme.colors.link
         }
     }
 
@@ -679,18 +704,21 @@ private struct GroupedNotificationRow: View {
 
     private var reasonText: String {
         switch group.reason {
-        case "like":            return "liked your post"
-        case "repost":          return "reposted your post"
-        case "follow":          return "followed you"
-        case "mention":         return "mentioned you"
-        case "reply":           return "replied to your post"
-        case "quote":           return "quoted your post"
-        // Subscribed-post: actor name already leads on the line above, so a
-        // bare "posted" reads naturally as "Matt Massicotte / posted". The
-        // full friendly mapping for every remaining reason (with proper
-        // RN-matching copy and stacked-actor pluralization) lands in #0063.
-        case "subscribed-post": return "posted"
-        default:                return group.reason
+        case "like":               return "liked your post"
+        case "repost":             return "reposted your post"
+        case "follow":             return "followed you"
+        case "mention":            return "mentioned you"
+        case "reply":              return "replied to your post"
+        case "quote":              return "quoted your post"
+        case "like-via-repost":    return "liked your repost"
+        case "repost-via-repost":  return "reposted your repost"
+        case "feedgen-like":       return "liked your custom feed"
+        case "starterpack-joined": return "joined via your starter pack"
+        case "subscribed-post":    return "shared a new post"
+        case "contact-match":      return "is in your contacts"
+        case "verified":           return "verified you"
+        case "unverified":         return "removed your verification"
+        default:                   return group.reason
         }
     }
 }
