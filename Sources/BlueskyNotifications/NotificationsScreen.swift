@@ -13,6 +13,16 @@ public struct NotificationsScreen: View {
     /// the parent (`MainTabView`) sets `feedProfileDID` to push a
     /// `ProfileScreen`. `nil` simply disables the tap.
     public var onAuthorTap: ((ProfileBasic) -> Void)?
+    /// Tap callback for the row's post target (the previewed post or the
+    /// notification's reason subject). When provided, the parent owns the
+    /// navigation destination and can push a real `ThreadView` from
+    /// `BlueskyFeed` — `BlueskyNotifications` cannot import `BlueskyFeed`
+    /// directly without forming a cross-feature cycle, so this callback
+    /// hoists the destination wiring up to the app shell (#0160 / #0062).
+    /// When `nil`, the screen falls back to its internal placeholder
+    /// `navigationDestination` (used by previews and any callsite that
+    /// hasn't wired the real thread view yet).
+    public var onPostTap: ((ATURI) -> Void)?
 
     @State private var viewModel: NotificationsViewModel
     @State private var threadURI: ATURI?
@@ -24,11 +34,13 @@ public struct NotificationsScreen: View {
     public init(
         network: any NetworkClient,
         onUnreadCountChange: ((Int) -> Void)? = nil,
-        onAuthorTap: ((ProfileBasic) -> Void)? = nil
+        onAuthorTap: ((ProfileBasic) -> Void)? = nil,
+        onPostTap: ((ATURI) -> Void)? = nil
     ) {
         self.network = network
         self.onUnreadCountChange = onUnreadCountChange
         self.onAuthorTap = onAuthorTap
+        self.onPostTap = onPostTap
         _viewModel = State(wrappedValue: NotificationsViewModel(network: network))
     }
 
@@ -70,13 +82,27 @@ public struct NotificationsScreen: View {
         .onChange(of: viewModel.unreadCount) { _, count in
             onUnreadCountChange?(count)
         }
+        // Internal placeholder destination — only mounted when the parent
+        // hasn't wired its own `onPostTap` (e.g. previews). Real navigation
+        // for the app shell goes through the `onPostTap` callback so the
+        // app target can mount the real `ThreadView` from `BlueskyFeed`.
         .navigationDestination(isPresented: Binding(
-            get: { threadURI != nil },
+            get: { threadURI != nil && onPostTap == nil },
             set: { if !$0 { threadURI = nil } }
         )) {
             if let uri = threadURI {
                 Text("Thread: \(uri.rawValue)").navigationTitle("Thread")
             }
+        }
+    }
+
+    /// Routes a row tap to the parent's post-tap callback when wired,
+    /// falling back to the internal placeholder navigation otherwise.
+    private func handlePostTap(_ uri: ATURI) {
+        if let onPostTap {
+            onPostTap(uri)
+        } else {
+            threadURI = uri
         }
     }
 
@@ -89,7 +115,7 @@ public struct NotificationsScreen: View {
                 GroupedNotificationRow(
                     group: group,
                     postCache: viewModel.postCache,
-                    onTap: { uri in threadURI = uri },
+                    onTap: { uri in handlePostTap(uri) },
                     onAuthorTap: { profile in onAuthorTap?(profile) }
                 )
                 .listRowInsets(EdgeInsets())
