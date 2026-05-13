@@ -23,6 +23,18 @@ public struct NotificationsScreen: View {
     /// `navigationDestination` (used by previews and any callsite that
     /// hasn't wired the real thread view yet).
     public var onPostTap: ((ATURI) -> Void)?
+    /// Tap callback for `feedgen-like` notifications, where the
+    /// `reasonSubject` is an `app.bsky.feed.generator` AT-URI rather than
+    /// a post URI. The parent app shell pushes a `CustomFeedTimelineView`
+    /// from `BlueskyFeed` (#0062). When `nil`, falls back to `onPostTap`
+    /// so previews and unwired callsites still navigate somewhere — even
+    /// if the resulting thread renders empty.
+    public var onFeedTap: ((ATURI) -> Void)?
+    /// Tap callback for `starterpack-joined` notifications, where the
+    /// `reasonSubject` is an `app.bsky.graph.starterpack` AT-URI. The
+    /// parent app shell pushes a `StarterPackScreen` from `BlueskyLists`
+    /// (#0062). When `nil`, falls back to `onPostTap`.
+    public var onStarterPackTap: ((ATURI) -> Void)?
 
     @State private var viewModel: NotificationsViewModel
     @State private var threadURI: ATURI?
@@ -35,12 +47,16 @@ public struct NotificationsScreen: View {
         network: any NetworkClient,
         onUnreadCountChange: ((Int) -> Void)? = nil,
         onAuthorTap: ((ProfileBasic) -> Void)? = nil,
-        onPostTap: ((ATURI) -> Void)? = nil
+        onPostTap: ((ATURI) -> Void)? = nil,
+        onFeedTap: ((ATURI) -> Void)? = nil,
+        onStarterPackTap: ((ATURI) -> Void)? = nil
     ) {
         self.network = network
         self.onUnreadCountChange = onUnreadCountChange
         self.onAuthorTap = onAuthorTap
         self.onPostTap = onPostTap
+        self.onFeedTap = onFeedTap
+        self.onStarterPackTap = onStarterPackTap
         _viewModel = State(wrappedValue: NotificationsViewModel(network: network))
     }
 
@@ -96,9 +112,26 @@ public struct NotificationsScreen: View {
         }
     }
 
-    /// Routes a row tap to the parent's post-tap callback when wired,
-    /// falling back to the internal placeholder navigation otherwise.
+    /// Routes a row tap based on the AT-URI's collection segment so
+    /// `feedgen-like` and `starterpack-joined` notifications land on the
+    /// right destination instead of opening an empty thread (#0062).
+    /// Falls back to the post-tap callback (and ultimately the internal
+    /// placeholder) when no specialised handler is wired.
     private func handlePostTap(_ uri: ATURI) {
+        switch uri.collection {
+        case "app.bsky.feed.generator":
+            if let onFeedTap {
+                onFeedTap(uri)
+                return
+            }
+        case "app.bsky.graph.starterpack":
+            if let onStarterPackTap {
+                onStarterPackTap(uri)
+                return
+            }
+        default:
+            break
+        }
         if let onPostTap {
             onPostTap(uri)
         } else {
