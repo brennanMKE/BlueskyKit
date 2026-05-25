@@ -86,6 +86,10 @@ public struct NotificationsScreen: View {
         // keeps the system nav bar (also inline).
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        // UI-test anchor for the whole notifications surface (#0180). Applied
+        // to the outer VStack so it exists regardless of loading / empty /
+        // error / list state.
+        .accessibilityIdentifier("notifications-screen")
         .task {
             await viewModel.loadInitial()
             await viewModel.markSeen()
@@ -224,6 +228,8 @@ private struct NotificationsFilterStrip: View {
                 .fill(theme.colors.border)
                 .frame(height: 0.5)
         }
+        // UI-test anchor for the All / Mentions filter strip (#0180).
+        .accessibilityIdentifier("notifications-filter-strip")
     }
 
     private func segmentButton(_ value: NotificationFilter, label: String) -> some View {
@@ -282,10 +288,39 @@ private struct GroupedNotificationRow: View {
         // remain on the default grouped layout: RN renders all three as a
         // full Post card, but the simplified "Replied to you" affordance
         // only reads correctly for replies, so we don't generalize it.
-        if group.reason == "reply" {
-            replyRow
-        } else {
-            defaultGroupedRow
+        Group {
+            if group.reason == "reply" {
+                replyRow
+            } else {
+                defaultGroupedRow
+            }
+        }
+        // UI-test anchors (#0180). The row carries `notification-cell` but uses
+        // `.accessibilityElement(children: .contain)` so its child static texts
+        // (actor summary, reason text, timestamp) stay individually queryable —
+        // applying an identifier *and* a value would fold the subtree into a
+        // single combined element and hide that text from the #0063
+        // raw-reason-leak guard. The raw `reason` code is exposed via a
+        // separate zero-size marker (`notification-reason-<reason>`) the
+        // tap-routing tests use to pick a like/repost row (→ thread) vs. a
+        // follow row (→ profile) without coupling to row layout. Multi-actor
+        // groups also drop a `notifications-group-header` marker, locking in
+        // the grouping regression (#0029) without stealing the row's tappable
+        // `notification-cell` identifier.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("notification-cell")
+        .overlay(alignment: .topLeading) {
+            ZStack {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier("notification-reason-\(group.reason)")
+                if group.actors.count >= 2 {
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .accessibilityIdentifier("notifications-group-header")
+                }
+            }
+            .allowsHitTesting(false)
         }
     }
 
