@@ -133,6 +133,10 @@ public struct ThreadView: View {
                 Label("Reply sorting", systemImage: "slider.horizontal.3")
             }
             .help("Reply sorting")
+            // UI-test coupling surface (#0177): the thread suite asserts this
+            // control is present so the reply-sort dropdown (#0140) can't
+            // silently regress.
+            .accessibilityIdentifier("thread-sort-menu")
             .disabled(viewModel.thread == nil)
         }
     }
@@ -492,6 +496,12 @@ private struct TreeReplyRow: View {
                 }
         }
         .background(theme.colors.background)
+        // UI-test coupling surface (#0177): identifies one reply cell in the
+        // tree so the thread suite can count replies below the focal post and
+        // tap the first one to push a deeper thread. `children: .contain`
+        // keeps the nested PostCard buttons individually addressable.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("thread-reply-cell")
     }
 
     /// Curved bottom-left corner that joins the row to the rail to its

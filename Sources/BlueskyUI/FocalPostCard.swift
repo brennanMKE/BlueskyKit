@@ -92,6 +92,12 @@ public struct FocalPostCard: View {
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.lg)
         .background(theme.colors.background)
+        // UI-test coupling surface (#0177): identifies the focal (anchor) post
+        // row so the thread-view suite can assert it rendered and scope the
+        // action-bar lookups to it. `children: .contain` keeps the nested
+        // action buttons individually addressable.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("thread-focal-post")
         .translationPresentation(isPresented: $isTranslating, text: item.post.record.text)
         .toast(isPresented: $showCopiedToast, message: "Copied to clipboard")
     }
@@ -234,25 +240,31 @@ public struct FocalPostCard: View {
             actionButton(
                 icon: "bubble.left",
                 color: theme.colors.textTertiary,
-                helpText: "Reply"
+                helpText: "Reply",
+                identifier: "post-action-reply"
             ) { actions?.onReply?(post) }
 
             actionButton(
                 icon: "arrow.2.squarepath",
                 color: isReposted ? theme.colors.success : theme.colors.textTertiary,
-                helpText: "Repost"
+                helpText: "Repost",
+                identifier: "post-action-repost",
+                accessibilityValue: isReposted ? "reposted" : "not reposted"
             ) { actions?.onRepost?(post) }
 
             actionButton(
                 icon: isLiked ? "heart.fill" : "heart",
                 color: isLiked ? theme.colors.like : theme.colors.textTertiary,
-                helpText: "Like"
+                helpText: "Like",
+                identifier: "post-action-like",
+                accessibilityValue: isLiked ? "liked" : "not liked"
             ) { actions?.onLike?(post) }
 
             actionButton(
                 icon: actions?.isBookmarked == true ? "bookmark.fill" : "bookmark",
                 color: actions?.isBookmarked == true ? theme.colors.link : theme.colors.textTertiary,
-                helpText: actions?.isBookmarked == true ? "Remove Bookmark" : "Bookmark"
+                helpText: actions?.isBookmarked == true ? "Remove Bookmark" : "Bookmark",
+                identifier: "post-action-bookmark"
             ) { actions?.onBookmark?(post) }
 
             if let url = shareURL(for: post) {
@@ -263,6 +275,7 @@ public struct FocalPostCard: View {
                         .help("Share")
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("post-action-share")
             }
 
             Menu {
@@ -323,6 +336,8 @@ public struct FocalPostCard: View {
         icon: String,
         color: Color,
         helpText: String,
+        identifier: String? = nil,
+        accessibilityValue: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -332,6 +347,12 @@ public struct FocalPostCard: View {
                 .help(helpText)
         }
         .buttonStyle(.plain)
+        // UI-test coupling surface (#0177): identifier addresses the button so
+        // the thread suite can assert the focal post's action bar is present
+        // and tappable; the optional value exposes like/repost toggle state.
+        .accessibilityIdentifier(identifier ?? "")
+        .accessibilityLabel(helpText)
+        .modifier(FocalOptionalAccessibilityValue(value: accessibilityValue))
     }
 
     // MARK: - Helpers
@@ -446,6 +467,24 @@ public struct FocalPostCard: View {
             Capsule().fill(theme.colors.backgroundSecondary)
         )
         .accessibilityLabel(text)
+    }
+}
+
+// MARK: - FocalOptionalAccessibilityValue
+
+/// Applies `.accessibilityValue(_:)` only when a non-nil value is supplied.
+/// `accessibilityValue` has no "clear" overload, so this keeps buttons without
+/// a toggle state (reply, share) free of a spurious value while letting the
+/// like / repost buttons expose their state for #0177's thread-view tests.
+/// A focal-post-local twin of `PostCard`'s file-private modifier.
+private struct FocalOptionalAccessibilityValue: ViewModifier {
+    let value: String?
+    func body(content: Content) -> some View {
+        if let value {
+            content.accessibilityValue(value)
+        } else {
+            content
+        }
     }
 }
 
