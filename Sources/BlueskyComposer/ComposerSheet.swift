@@ -129,6 +129,10 @@ public struct ComposerSheet: View {
                 .padding(.horizontal, 16)
             }
             .navigationTitle("New Post")
+            // UI-test handle for the composer sheet root (#0182). Lets the UI
+            // test suite assert the sheet opened / dismissed without coupling
+            // to the navigation title text.
+            .accessibilityIdentifier("composer-sheet")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -141,6 +145,8 @@ public struct ComposerSheet: View {
                             dismiss()
                         }
                     }
+                    // UI-test handle for the cancel affordance (#0182).
+                    .accessibilityIdentifier("composer-cancel-button")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     HStack(spacing: 12) {
@@ -153,6 +159,9 @@ public struct ComposerSheet: View {
                         }
                         .disabled(!viewModel.canPost)
                         .fontWeight(.semibold)
+                        // UI-test handle for the submit button so its
+                        // enabled/disabled state is assertable (#0182).
+                        .accessibilityIdentifier("composer-post-button")
                     }
                 }
             }
@@ -259,6 +268,8 @@ public struct ComposerSheet: View {
             .frame(minHeight: 120)
             .scrollContentBackground(.hidden)
             .onChange(of: viewModel.text) { viewModel.onTextChange() }
+            // UI-test handle for the primary post text editor (#0182).
+            .accessibilityIdentifier("composer-text-editor")
     }
 
     // MARK: - Mention suggestions
@@ -1010,6 +1021,13 @@ public struct ComposerSheet: View {
 
     private var charCounter: some View {
         CharProgressRing(count: viewModel.characterCount, max: 300)
+            // UI-test handle for the character counter (#0182). The ring is an
+            // ignore-children accessibility element, so we re-state an explicit
+            // value carrying the raw "<used>/<max>" count the UI test asserts
+            // against. This overrides CharProgressRing's "N remaining of 300"
+            // value with a format the test can parse deterministically.
+            .accessibilityIdentifier("composer-char-count")
+            .accessibilityValue("\(viewModel.characterCount)/300")
     }
 }
 
