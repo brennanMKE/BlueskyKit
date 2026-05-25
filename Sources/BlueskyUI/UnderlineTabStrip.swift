@@ -26,14 +26,22 @@ public struct UnderlineTabStrip: View {
     @Binding private var selectedID: String
     private let tabs: [UnderlineTab]
     private let onTap: ((UnderlineTab) -> Void)?
+    /// Optional accessibility-identifier prefix. When supplied, each tab button
+    /// is tagged `"<prefix>-<tab.id>-tab"` so UI tests can address an
+    /// individual tab without coupling to its localized label (#0178 — the
+    /// profile suite asserts on `profile-posts-tab`). `nil` for the home feed
+    /// strip, which keeps the default behavior of matching on the tab label.
+    private let accessibilityIDPrefix: String?
 
     public init(
         tabs: [UnderlineTab],
         selectedID: Binding<String>,
+        accessibilityIDPrefix: String? = nil,
         onTap: ((UnderlineTab) -> Void)? = nil
     ) {
         self.tabs = tabs
         self._selectedID = selectedID
+        self.accessibilityIDPrefix = accessibilityIDPrefix
         self.onTap = onTap
     }
 
@@ -83,6 +91,30 @@ public struct UnderlineTabStrip: View {
         }
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.15), value: isSelected)
+        .modifier(OptionalTabAccessibilityID(
+            identifier: accessibilityIDPrefix.map { "\($0)-\(tab.id)-tab" },
+            isSelected: isSelected
+        ))
+    }
+}
+
+// MARK: - OptionalTabAccessibilityID
+
+/// Applies an `.accessibilityIdentifier(_:)` (and a selected/not-selected
+/// accessibility value) only when an identifier is supplied. Keeps the home
+/// feed strip — which addresses tabs by label — free of identifiers while
+/// letting the profile strip expose `profile-<tab>-tab` for #0178.
+private struct OptionalTabAccessibilityID: ViewModifier {
+    let identifier: String?
+    let isSelected: Bool
+    func body(content: Content) -> some View {
+        if let identifier {
+            content
+                .accessibilityIdentifier(identifier)
+                .accessibilityValue(isSelected ? "selected" : "not selected")
+        } else {
+            content
+        }
     }
 }
 

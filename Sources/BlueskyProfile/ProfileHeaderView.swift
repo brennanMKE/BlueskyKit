@@ -135,6 +135,10 @@ public struct ProfileHeaderView: View {
                     switch phase {
                     case .success(let image):
                         image.resizable().scaledToFill()
+                            // UI-test coupling surface (#0178): a real banner
+                            // image exposes `profile-banner`; the placeholder
+                            // below exposes `profile-banner-placeholder`.
+                            .accessibilityIdentifier("profile-banner")
                     default:
                         bannerPlaceholder
                     }
@@ -157,6 +161,7 @@ public struct ProfileHeaderView: View {
 
     private var bannerPlaceholder: some View {
         Rectangle().fill(Color.secondary.opacity(0.2))
+            .accessibilityIdentifier("profile-banner-placeholder")
     }
 
     // MARK: - Avatar + action buttons (macOS layout)
@@ -167,6 +172,7 @@ public struct ProfileHeaderView: View {
                 .overlay(Circle().stroke(Color.white.opacity(0.85), lineWidth: 3))
                 .offset(y: -24)
                 .padding(.leading, 16)
+                .accessibilityIdentifier("profile-avatar")
             Spacer()
             actionButtons
                 .padding(.trailing, 16)
@@ -180,6 +186,7 @@ public struct ProfileHeaderView: View {
         if isOwnProfile {
             Button("Edit Profile", action: onEditProfile)
                 .buttonStyle(.bordered)
+                .accessibilityIdentifier("profile-edit-button")
         } else if let viewer = profile?.viewer {
             HStack(spacing: 8) {
                 followButton(viewer: viewer)
@@ -190,12 +197,16 @@ public struct ProfileHeaderView: View {
 
     @ViewBuilder
     private func followButton(viewer: ProfileViewerState) -> some View {
+        // UI-test coupling surface (#0178): the other-profile suite asserts
+        // `profile-follow-button` exists and is hittable (Follow OR Following).
         if viewer.following != nil {
             Button("Following", action: onUnfollow)
                 .buttonStyle(.bordered)
+                .accessibilityIdentifier("profile-follow-button")
         } else {
             Button("Follow", action: onFollow)
                 .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("profile-follow-button")
         }
     }
 
@@ -230,6 +241,7 @@ public struct ProfileHeaderView: View {
             AvatarView(url: profile?.avatar, handle: profile?.handle.rawValue ?? "", size: 84)
                 .offset(y: -42) // half-overlap: avatar size 84 / 2
                 .padding(.leading, 16)
+                .accessibilityIdentifier("profile-avatar")
             Spacer()
             iosActionRow
                 .padding(.trailing, 16)
@@ -247,6 +259,7 @@ public struct ProfileHeaderView: View {
                 Button("Edit Profile", action: onEditProfile)
                     .buttonStyle(.bordered)
                     .clipShape(Capsule())
+                    .accessibilityIdentifier("profile-edit-button")
                 ownProfileEllipsisMenu
             }
         } else if let viewer = profile?.viewer {
@@ -270,6 +283,9 @@ public struct ProfileHeaderView: View {
                 .background(Color.secondary.opacity(0.15), in: Circle())
                 .overlay(alignment: .topTrailing) { blueDotIndicator }
         }
+        // UI-test coupling surface (#0178): the own-profile suite taps this to
+        // assert the Settings / Saved / My Lists / Moderation menu items exist.
+        .accessibilityIdentifier("profile-menu-button")
     }
 
     /// 6pt blue indicator dot for "unviewed menu items" — currently always
@@ -290,6 +306,7 @@ public struct ProfileHeaderView: View {
             HStack(spacing: 4) {
                 Text(profile?.displayName ?? profile?.handle.rawValue ?? "")
                     .font(.title3).fontWeight(.bold)
+                    .accessibilityIdentifier("profile-display-name")
                 if profile?.labels.contains(where: { $0.val == "verified" }) == true {
                     Image(systemName: "checkmark.seal.fill")
                         .foregroundStyle(.blue)
@@ -299,6 +316,7 @@ public struct ProfileHeaderView: View {
             Text("@\(profile?.handle.rawValue ?? "")")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .accessibilityIdentifier("profile-handle")
         }
         .padding(.horizontal, 16)
         .padding(.top, 28)
@@ -336,8 +354,14 @@ public struct ProfileHeaderView: View {
     private var statsRow: some View {
         HStack(spacing: 20) {
             statView(count: profile?.followersCount ?? 0, label: "followers")
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("profile-followers-count")
             statView(count: profile?.followsCount ?? 0, label: "following")
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("profile-following-count")
             statView(count: profile?.postsCount ?? 0, label: "posts")
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("profile-posts-count")
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)

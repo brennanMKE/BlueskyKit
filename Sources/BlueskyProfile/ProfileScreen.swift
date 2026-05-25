@@ -85,6 +85,13 @@ public struct ProfileScreen: View {
         // Feeds tab. Instead, the bleed-up is now owned by `ProfileHeaderView`'s
         // `bannerSection` via a `GeometryReader`-based negative top padding —
         // see the comment there.
+        // UI-test coupling surface (#0178): identifies the whole profile page so
+        // the suite can assert `profile-screen` exists after a feed author tap
+        // pushes another user's profile, and that it's gone after back nav.
+        // `children: .contain` keeps the nested header elements, tab buttons,
+        // and post cells individually addressable.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("profile-screen")
         .refreshable {
             await viewModel.loadProfile()
             await loadCurrentTab(selectedTab)
@@ -233,7 +240,11 @@ public struct ProfileScreen: View {
                         selectedTab = tab
                     }
                 }
-            )
+            ),
+            // UI-test coupling surface (#0178): tags each profile tab as
+            // `profile-<id>-tab` (e.g. `profile-posts-tab`) so the suite can
+            // assert the Posts tab exists and is selected by default.
+            accessibilityIDPrefix: "profile"
         )
     }
 

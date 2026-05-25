@@ -151,6 +151,9 @@ public struct PostCard: View {
             size: 44
         )
         .onTapGesture { actions?.onAuthorTap?(item.post.author) }
+        // UI-test coupling surface (#0178): the other-profile suite taps this
+        // to navigate to a post author's profile from the home feed (#0046).
+        .accessibilityIdentifier("post-author-avatar")
     }
 
     private var authorHeader: some View {
