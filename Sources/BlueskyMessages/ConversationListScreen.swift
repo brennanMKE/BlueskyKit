@@ -45,6 +45,10 @@ public struct ConversationListScreen: View {
             }
         }
         .navigationTitle("Messages")
+        // UI-test anchor for the whole conversation inbox surface (#0181).
+        // Applied to the outer Group so it exists across the loading / empty /
+        // error / list states the screen can be in.
+        .accessibilityIdentifier("conversation-list-screen")
         .task { await viewModel.loadInitial() }
         .navigationDestination(isPresented: Binding(
             get: { selectedConvo != nil },
@@ -99,6 +103,13 @@ public struct ConversationListScreen: View {
                     ConvoRow(convo: convo, viewerDID: viewerDID)
                 }
                 .buttonStyle(.plain)
+                // UI-test anchors (#0181). `children: .contain` keeps the row's
+                // avatar / name / preview sub-elements individually queryable so
+                // the conversation-cell composition test can assert each one,
+                // while the row itself stays the tappable target the
+                // `openFirstConversation` intent drives.
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("conversation-cell")
                 .listRowInsets(EdgeInsets())
                 .swipeActions(edge: .trailing) {
                     Button("Leave", role: .destructive) {
@@ -163,12 +174,14 @@ private struct ConvoRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             avatarStack
+                .accessibilityIdentifier("conversation-avatar")
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(convoName)
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .lineLimit(1)
+                        .accessibilityIdentifier("conversation-name")
                     Spacer(minLength: 4)
                     if let stamp = relativeTimestamp {
                         Text(stamp)
@@ -185,6 +198,7 @@ private struct ConvoRow: View {
                     .truncationMode(.tail)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("conversation-preview")
             }
             if convo.unreadCount > 0 {
                 BadgeView(count: convo.unreadCount)

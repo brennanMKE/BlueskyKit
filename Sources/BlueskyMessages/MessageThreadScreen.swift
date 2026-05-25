@@ -84,6 +84,11 @@ public struct MessageThreadScreen: View {
             Divider()
             composeBar
         }
+        // UI-test anchor for the whole message thread surface (#0181). Applied
+        // to the outer VStack so it exists regardless of load state, and so the
+        // thread can be confirmed present after the `openFirstConversation`
+        // intent pushes it.
+        .accessibilityIdentifier("conversation-thread-screen")
         .navigationTitle(convoTitle)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -562,6 +567,11 @@ public struct MessageThreadScreen: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        // UI-test anchor for the compose bar (#0181). `children: .contain`
+        // keeps the photo / text field / send button individually hittable
+        // while letting the test assert the bar itself exists and is hittable.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("message-compose-bar")
     }
 
     // MARK: - Image sending
@@ -755,6 +765,12 @@ private struct MessageBubble: View {
             reactionQuickPicker
         }
         .translationPresentation(isPresented: $isTranslating, text: message.text)
+        // UI-test anchors (#0181). `children: .contain` keeps the bubble's
+        // sender-row / text / reaction sub-elements queryable so the group
+        // sender-row presence test can find `message-sender-row` inside a
+        // bubble, while the bubble itself stays countable as `message-bubble`.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("message-bubble")
     }
 
     @ViewBuilder
@@ -938,6 +954,11 @@ private struct MessageBubble: View {
             .truncationMode(.tail)
             .padding(.leading, 4)
             .padding(.bottom, 1)
+            // UI-test anchor for the group-chat sender info row (#0181 /
+            // regression guard for #0105). Only rendered on the first bubble of
+            // a non-self run in a group, so its presence proves the sender row
+            // is wired.
+            .accessibilityIdentifier("message-sender-row")
     }
 
     private var embeddedImages: [EmbedImageView]? {
@@ -1031,6 +1052,10 @@ private struct DateDivider: View {
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Messages from \(label)")
+        // UI-test anchor for the per-day date divider (#0181 / regression guard
+        // for #0107). Present only when the thread spans more than one calendar
+        // day (or on the first row), so the date-divider test conditions on it.
+        .accessibilityIdentifier("message-date-divider")
     }
 
     /// "Today at 3:42 PM" / "Yesterday at 3:42 PM" / "Mon, Mar 4 at 3:42 PM".
