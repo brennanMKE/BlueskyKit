@@ -93,6 +93,12 @@ public struct PostCard: View {
             .padding(.vertical, Spacing.sm)
         }
         .background(theme.colors.background)
+        // UI-test coupling surface (#0176): identify the post cell and expose
+        // its key text as the accessibility label so the suite can assert the
+        // cell exists and renders content. `children: .contain` keeps the
+        // nested action buttons individually addressable.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("post-cell")
         // Drives the system Translate sheet (#0143). Mirrors the RN
         // `TranslatedPost` flow: tapping the inline "Translate" link or the
         // ellipsis-menu "Translate post" item flips this flag, which presents
@@ -237,28 +243,37 @@ public struct PostCard: View {
                 icon: "bubble.left",
                 count: post.replyCount,
                 color: theme.colors.textTertiary,
-                helpText: "Reply"
+                helpText: "Reply",
+                identifier: "post-action-reply"
             ) { actions?.onReply?(post) }
 
             actionButton(
                 icon: "arrow.2.squarepath",
                 count: post.repostCount,
                 color: isReposted ? theme.colors.success : theme.colors.textTertiary,
-                helpText: "Repost"
+                helpText: "Repost",
+                identifier: "post-action-repost",
+                accessibilityValue: isReposted ? "reposted" : "not reposted"
             ) { actions?.onRepost?(post) }
 
             actionButton(
                 icon: isLiked ? "heart.fill" : "heart",
                 count: post.likeCount,
                 color: isLiked ? theme.colors.like : theme.colors.textTertiary,
-                helpText: "Like"
+                helpText: "Like",
+                identifier: "post-action-like",
+                // UI-test coupling surface (#0176): the like test taps this
+                // button and asserts the value flips, so the local-state
+                // regressions (#0041 / #0053) surface on the next CI run.
+                accessibilityValue: isLiked ? "liked" : "not liked"
             ) { actions?.onLike?(post) }
 
             actionButton(
                 icon: actions?.isBookmarked == true ? "bookmark.fill" : "bookmark",
                 count: nil,
                 color: actions?.isBookmarked == true ? theme.colors.link : theme.colors.textTertiary,
-                helpText: actions?.isBookmarked == true ? "Remove Bookmark" : "Bookmark"
+                helpText: actions?.isBookmarked == true ? "Remove Bookmark" : "Bookmark",
+                identifier: "post-action-bookmark"
             ) { actions?.onBookmark?(post) }
 
             if let url = shareURL(for: post) {
@@ -271,6 +286,7 @@ public struct PostCard: View {
                     .help("Share")
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("post-action-share")
             }
 
             Menu {
@@ -402,6 +418,8 @@ public struct PostCard: View {
         count: Int?,
         color: Color,
         helpText: String = "",
+        identifier: String? = nil,
+        accessibilityValue: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -417,8 +435,31 @@ public struct PostCard: View {
             .help(helpText)
         }
         .buttonStyle(.plain)
+        // UI-test coupling surface (#0176). Identifier addresses the button;
+        // the accessibility value (when supplied) lets a test assert toggle
+        // state flips after a tap. The help text doubles as the a11y label.
+        .accessibilityIdentifier(identifier ?? "")
+        .accessibilityLabel(helpText)
+        .modifier(OptionalAccessibilityValue(value: accessibilityValue))
     }
 
+}
+
+// MARK: - OptionalAccessibilityValue
+
+/// Applies `.accessibilityValue(_:)` only when a non-nil value is supplied.
+/// `accessibilityValue` has no "clear" overload, so this keeps buttons without
+/// a toggle state (reply, share) free of a spurious value while letting the
+/// like / repost buttons expose their state for #0176's interaction tests.
+private struct OptionalAccessibilityValue: ViewModifier {
+    let value: String?
+    func body(content: Content) -> some View {
+        if let value {
+            content.accessibilityValue(value)
+        } else {
+            content
+        }
+    }
 }
 
 #Preview("PostCard - Light") {

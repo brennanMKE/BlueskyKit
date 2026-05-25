@@ -175,6 +175,9 @@ public struct ThreadView: View {
                 replyTree(of: node, focalURI: focalURI)
             }
         }
+        // UI-test coupling surface (#0176): the reply-navigation test asserts
+        // this identifier exists once the thread has pushed.
+        .accessibilityIdentifier("thread-view")
         .refreshable { await viewModel.load() }
         .navigationDestination(item: $selectedReplyURI) { uri in
             ThreadView(
