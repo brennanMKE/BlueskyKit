@@ -129,6 +129,8 @@ public struct AccountSettingsScreen: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("account-settings-screen")
         .navigationTitle("Account")
         .task { await model.refreshFromServer() }
         .sheet(item: $presentingSheet) { kind in

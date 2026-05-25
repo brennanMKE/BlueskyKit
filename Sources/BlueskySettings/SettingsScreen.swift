@@ -70,24 +70,28 @@ public struct SettingsScreen: View {
                 } label: {
                     Label("Account", systemImage: "person.circle")
                 }
+                .accessibilityIdentifier("settings-account-row")
 
                 NavigationLink {
                     FindContactsScreen(network: network, accountStore: viewModel.accountStore)
                 } label: {
                     Label("Find Friends", systemImage: "person.2")
                 }
+                .accessibilityIdentifier("settings-find-friends-row")
 
                 NavigationLink {
                     AppPasswordsScreen(network: network)
                 } label: {
                     Label("App Passwords", systemImage: "key")
                 }
+                .accessibilityIdentifier("settings-app-passwords-row")
 
                 Button(role: .destructive) {
                     onSignOut()
                 } label: {
                     Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                 }
+                .accessibilityIdentifier("settings-sign-out-button")
             }
 
             Section("Appearance") {
@@ -96,6 +100,7 @@ public struct SettingsScreen: View {
                 } label: {
                     Label("Appearance", systemImage: "paintpalette")
                 }
+                .accessibilityIdentifier("settings-appearance-row")
             }
 
             Section("Preferences") {
@@ -104,18 +109,21 @@ public struct SettingsScreen: View {
                 } label: {
                     Label("Languages", systemImage: "globe")
                 }
+                .accessibilityIdentifier("settings-languages-row")
 
                 NavigationLink {
                     ContentSettingsScreen(viewModel: viewModel, network: network)
                 } label: {
                     Label("Content & Media", systemImage: "photo.on.rectangle")
                 }
+                .accessibilityIdentifier("settings-content-row")
 
                 NavigationLink {
                     AccessibilitySettingsScreen(viewModel: viewModel)
                 } label: {
                     Label("Accessibility", systemImage: "accessibility")
                 }
+                .accessibilityIdentifier("settings-accessibility-row")
             }
 
             Section("Notifications") {
@@ -124,6 +132,7 @@ public struct SettingsScreen: View {
                 } label: {
                     Label("Notifications", systemImage: "bell")
                 }
+                .accessibilityIdentifier("settings-notifications-row")
             }
 
             Section("Privacy") {
@@ -136,6 +145,7 @@ public struct SettingsScreen: View {
                 } label: {
                     Label("Privacy & Security", systemImage: "lock.shield")
                 }
+                .accessibilityIdentifier("settings-privacy-row")
 
                 if let onMod = onModerationTap {
                     Button {
@@ -143,6 +153,7 @@ public struct SettingsScreen: View {
                     } label: {
                         Label("Moderation", systemImage: "shield")
                     }
+                    .accessibilityIdentifier("settings-moderation-row")
                 }
             }
 
@@ -153,14 +164,21 @@ public struct SettingsScreen: View {
                     Label("Help", systemImage: "questionmark.circle")
                 }
                 .accessibilityHint(Text("Opens helpdesk in browser"))
+                .accessibilityIdentifier("settings-help-row")
 
                 NavigationLink {
                     AboutScreen(cache: cache, currentAccount: currentAccount)
                 } label: {
                     Label("About", systemImage: "info.circle")
                 }
+                .accessibilityIdentifier("settings-about-row")
             }
         }
+        // UI-test coupling surface (#0183): `children: .contain` exposes the
+        // List as one queryable element carrying `settings-screen` while
+        // keeping each row individually addressable by its own identifier.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("settings-screen")
         .navigationTitle("Settings")
         .onAppear { viewModel.load() }
     }

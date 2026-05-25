@@ -58,6 +58,8 @@ public struct MutesScreen: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("moderation-mutes-screen")
         .navigationTitle("Muted Accounts")
         .searchable(text: $searchText, prompt: "Search…")
         .refreshable { await viewModel.loadMutes() }

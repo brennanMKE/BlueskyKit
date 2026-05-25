@@ -58,6 +58,8 @@ public struct BlocksScreen: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("moderation-blocks-screen")
         .navigationTitle("Blocked Accounts")
         .searchable(text: $searchText, prompt: "Search…")
         .refreshable { await viewModel.loadBlocks() }

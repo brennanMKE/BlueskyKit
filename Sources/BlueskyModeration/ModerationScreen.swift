@@ -58,6 +58,11 @@ public struct ModerationScreen: View {
             contentFiltersSection
             advancedSection
         }
+        // UI-test coupling surface (#0183): `children: .contain` exposes the
+        // List as one queryable element carrying `moderation-screen` while
+        // keeping each row individually addressable by its own identifier.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("moderation-screen")
         .navigationTitle("Moderation")
         .task {
             await viewModel.loadPreferences()
@@ -85,30 +90,35 @@ public struct ModerationScreen: View {
             } label: {
                 Label("Interaction settings", systemImage: "square.and.pencil")
             }
+            .accessibilityIdentifier("moderation-interaction-row")
 
             NavigationLink {
                 MutedWordsScreen(network: network)
             } label: {
                 Label("Muted words & tags", systemImage: "line.3.horizontal.decrease.circle")
             }
+            .accessibilityIdentifier("moderation-muted-words-row")
 
             NavigationLink {
                 ModerationListsScreen(network: network, accountStore: accountStore)
             } label: {
                 Label("Moderation lists", systemImage: "person.3")
             }
+            .accessibilityIdentifier("moderation-lists-row")
 
             NavigationLink {
                 MutesScreen(network: network, accountStore: accountStore)
             } label: {
                 Label("Muted accounts", systemImage: "speaker.slash")
             }
+            .accessibilityIdentifier("moderation-mutes-row")
 
             NavigationLink {
                 BlocksScreen(network: network, accountStore: accountStore)
             } label: {
                 Label("Blocked accounts", systemImage: "nosign")
             }
+            .accessibilityIdentifier("moderation-blocks-row")
 
             Button {
                 showVerificationSettingsPlaceholder = true
@@ -147,6 +157,7 @@ public struct ModerationScreen: View {
             } label: {
                 Label("Configure content filters", systemImage: "eye.slash")
             }
+            .accessibilityIdentifier("moderation-content-filters-row")
         } header: {
             Text("Content filters")
         }

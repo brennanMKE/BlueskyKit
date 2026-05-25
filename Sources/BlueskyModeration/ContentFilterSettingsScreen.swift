@@ -78,6 +78,8 @@ public struct ContentFilterSettingsScreen: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("moderation-content-filters-screen")
         .navigationTitle("Content Filters")
         .task {
             await viewModel.loadPreferences()
