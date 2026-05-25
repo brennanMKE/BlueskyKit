@@ -39,6 +39,8 @@ public struct SearchScreen: View {
             Divider()
             content
         }
+        // #0179: UI-test anchor for the search surface root.
+        .accessibilityIdentifier("search-screen")
         // #0090: on iOS the slim `BlueskyTopBar` mounted by `MainTabView`
         // (`iosSearchTopBar`) replaces the giant `.large` "Search" headline,
         // so suppress the system nav bar's display mode to inline. macOS
@@ -63,6 +65,8 @@ public struct SearchScreen: View {
                 .foregroundStyle(.secondary)
             TextField("Search people, posts, feeds…", text: $viewModel.query)
                 .textFieldStyle(.plain)
+                // #0179: UI-test anchor for the search text field.
+                .accessibilityIdentifier("search-field")
                 .autocorrectionDisabled()
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
@@ -110,6 +114,8 @@ public struct SearchScreen: View {
                         .font(.headline)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
+                        // #0179: UI-test anchor for the trending discovery section.
+                        .accessibilityIdentifier("search-trending-section")
                     ForEach(viewModel.trendingTopics, id: \.topic) { topic in
                         Button {
                             let tag = topic.topic
@@ -137,6 +143,8 @@ public struct SearchScreen: View {
                             ActorRow(actor: actor)
                         }
                         .buttonStyle(.plain)
+                        // #0179: UI-test anchor for a suggested-account row.
+                        .accessibilityIdentifier("search-suggested-account")
                         Divider().padding(.leading, 68)
                     }
                 } else if viewModel.isLoading {
@@ -156,6 +164,8 @@ public struct SearchScreen: View {
             }
         }
         .pickerStyle(.segmented)
+        // #0179: UI-test anchor for the result-tab strip (People / Posts / Feeds).
+        .accessibilityIdentifier("search-tab-strip")
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .onChange(of: viewModel.activeTab) { _, _ in
@@ -185,6 +195,8 @@ public struct SearchScreen: View {
                 ForEach(viewModel.actors, id: \.did) { actor in
                     Button { onActorTap?(actor) } label: { ActorRow(actor: actor) }
                         .buttonStyle(.plain)
+                        // #0179: UI-test anchor for a People-tab result row.
+                        .accessibilityIdentifier("search-account-result")
                     Divider().padding(.leading, 68)
                         .onAppear {
                             if actor.did == viewModel.actors.last?.did {
