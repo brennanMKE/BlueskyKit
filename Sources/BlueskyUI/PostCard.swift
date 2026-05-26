@@ -86,6 +86,25 @@ public struct PostCard: View {
                     .onTapGesture {
                         actions?.onTap?(item.post)
                     }
+                    // UI-test / VoiceOver coupling surface (#0184): expose the
+                    // open-thread tap region as a discrete, button-trait element
+                    // carrying an explicit accessibility action that invokes the
+                    // same `onTap`. A synthetic XCUITest `.tap()` (and a
+                    // VoiceOver activate) fires `.accessibilityAction`, whereas a
+                    // bare `.onTapGesture` is not reliably triggered by a
+                    // synthetic tap on a combined a11y element. Tapping the
+                    // whole-cell `post-cell` container is also unreliable — its
+                    // centre can land on the avatar column, an image embed
+                    // (which has its own button), or the action bar, none of
+                    // which open the thread. Only surfaced when an `onTap` is
+                    // wired so read-only cards (e.g. notification rows) don't
+                    // advertise a non-functional target.
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction {
+                        actions?.onTap?(item.post)
+                    }
+                    .accessibilityIdentifier(actions?.onTap != nil ? "post-open-thread" : "")
                     actionBar
                 }
             }
