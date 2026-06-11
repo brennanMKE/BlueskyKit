@@ -49,6 +49,21 @@ public final class ListsStore: ListsStoring {
 
     private var cursor: Cursor?
 
+    /// Optimistically-inserted lists created in this session whose server
+    /// copies have not yet appeared in a `getLists` response. The AppView
+    /// indexes `createRecord` writes asynchronously, so the immediate
+    /// post-create re-fetch routinely returns a stale set (#0203).
+    /// Reconciliation keeps these entries alive across stale re-fetches and
+    /// drops the local copy once the indexed server copy shows up
+    /// (de-duped by URI). Newest first, matching `getLists` ordering.
+    private var pendingCreated: [ListView] = []
+
+    /// URIs of lists deleted in this session. A stale `getLists` response
+    /// can still contain a record after the PDS delete succeeded;
+    /// reconciliation filters these out so the deleted row doesn't
+    /// resurrect until the AppView catches up.
+    private var deletedURIs: Set<ATURI> = []
+
     private let network: any NetworkClient
     private let accountStore: any AccountStore
 
@@ -75,7 +90,7 @@ public final class ListsStore: ListsStoring {
                 lexicon: "app.bsky.graph.getLists",
                 params: ["actor": actorDID, "limit": "50"]
             )
-            lists = resp.lists
+            lists = reconcile(resp.lists)
             cursor = resp.cursor
         } catch {
             logger.error("lists load error: \(error, privacy: .public)")
@@ -90,11 +105,31 @@ public final class ListsStore: ListsStoring {
                 lexicon: "app.bsky.graph.getLists",
                 params: ["actor": actorDID, "limit": "50", "cursor": cursor]
             )
-            lists.append(contentsOf: resp.lists)
+            // De-dupe against what's already shown (an optimistic insert may
+            // surface on a later page) and drop tombstoned lists.
+            let existing = Set(lists.map(\.uri))
+            let page = resp.lists.filter {
+                !deletedURIs.contains($0.uri) && !existing.contains($0.uri)
+            }
+            let pageURIs = Set(resp.lists.map(\.uri))
+            pendingCreated.removeAll { pageURIs.contains($0.uri) }
+            lists.append(contentsOf: page)
             self.cursor = resp.cursor
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    /// Merges a fresh first-page `getLists` response with the session's
+    /// optimistic state: tombstoned (locally deleted) lists are filtered
+    /// out, and optimistic inserts the AppView hasn't indexed yet are kept
+    /// at the top (`getLists` returns newest-first). Once the server copy
+    /// of an optimistic insert arrives it wins and local tracking stops.
+    private func reconcile(_ serverLists: [ListView]) -> [ListView] {
+        let kept = serverLists.filter { !deletedURIs.contains($0.uri) }
+        let serverURIs = Set(kept.map(\.uri))
+        pendingCreated.removeAll { serverURIs.contains($0.uri) }
+        return pendingCreated + kept
     }
 
     // MARK: - Create list
@@ -116,13 +151,61 @@ public final class ListsStore: ListsStoring {
                 collection: "app.bsky.graph.list",
                 record: record
             )
-            let _: CreateRecordResponse = try await network.post(
+            let resp: CreateRecordResponse = try await network.post(
                 lexicon: "com.atproto.repo.createRecord", body: req
             )
+            // Optimistic insert (#0203). The AppView indexes the new record
+            // asynchronously, so an immediate `getLists` re-fetch usually
+            // returns the stale pre-create set and the new list would stay
+            // invisible. RN sidesteps the race by polling `getList` until
+            // the AppView has the record before invalidating its lists
+            // query; we instead surface a locally-built ListView right away
+            // and reconcile (de-dupe by URI) when the indexed copy arrives.
+            let optimistic = ListView(
+                uri: resp.uri,
+                cid: resp.cid,
+                creator: await localCreatorProfile(did: viewerDID),
+                name: name,
+                purpose: purpose,
+                description: description,
+                avatar: nil,
+                labels: [],
+                indexedAt: record.createdAt,
+                listItemCount: 0,
+                viewer: nil
+            )
+            pendingCreated.insert(optimistic, at: 0)
+            lists.insert(optimistic, at: 0)
+            // Still re-fetch: if indexing already caught up the server copy
+            // replaces the optimistic one; if not, reconciliation keeps it.
             await loadLists(actorDID: viewerDID.rawValue)
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    /// Builds a `ProfileView` for the signed-in account from the locally
+    /// stored session (no network) so an optimistic `ListView` can carry a
+    /// creator without waiting on the AppView. A keychain read failure must
+    /// not abort the optimistic insert — the record already exists on the
+    /// PDS — so this falls back to a DID-only profile and logs.
+    private func localCreatorProfile(did: DID) async -> ProfileView {
+        var account: Account?
+        do {
+            account = try await accountStore.load(did: did)?.account
+        } catch {
+            logger.warning("createList: could not load stored account for optimistic creator: \(error.localizedDescription, privacy: .public)")
+        }
+        return ProfileView(
+            did: did,
+            handle: account?.handle ?? Handle(rawValue: did.rawValue),
+            displayName: account?.displayName,
+            description: nil,
+            avatar: account?.avatarURL,
+            labels: [],
+            indexedAt: nil,
+            viewer: nil
+        )
     }
 
     // MARK: - Delete list
@@ -145,6 +228,10 @@ public final class ListsStore: ListsStoring {
                 lexicon: "com.atproto.repo.deleteRecord",
                 body: DeleteRecordRequest(repo: viewerDID.rawValue, collection: "app.bsky.graph.list", rkey: rkey)
             )
+            // Tombstone so a stale `getLists` response (AppView not yet
+            // caught up with the delete) can't resurrect the row (#0203).
+            deletedURIs.insert(uri)
+            pendingCreated.removeAll { $0.uri == uri }
         } catch {
             // Restore the list so the UI doesn't lie about its absence.
             if let removed { lists.insert(removed, at: 0) }
