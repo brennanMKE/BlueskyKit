@@ -20,6 +20,17 @@ public struct ProfileScreen: View {
     private let onSaved: (() -> Void)?
     private let onMyLists: (() -> Void)?
     private let onModeration: (() -> Void)?
+    /// Starter Packs tab (#0206): row taps hand the pack's AT-URI up to the
+    /// host, which pushes `StarterPackScreen` — `BlueskyProfile` cannot
+    /// import `BlueskyLists` without a Layer-3 ↔ Layer-3 cycle, so the app
+    /// target wires the destination (same pattern as the Notifications tab's
+    /// `onStarterPackTap`).
+    private let onStarterPackTap: ((ATURI) -> Void)?
+    /// Own-profile create entry (#0206): RN's empty-state "Create" /
+    /// list-footer "Create another" buttons navigate to the wizard. The
+    /// host presents `StarterPackCreateSheet`; when this is `nil` the create
+    /// affordances are hidden.
+    private let onCreateStarterPack: (() -> Void)?
 
     @Environment(\.blueskyTheme) private var theme
     @State private var viewModel: ProfileViewModel
@@ -44,7 +55,9 @@ public struct ProfileScreen: View {
         onSettings: (() -> Void)? = nil,
         onSaved: (() -> Void)? = nil,
         onMyLists: (() -> Void)? = nil,
-        onModeration: (() -> Void)? = nil
+        onModeration: (() -> Void)? = nil,
+        onStarterPackTap: ((ATURI) -> Void)? = nil,
+        onCreateStarterPack: (() -> Void)? = nil
     ) {
         self.network = network
         self.accountStore = accountStore
@@ -53,6 +66,8 @@ public struct ProfileScreen: View {
         self.onSaved = onSaved
         self.onMyLists = onMyLists
         self.onModeration = onModeration
+        self.onStarterPackTap = onStarterPackTap
+        self.onCreateStarterPack = onCreateStarterPack
         _viewModel = State(wrappedValue: ProfileViewModel(
             network: network,
             accountStore: accountStore,
@@ -235,9 +250,22 @@ public struct ProfileScreen: View {
     ///  - 2pt brand-color underline on the selected tab via `UnderlineTabStrip`
     ///    (shared visual treatment with the Home feed strip from #0074).
     ///  - Horizontally scrollable since seven tabs don't fit on iPhone widths.
+    /// Whether the screen is showing the signed-in viewer's own profile.
+    private var isOwnProfile: Bool { viewModel.actorDID == viewerDID }
+
+    /// RN gates the Starter Packs tab (`Profile.tsx`):
+    /// `showStarterPacksTab = isMe || (profile.associated?.starterPacks ?? 0) > 0`.
+    /// All other tabs render unconditionally, matching the existing strip.
+    private var visibleTabs: [ProfileTab] {
+        ProfileTab.allCases.filter { tab in
+            guard tab == .starterPacks else { return true }
+            return isOwnProfile || (viewModel.profile?.associated?.starterPacks ?? 0) > 0
+        }
+    }
+
     private var tabStrip: some View {
         UnderlineTabStrip(
-            tabs: ProfileTab.allCases.map { UnderlineTab(id: $0.rawValue, label: $0.title) },
+            tabs: visibleTabs.map { UnderlineTab(id: $0.rawValue, label: $0.title) },
             selectedID: Binding(
                 get: { selectedTab.rawValue },
                 set: { newID in
@@ -259,6 +287,8 @@ public struct ProfileScreen: View {
         switch tab {
         case .feeds:
             await viewModel.loadFeeds()
+        case .starterPacks:
+            await viewModel.loadStarterPacks()
         case .lists:
             await viewModel.loadLists()
         default:
@@ -273,6 +303,8 @@ public struct ProfileScreen: View {
         switch selectedTab {
         case .feeds:
             feedsTabContent
+        case .starterPacks:
+            starterPacksTabContent
         case .lists:
             listsTabContent
         default:
@@ -321,6 +353,59 @@ public struct ProfileScreen: View {
             ForEach(viewModel.actorFeeds, id: \.uri) { feed in
                 FeedCard(feed: feed)
                 Divider()
+            }
+        }
+    }
+
+    /// Starter Packs tab (#0206). RN: `ProfileStarterPacks.tsx` — rows are
+    /// `StarterPackCard`s; the own-profile empty state pitches creation with
+    /// a "Create" button, and a "Create another" footer follows the rows.
+    /// (RN's second empty-state button, "Make one for me" — the
+    /// auto-generated pack flow — is deliberately not ported; see #0206.)
+    @ViewBuilder
+    private var starterPacksTabContent: some View {
+        let packs = viewModel.actorStarterPacks
+        if packs.isEmpty {
+            if isOwnProfile {
+                VStack(spacing: Spacing.sm) {
+                    Text("You haven't created a starter pack yet!")
+                        .font(Typography.headline)
+                        .multilineTextAlignment(.center)
+                    Text("Starter packs let you easily share your favorite feeds and people with your friends.")
+                        .font(Typography.bodySmall)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    if onCreateStarterPack != nil {
+                        Button("Create") { onCreateStarterPack?() }
+                            .buttonStyle(.borderedProminent)
+                            .padding(.top, Spacing.xs)
+                            .accessibilityIdentifier("starter-packs-create-button")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(40)
+            } else {
+                Text("No starter packs")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(40)
+            }
+        } else {
+            ForEach(packs, id: \.uri) { pack in
+                StarterPackCard(
+                    pack: pack,
+                    isOwn: pack.creator.did == viewerDID,
+                    onTap: { onStarterPackTap?($0.uri) }
+                )
+                Divider()
+            }
+            if isOwnProfile && onCreateStarterPack != nil {
+                Button("Create another") { onCreateStarterPack?() }
+                    .buttonStyle(.bordered)
+                    .padding(.vertical, Spacing.md)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("starter-packs-create-button")
             }
         }
     }
@@ -385,7 +470,7 @@ public struct ProfileScreen: View {
         case .media:   "No media"
         case .videos:  "No videos yet"
         case .likes:   "No likes"
-        case .feeds, .lists: ""
+        case .feeds, .starterPacks, .lists: ""
         }
     }
 }

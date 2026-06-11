@@ -182,6 +182,36 @@ public struct ProfileView: Codable, Hashable, Sendable {
     }
 }
 
+/// Associated-resource counts on a detailed profile
+/// (`app.bsky.actor.defs#profileAssociated`). RN uses these to gate
+/// profile tabs — e.g. the Starter Packs tab shows when
+/// `associated.starterPacks > 0` (#0206).
+public struct ProfileAssociated: Codable, Hashable, Sendable {
+    public let lists: Int
+    public let feedgens: Int
+    public let starterPacks: Int
+    public let labeler: Bool?
+
+    public init(lists: Int = 0, feedgens: Int = 0, starterPacks: Int = 0, labeler: Bool? = nil) {
+        self.lists = lists
+        self.feedgens = feedgens
+        self.starterPacks = starterPacks
+        self.labeler = labeler
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case lists, feedgens, starterPacks, labeler
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        lists = try c.decodeIfPresent(Int.self, forKey: .lists) ?? 0
+        feedgens = try c.decodeIfPresent(Int.self, forKey: .feedgens) ?? 0
+        starterPacks = try c.decodeIfPresent(Int.self, forKey: .starterPacks) ?? 0
+        labeler = try c.decodeIfPresent(Bool.self, forKey: .labeler)
+    }
+}
+
 /// Full profile returned by `app.bsky.actor.getProfile`.
 public struct ProfileDetailed: Codable, Sendable {
     public let did: DID
@@ -194,6 +224,7 @@ public struct ProfileDetailed: Codable, Sendable {
     public let followsCount: Int
     public let postsCount: Int
     public let labels: [Label]
+    public let associated: ProfileAssociated?
     public let createdAt: Date?
     public let indexedAt: Date?
     public let viewer: ProfileViewerState?
@@ -210,6 +241,7 @@ public struct ProfileDetailed: Codable, Sendable {
         followsCount: Int,
         postsCount: Int,
         labels: [Label] = [],
+        associated: ProfileAssociated? = nil,
         createdAt: Date?,
         indexedAt: Date?,
         viewer: ProfileViewerState?,
@@ -225,6 +257,7 @@ public struct ProfileDetailed: Codable, Sendable {
         self.followsCount = followsCount
         self.postsCount = postsCount
         self.labels = labels
+        self.associated = associated
         self.createdAt = createdAt
         self.indexedAt = indexedAt
         self.viewer = viewer
@@ -234,7 +267,7 @@ public struct ProfileDetailed: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case did, handle, displayName, description, avatar, banner
         case followersCount, followsCount, postsCount
-        case labels, createdAt, indexedAt, viewer, verification
+        case labels, associated, createdAt, indexedAt, viewer, verification
     }
 
     public init(from decoder: any Decoder) throws {
@@ -249,6 +282,7 @@ public struct ProfileDetailed: Codable, Sendable {
         followsCount = try c.decodeIfPresent(Int.self, forKey: .followsCount) ?? 0
         postsCount = try c.decodeIfPresent(Int.self, forKey: .postsCount) ?? 0
         labels = try c.decodeIfPresent([Label].self, forKey: .labels) ?? []
+        associated = try c.decodeIfPresent(ProfileAssociated.self, forKey: .associated)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
         indexedAt = try c.decodeIfPresent(Date.self, forKey: .indexedAt)
         viewer = try c.decodeIfPresent(ProfileViewerState.self, forKey: .viewer)

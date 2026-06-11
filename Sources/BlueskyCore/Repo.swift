@@ -105,6 +105,35 @@ public struct ApplyWritesResponse: Codable, Sendable {
     }
 }
 
+// MARK: - com.atproto.repo.listRecords
+
+/// One record envelope returned by `com.atproto.repo.listRecords`.
+public struct ListedRecord<Value: Decodable & Sendable>: Decodable, Sendable {
+    public let uri: ATURI
+    public let cid: CID?
+    public let value: Value
+
+    public init(uri: ATURI, cid: CID? = nil, value: Value) {
+        self.uri = uri
+        self.cid = cid
+        self.value = value
+    }
+}
+
+/// Response of `com.atproto.repo.listRecords`, generic over the record
+/// value shape. Unlike AppView queries, `listRecords` reads the repo on the
+/// user's own PDS directly, so it reflects writes immediately (no AppView
+/// indexing lag) — used by the starter-pack delete cleanup (#0206).
+public struct ListRecordsResponse<Value: Decodable & Sendable>: Decodable, Sendable {
+    public let records: [ListedRecord<Value>]
+    public let cursor: String?
+
+    public init(records: [ListedRecord<Value>], cursor: String? = nil) {
+        self.records = records
+        self.cursor = cursor
+    }
+}
+
 public struct RepoCommit: Codable, Sendable {
     public let cid: CID
     public let rev: String

@@ -42,11 +42,19 @@ public struct StarterPackView: Decodable, Sendable {
 
 // MARK: - app.bsky.graph.defs#starterPackViewBasic
 
-/// Lightweight starter pack reference used in actor-level listings.
+/// Lightweight starter pack reference used in actor-level listings
+/// (`app.bsky.graph.getActorStarterPacks`).
+///
+/// The lexicon carries the pack's name and description inside the raw
+/// `record` field (the `app.bsky.graph.starterpack` record itself), not at
+/// the top level — RN reads `record.name` after validating the record
+/// (`StarterPackCard.tsx`). The custom decoder lifts those two fields out of
+/// the nested container so callers get a flat shape (#0206).
 public struct StarterPackBasic: Decodable, Sendable {
     public let uri: ATURI
     public let cid: CID
     public let name: String
+    public let description: String?
     public let creator: ProfileBasic
     public let listItemCount: Int?
     public let joinedWeekCount: Int?
@@ -56,6 +64,7 @@ public struct StarterPackBasic: Decodable, Sendable {
         uri: ATURI,
         cid: CID,
         name: String,
+        description: String? = nil,
         creator: ProfileBasic,
         listItemCount: Int? = nil,
         joinedWeekCount: Int? = nil,
@@ -64,10 +73,39 @@ public struct StarterPackBasic: Decodable, Sendable {
         self.uri = uri
         self.cid = cid
         self.name = name
+        self.description = description
         self.creator = creator
         self.listItemCount = listItemCount
         self.joinedWeekCount = joinedWeekCount
         self.joinedAllTimeCount = joinedAllTimeCount
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case uri, cid, record, creator, listItemCount, joinedWeekCount, joinedAllTimeCount
+    }
+
+    private enum RecordKeys: String, CodingKey {
+        case name, description
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        uri = try c.decode(ATURI.self, forKey: .uri)
+        cid = try c.decode(CID.self, forKey: .cid)
+        creator = try c.decode(ProfileBasic.self, forKey: .creator)
+        listItemCount = try c.decodeIfPresent(Int.self, forKey: .listItemCount)
+        joinedWeekCount = try c.decodeIfPresent(Int.self, forKey: .joinedWeekCount)
+        joinedAllTimeCount = try c.decodeIfPresent(Int.self, forKey: .joinedAllTimeCount)
+        // `record` is lexicon-`unknown`; tolerate a missing/invalid record
+        // the way RN does (it falls back to "starter pack" copy) rather than
+        // failing the whole page decode.
+        if let record = try? c.nestedContainer(keyedBy: RecordKeys.self, forKey: .record) {
+            name = (try? record.decodeIfPresent(String.self, forKey: .name)) ?? "Starter Pack"
+            description = (try? record.decodeIfPresent(String.self, forKey: .description)) ?? nil
+        } else {
+            name = "Starter Pack"
+            description = nil
+        }
     }
 }
 
@@ -126,6 +164,11 @@ public struct GetStarterPackResponse: Decodable, Sendable {
 }
 
 public struct GetActorStarterPacksResponse: Decodable, Sendable {
-    public let starterPacks: [StarterPackView]
+    public let starterPacks: [StarterPackBasic]
     public let cursor: String?
+
+    public init(starterPacks: [StarterPackBasic], cursor: String? = nil) {
+        self.starterPacks = starterPacks
+        self.cursor = cursor
+    }
 }

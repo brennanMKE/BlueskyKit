@@ -230,6 +230,21 @@ public struct ListItemRecord: Encodable, Sendable {
     }
 }
 
+/// Decodable counterpart of `ListItemRecord` for reading
+/// `app.bsky.graph.listitem` rows back off the PDS via
+/// `com.atproto.repo.listRecords` (#0206 starter-pack delete cleanup).
+public struct ListItemRecordValue: Decodable, Sendable {
+    /// AT-URI of the list this item belongs to.
+    public let list: String
+    /// DID of the member.
+    public let subject: String?
+
+    public init(list: String, subject: String? = nil) {
+        self.list = list
+        self.subject = subject
+    }
+}
+
 // MARK: - app.bsky.feed.getListFeed response
 
 public struct GetListFeedResponse: Decodable, Sendable {

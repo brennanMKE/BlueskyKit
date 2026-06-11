@@ -66,14 +66,14 @@ public final class ListsViewModel {
 
     /// Wizard create path. See `ListsStore.createStarterPackWithProfiles` —
     /// builds the backing reference list, fans out the curated members via
-    /// `applyWrites`, then creates the starter-pack record. Returns `true`
-    /// on success.
+    /// `applyWrites`, then creates the starter-pack record. Returns the new
+    /// pack's AT-URI on success, `nil` on failure.
     public func createStarterPackWithProfiles(
         name: String,
         description: String?,
         profileDIDs: [DID],
         feedURIs: [ATURI]
-    ) async -> Bool {
+    ) async -> ATURI? {
         await store.createStarterPackWithProfiles(
             name: name,
             description: description,

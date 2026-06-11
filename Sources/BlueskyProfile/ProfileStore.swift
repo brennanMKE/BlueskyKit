@@ -9,19 +9,22 @@ private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "co.sstoo
 // MARK: - ProfileTab
 
 public enum ProfileTab: String, CaseIterable, Identifiable {
-    // Tab order matches the React Native reference (#0086):
-    // Posts · Replies · Media · Videos · Likes · Feeds · Lists.
-    case posts, replies, media, videos, likes, feeds, lists
+    // Tab order matches the React Native reference (#0086, #0206):
+    // Posts · Replies · Media · Videos · Likes · Feeds · Starter Packs · Lists
+    // (`Profile.tsx` sectionTitles puts Starter Packs between Feeds and the
+    // trailing Lists tab).
+    case posts, replies, media, videos, likes, feeds, starterPacks, lists
     public var id: String { rawValue }
     public var title: String {
         switch self {
-        case .posts:   "Posts"
-        case .replies: "Replies"
-        case .media:   "Media"
-        case .videos:  "Videos"
-        case .likes:   "Likes"
-        case .feeds:   "Feeds"
-        case .lists:   "Lists"
+        case .posts:        "Posts"
+        case .replies:      "Replies"
+        case .media:        "Media"
+        case .videos:       "Videos"
+        case .likes:        "Likes"
+        case .feeds:        "Feeds"
+        case .starterPacks: "Starter Packs"
+        case .lists:        "Lists"
         }
     }
 }
@@ -34,6 +37,7 @@ public protocol ProfileStoring: AnyObject, Observable, Sendable {
     var errorMessage: String? { get }
     var actorFeeds: [GeneratorView] { get }
     var actorLists: [ListView] { get }
+    var actorStarterPacks: [StarterPackBasic] { get }
     var knownFollowers: [ProfileView] { get }
 
     func posts(for tab: ProfileTab) -> [FeedViewPost]
@@ -44,6 +48,11 @@ public protocol ProfileStoring: AnyObject, Observable, Sendable {
     func loadMoreFeed(tab: ProfileTab, actorDID: DID) async
     func loadFeeds(actorDID: DID) async
     func loadLists(actorDID: DID) async
+    /// Loads the actor's starter packs for the Starter Packs tab (#0206).
+    /// Unlike `loadFeeds`/`loadLists` this re-fetches on every call (with an
+    /// in-flight guard) so the tab reflects a pack created or deleted during
+    /// the session as soon as the user re-enters it or pulls to refresh.
+    func loadStarterPacks(actorDID: DID) async
     func follow() async
     func unfollow() async
     func block() async
@@ -81,7 +90,11 @@ public final class ProfileStore: ProfileStoring {
     public private(set) var errorMessage: String?
     public private(set) var actorFeeds: [GeneratorView] = []
     public private(set) var actorLists: [ListView] = []
+    public private(set) var actorStarterPacks: [StarterPackBasic] = []
     public private(set) var knownFollowers: [ProfileView] = []
+
+    /// In-flight guard for `loadStarterPacks` (which always re-fetches).
+    private var starterPacksLoading = false
 
     private var tabPosts: [ProfileTab: [FeedViewPost]] = [:]
     private var tabCursors: [ProfileTab: String?] = [:]
@@ -162,6 +175,23 @@ public final class ProfileStore: ProfileStoring {
         }
     }
 
+    public func loadStarterPacks(actorDID: DID) async {
+        guard !starterPacksLoading else { return }
+        starterPacksLoading = true
+        defer { starterPacksLoading = false }
+        do {
+            // RN pages `getActorStarterPacks` at 10; the profile tabs here
+            // use a single 50-item fetch like `loadFeeds`/`loadLists`.
+            let response: GetActorStarterPacksResponse = try await network.get(
+                lexicon: "app.bsky.graph.getActorStarterPacks",
+                params: ["actor": actorDID.rawValue, "limit": "50"]
+            )
+            actorStarterPacks = response.starterPacks
+        } catch {
+            logger.error("getActorStarterPacks error: \(error, privacy: .public)")
+        }
+    }
+
     // MARK: - Load feed tab
 
     public func loadFeed(tab: ProfileTab, actorDID: DID) async {
@@ -218,8 +248,9 @@ public final class ProfileStore: ProfileStoring {
             return try await network.get(lexicon: "app.bsky.feed.getAuthorFeed", params: params)
         case .likes:
             return try await network.get(lexicon: "app.bsky.feed.getActorLikes", params: params)
-        case .feeds, .lists:
-            // Feeds and Lists tabs use dedicated load methods; this path is never reached.
+        case .feeds, .starterPacks, .lists:
+            // Feeds / Starter Packs / Lists tabs use dedicated load methods;
+            // this path is never reached.
             throw URLError(.unsupportedURL)
         }
     }
@@ -666,7 +697,7 @@ private extension ProfileDetailed {
             did: did, handle: handle, displayName: displayName,
             description: description, avatar: avatar, banner: banner,
             followersCount: followersCount, followsCount: followsCount,
-            postsCount: postsCount, labels: labels,
+            postsCount: postsCount, labels: labels, associated: associated,
             createdAt: createdAt, indexedAt: indexedAt,
             viewer: transform(viewer)
         )
@@ -677,7 +708,7 @@ private extension ProfileDetailed {
             did: did, handle: handle, displayName: displayName,
             description: description, avatar: avatar, banner: banner,
             followersCount: max(0, followersCount + delta), followsCount: followsCount,
-            postsCount: postsCount, labels: labels,
+            postsCount: postsCount, labels: labels, associated: associated,
             createdAt: createdAt, indexedAt: indexedAt, viewer: viewer
         )
     }

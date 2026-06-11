@@ -11,6 +11,7 @@ public final class ProfileViewModel {
     public var errorMessage: String? { store.errorMessage }
     public var actorFeeds: [GeneratorView] { store.actorFeeds }
     public var actorLists: [ListView] { store.actorLists }
+    public var actorStarterPacks: [StarterPackBasic] { store.actorStarterPacks }
     public var knownFollowers: [ProfileView] { store.knownFollowers }
 
     public func posts(for tab: ProfileTab) -> [FeedViewPost] { store.posts(for: tab) }
@@ -29,6 +30,7 @@ public final class ProfileViewModel {
     public func loadMoreFeed(tab: ProfileTab) async { await store.loadMoreFeed(tab: tab, actorDID: actorDID) }
     public func loadFeeds() async { await store.loadFeeds(actorDID: actorDID) }
     public func loadLists() async { await store.loadLists(actorDID: actorDID) }
+    public func loadStarterPacks() async { await store.loadStarterPacks(actorDID: actorDID) }
     public func follow() async { await store.follow() }
     public func unfollow() async { await store.unfollow() }
     public func block() async { await store.block() }

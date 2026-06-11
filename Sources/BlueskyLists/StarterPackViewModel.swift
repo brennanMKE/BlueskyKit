@@ -18,5 +18,9 @@ public final class StarterPackViewModel {
 
     public func load(uri: ATURI) async { await store.loadStarterPack(uri: uri) }
     public func followAll(pack: StarterPackView) async { await store.followAll(pack: pack) }
+    /// Owner delete (#0206) — see `ListsStore.deleteStarterPack`.
+    public func deleteStarterPack(pack: StarterPackView) async -> Bool {
+        await store.deleteStarterPack(pack: pack)
+    }
     public func clearError() { store.clearError() }
 }

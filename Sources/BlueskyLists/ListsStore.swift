@@ -23,14 +23,20 @@ public protocol ListsStoring: AnyObject, Observable, Sendable {
     /// profiles plus the starter-pack record (with optional feeds). Mirrors
     /// RN's `useCreateStarterPackMutation` flow which first creates the list,
     /// fans out `applyWrites` to add list-item members, then creates the
-    /// starter-pack record. Returns `true` on success.
+    /// starter-pack record. Returns the new starter-pack record's AT-URI on
+    /// success (RN navigates straight to the created pack), `nil` on failure.
     func createStarterPackWithProfiles(
         name: String,
         description: String?,
         profileDIDs: [DID],
         feedURIs: [ATURI]
-    ) async -> Bool
+    ) async -> ATURI?
     func loadStarterPack(uri: ATURI) async
+    /// Deletes a starter pack the viewer owns (#0206). Mirrors RN's
+    /// `useDeleteStarterPackMutation` (starter-pack record + backing list);
+    /// additionally removes the backing list's `listitem` rows — RN orphans
+    /// those on the PDS (see the #0204 gotcha). Returns `true` on success.
+    func deleteStarterPack(pack: StarterPackView) async -> Bool
     func followAll(pack: StarterPackView) async
     func clearError()
 }
@@ -280,18 +286,18 @@ public final class ListsStore: ListsStoring {
         description: String?,
         profileDIDs: [DID],
         feedURIs: [ATURI]
-    ) async -> Bool {
+    ) async -> ATURI? {
         let viewerDID: DID?
         do {
             viewerDID = try await accountStore.loadCurrentDID()
         } catch {
             logger.error("createStarterPackWithProfiles: failed to load current DID: \(error.localizedDescription, privacy: .public)")
             self.error = error.localizedDescription
-            return false
+            return nil
         }
         guard let viewerDID else {
             self.error = "Not signed in"
-            return false
+            return nil
         }
 
         // 1) Create the backing list (referencelist purpose, matching RN).
@@ -314,7 +320,7 @@ public final class ListsStore: ListsStoring {
         } catch {
             logger.error("createStarterPackWithProfiles: list create failed: \(error.localizedDescription, privacy: .public)")
             self.error = error.localizedDescription
-            return false
+            return nil
         }
 
         // 2) Apply writes for each member. Chunk at 50 to stay under server
@@ -338,7 +344,7 @@ public final class ListsStore: ListsStoring {
                 } catch {
                     logger.error("createStarterPackWithProfiles: applyWrites failed: \(error.localizedDescription, privacy: .public)")
                     self.error = error.localizedDescription
-                    return false
+                    return nil
                 }
             }
         }
@@ -352,7 +358,7 @@ public final class ListsStore: ListsStoring {
             feeds: feedItems
         )
         do {
-            let _: CreateRecordResponse = try await network.post(
+            let resp: CreateRecordResponse = try await network.post(
                 lexicon: "com.atproto.repo.createRecord",
                 body: CreateRecordRequest(
                     repo: viewerDID.rawValue,
@@ -360,9 +366,107 @@ public final class ListsStore: ListsStoring {
                     record: packRecord
                 )
             )
-            return true
+            return resp.uri
         } catch {
             logger.error("createStarterPackWithProfiles: starterpack create failed: \(error.localizedDescription, privacy: .public)")
+            self.error = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Owner delete (#0206). RN's `useDeleteStarterPackMutation` deletes the
+    /// starter-pack record plus its backing reference list; this port also
+    /// sweeps the list's `app.bsky.graph.listitem` rows first — RN leaves
+    /// them orphaned on the PDS (the #0204 gotcha). The listitem rkeys come
+    /// from `com.atproto.repo.listRecords` (PDS truth, no AppView indexing
+    /// lag), filtered to the backing list's URI.
+    public func deleteStarterPack(pack: StarterPackView) async -> Bool {
+        let viewerDID: DID?
+        do {
+            viewerDID = try await accountStore.loadCurrentDID()
+        } catch {
+            logger.error("deleteStarterPack: failed to load current DID: \(error.localizedDescription, privacy: .public)")
+            self.error = error.localizedDescription
+            return false
+        }
+        guard let viewerDID, viewerDID == pack.creator.did else {
+            self.error = "Only the creator can delete a starter pack."
+            return false
+        }
+        guard let packRkey = pack.uri.rkey else {
+            self.error = "Malformed starter pack URI."
+            return false
+        }
+
+        // 1) Sweep the backing list's member rows, then the list itself.
+        if let listURI = pack.list?.uri {
+            var itemRkeys: [String] = []
+            var cursor: String?
+            repeat {
+                var params = [
+                    "repo": viewerDID.rawValue,
+                    "collection": "app.bsky.graph.listitem",
+                    "limit": "100",
+                ]
+                if let cursor { params["cursor"] = cursor }
+                do {
+                    let page: ListRecordsResponse<ListItemRecordValue> = try await network.get(
+                        lexicon: "com.atproto.repo.listRecords", params: params
+                    )
+                    itemRkeys.append(contentsOf: page.records
+                        .filter { $0.value.list == listURI.rawValue }
+                        .compactMap { $0.uri.rkey })
+                    cursor = page.records.isEmpty ? nil : page.cursor
+                } catch {
+                    logger.error("deleteStarterPack: listRecords failed: \(error.localizedDescription, privacy: .public)")
+                    self.error = error.localizedDescription
+                    return false
+                }
+            } while cursor != nil
+
+            // Chunk at 50 like the create fan-out (applyWrites caps at 200).
+            let chunks = stride(from: 0, to: itemRkeys.count, by: 50).map {
+                Array(itemRkeys[$0..<min($0 + 50, itemRkeys.count)])
+            }
+            for batch in chunks {
+                let writes: [WriteOp] = batch.map {
+                    .delete(WriteDelete(collection: "app.bsky.graph.listitem", rkey: $0))
+                }
+                do {
+                    let _: ApplyWritesResponse = try await network.post(
+                        lexicon: "com.atproto.repo.applyWrites",
+                        body: ApplyWritesRequest(repo: viewerDID, writes: writes)
+                    )
+                } catch {
+                    logger.error("deleteStarterPack: listitem sweep failed: \(error.localizedDescription, privacy: .public)")
+                    self.error = error.localizedDescription
+                    return false
+                }
+            }
+
+            if let listRkey = listURI.rkey {
+                do {
+                    let _: EmptyResponse = try await network.post(
+                        lexicon: "com.atproto.repo.deleteRecord",
+                        body: DeleteRecordRequest(repo: viewerDID.rawValue, collection: "app.bsky.graph.list", rkey: listRkey)
+                    )
+                } catch {
+                    logger.error("deleteStarterPack: list delete failed: \(error.localizedDescription, privacy: .public)")
+                    self.error = error.localizedDescription
+                    return false
+                }
+            }
+        }
+
+        // 2) Delete the starter-pack record itself.
+        do {
+            let _: EmptyResponse = try await network.post(
+                lexicon: "com.atproto.repo.deleteRecord",
+                body: DeleteRecordRequest(repo: viewerDID.rawValue, collection: "app.bsky.graph.starterpack", rkey: packRkey)
+            )
+            return true
+        } catch {
+            logger.error("deleteStarterPack: starterpack delete failed: \(error.localizedDescription, privacy: .public)")
             self.error = error.localizedDescription
             return false
         }

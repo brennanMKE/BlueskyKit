@@ -47,15 +47,22 @@ public struct StarterPackCreateSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let onDismiss: () -> Void
+    /// Fired with the new pack's AT-URI after a successful create (#0206).
+    /// RN's wizard navigates straight to the created starter pack
+    /// (`Wizard/index.tsx` → `navigation.replace('StarterPack', …)`); the
+    /// host mirrors that by pushing `StarterPackScreen` for this URI.
+    let onCreated: ((ATURI) -> Void)?
 
     public init(
         network: any NetworkClient,
         accountStore: any AccountStore,
-        onDismiss: @escaping () -> Void
+        onDismiss: @escaping () -> Void,
+        onCreated: ((ATURI) -> Void)? = nil
     ) {
         _viewModel = State(initialValue: ListsViewModel(network: network, accountStore: accountStore))
         _search = State(initialValue: StarterPackWizardSearchStore(network: network))
         self.onDismiss = onDismiss
+        self.onCreated = onCreated
     }
 
     public var body: some View {
@@ -193,15 +200,16 @@ public struct StarterPackCreateSheet: View {
     private func submit() async {
         model.processing = true
         defer { model.processing = false }
-        let success = await viewModel.createStarterPackWithProfiles(
+        let createdURI = await viewModel.createStarterPackWithProfiles(
             name: model.effectiveName,
             description: model.effectiveDescription,
             profileDIDs: model.selectedProfiles.map(\.did),
             feedURIs: model.selectedFeeds.map(\.uri)
         )
-        if success {
+        if let createdURI {
             dismiss()
             onDismiss()
+            onCreated?(createdURI)
         } else if let storeError = viewModel.error {
             model.errorMessage = storeError
             viewModel.clearError()

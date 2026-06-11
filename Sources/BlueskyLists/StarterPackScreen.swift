@@ -31,7 +31,14 @@ public struct StarterPackScreen: View {
     @State private var viewModel: StarterPackViewModel
     @State private var showQRSheet = false
     @State private var showCopiedToast = false
+    /// Owner delete (#0206): viewer resolved on appear; gates the
+    /// destructive menu entry to the pack's creator like RN.
+    @State private var viewerDID: DID?
+    @State private var showDeleteConfirm = false
+    @State private var isDeleting = false
+    @Environment(\.dismiss) private var dismiss
     private let starterPackURI: ATURI
+    private let accountStore: any AccountStore
 
     public init(
         starterPackURI: ATURI,
@@ -39,7 +46,13 @@ public struct StarterPackScreen: View {
         accountStore: any AccountStore
     ) {
         self.starterPackURI = starterPackURI
+        self.accountStore = accountStore
         _viewModel = State(initialValue: StarterPackViewModel(network: network, accountStore: accountStore))
+    }
+
+    private var isOwner: Bool {
+        guard let viewerDID, let pack = viewModel.starterPack else { return false }
+        return pack.creator.did == viewerDID
     }
 
     public var body: some View {
@@ -78,12 +91,43 @@ public struct StarterPackScreen: View {
                         } label: {
                             Label("Show QR code", systemImage: "qrcode")
                         }
+                        // RN's owner overflow offers Edit / Delete /
+                        // "Create list from members" (`StarterPackScreen.tsx`).
+                        // Delete is ported (#0206); Edit and list-conversion
+                        // are deliberately not — see the issue notes.
+                        if isOwner {
+                            Divider()
+                            Button(role: .destructive) {
+                                showDeleteConfirm = true
+                            } label: {
+                                Label("Delete starter pack", systemImage: "trash")
+                            }
+                            .disabled(isDeleting)
+                        }
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
                     .help("Share starter pack")
+                    // UI-test coupling surface (#0206): stable handle for the
+                    // share/overflow menu so the gate suite can reach the
+                    // owner Delete entry.
+                    .accessibilityIdentifier("starter-pack-menu")
                 }
             }
+        }
+        // RN confirmation prompt: "Delete starter pack?" / "Are you sure you
+        // want to delete this starter pack?" with a destructive Delete.
+        .confirmationDialog(
+            "Delete starter pack?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                Task { await performDelete() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to delete this starter pack?")
         }
         .sheet(isPresented: $showQRSheet) {
             if let pack = viewModel.starterPack, let url = shareURL(for: pack) {
@@ -91,7 +135,15 @@ public struct StarterPackScreen: View {
             }
         }
         .toast(isPresented: $showCopiedToast, message: "Link copied")
-        .task { await viewModel.load(uri: starterPackURI) }
+        .task {
+            await viewModel.load(uri: starterPackURI)
+            do {
+                viewerDID = try await accountStore.loadCurrentDID()
+            } catch {
+                // Owner affordances stay hidden; the screen remains usable read-only.
+                viewerDID = nil
+            }
+        }
         .alert("Error", isPresented: Binding(
             get: { viewModel.error != nil },
             set: { if !$0 { viewModel.clearError() } }
@@ -191,6 +243,18 @@ public struct StarterPackScreen: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    // MARK: - Delete (#0206)
+
+    private func performDelete() async {
+        guard let pack = viewModel.starterPack, !isDeleting else { return }
+        isDeleting = true
+        defer { isDeleting = false }
+        if await viewModel.deleteStarterPack(pack: pack) {
+            dismiss()
+        }
+        // On failure `viewModel.error` is set and the existing alert shows it.
     }
 
     // MARK: - Share helpers
