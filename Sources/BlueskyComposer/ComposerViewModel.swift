@@ -200,6 +200,15 @@ public final class ComposerViewModel {
         Self.purgeLegacyAutoSaveKeysIfNeeded()
     }
 
+    /// Test-only injection point: build a view model around a scriptable
+    /// `ComposerStoring` so the mention trigger / dismiss rules can be unit
+    /// tested without the production store's debounce and network (#0198).
+    init(store: any ComposerStoring, draftsStore: any DraftsStoring) {
+        self.store = store
+        self.draftsStore = draftsStore
+        self.requireAltText = false
+    }
+
     // MARK: - Legacy auto-save migration
 
     /// Migration sentinel for the #0151 cleanup. The first time a build
@@ -329,18 +338,57 @@ public final class ComposerViewModel {
 
     // MARK: - Mention autocomplete
 
+    /// Characters RN's mention detector accepts inside a handle token —
+    /// `getMentionAt` in `lib/strings/mention-manip.ts` matches
+    /// `/(^|\s)@([a-z0-9.-]*)/gi`, so anything outside `[a-z0-9.-]`
+    /// (case-insensitive) terminates the token.
+    private static let mentionTokenCharacters = CharacterSet(
+        charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-"
+    )
+
+    /// The in-progress mention token the autocomplete overlay should track,
+    /// or `nil` when no mention is being typed (#0198).
+    ///
+    /// RN's composer (`view/com/composer/text-input/TextInput.tsx`) calls
+    /// `getMentionAt(text, cursorPos)` on every change: the overlay is only
+    /// shown while the *caret* sits inside an `@`-prefixed word, and clears
+    /// the moment the caret leaves it (e.g. the trailing space inserted by
+    /// `insertMentionAt` after picking a suggestion). SwiftUI's `TextEditor`
+    /// doesn't expose the caret, so we approximate "caret position" as
+    /// "end of text" — the overwhelmingly common case while typing. The rule:
+    /// a mention is active only when the *final* word of the text is an
+    /// in-progress `@token` (starts with `@`, at least one body character,
+    /// body restricted to RN's `[a-z0-9.-]` charset) and the text does not
+    /// end in whitespace. A trailing space, newline, or punctuation
+    /// terminates the token exactly as moving the caret past it does in RN.
+    private var activeMentionPrefix: String? {
+        guard !text.isEmpty, let lastChar = text.unicodeScalars.last,
+              !CharacterSet.whitespacesAndNewlines.contains(lastChar) else { return nil }
+        // Final whitespace-delimited word. `components` is fine here — the
+        // composer caps at 300 graphemes, so the split is cheap.
+        guard let word = text.components(separatedBy: .whitespacesAndNewlines).last,
+              word.hasPrefix("@"), word.count > 1 else { return nil }
+        let body = String(word.dropFirst())
+        // Punctuation ends the token in RN (`@alice!` → no active mention).
+        guard body.unicodeScalars.allSatisfy({ Self.mentionTokenCharacters.contains($0) }) else {
+            return nil
+        }
+        return body
+    }
+
     public func onTextChange() {
         detectURL()
-        let words = text.components(separatedBy: .whitespacesAndNewlines)
-        let currentWord = words.last(where: { $0.hasPrefix("@") && $0.count > 1 })
-        if let word = currentWord {
-            let prefix = String(word.dropFirst())
+        if let prefix = activeMentionPrefix {
             if prefix != mentionPrefix {
                 mentionPrefix = prefix
                 store.searchMentions(prefix)
             }
-        } else {
+        } else if mentionPrefix != nil {
+            // The token was completed (space / punctuation / deletion) —
+            // dismiss the overlay. Clearing the store's suggestions, not just
+            // the prefix, is what actually hides the list (#0198).
             mentionPrefix = nil
+            store.clearMentionSuggestions()
         }
     }
 
@@ -348,10 +396,17 @@ public final class ComposerViewModel {
         guard let prefix = mentionPrefix else { return }
         let handle = actor.handle.rawValue
         mentionDIDs[handle] = actor.did
-        if let range = text.range(of: "@\(prefix)") {
+        // The active token is the trailing word (see `activeMentionPrefix`),
+        // so replace the *last* occurrence — an identical earlier mention
+        // must not be rewritten. The trailing space mirrors RN's
+        // `insertMentionAt`, and is also what dismisses the overlay: the
+        // next `onTextChange` sees text ending in whitespace → no active
+        // token → no re-trigger for the completed handle.
+        if let range = text.range(of: "@\(prefix)", options: .backwards) {
             text.replaceSubrange(range, with: "@\(handle) ")
         }
         mentionPrefix = nil
+        store.clearMentionSuggestions()
     }
 
     // MARK: - Image management

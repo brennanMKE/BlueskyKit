@@ -104,7 +104,11 @@ public struct ComposerSheet: View {
                         replyBanner(replyView)
                     }
                     textEditor
-                    if !viewModel.mentionSuggestions.isEmpty {
+                    // Overlay only while a mention is actively being typed
+                    // (#0198) — suggestions alone aren't enough, since a
+                    // late typeahead response can arrive after the token
+                    // was completed.
+                    if viewModel.mentionPrefix != nil, !viewModel.mentionSuggestions.isEmpty {
                         mentionSuggestions
                     }
                     if let quoteView = viewModel.quotedPostView {

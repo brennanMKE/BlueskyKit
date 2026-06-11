@@ -31,6 +31,7 @@ public protocol ComposerStoring: AnyObject, Observable, Sendable {
         quotesEnabled: Bool
     ) async -> [ComposerImageAttachment]
     func searchMentions(_ prefix: String)
+    func clearMentionSuggestions()
     func clearError()
     func setError(_ message: String)
 }
@@ -461,9 +462,23 @@ public final class ComposerStore: ComposerStoring {
                     lexicon: "app.bsky.actor.searchActorsTypeahead",
                     params: ["q": prefix, "limit": "5"]
                 )
+                // A clear (mention completed) may have landed while the
+                // request was in flight — stale results must not resurrect
+                // the dismissed overlay (#0198).
+                guard !Task.isCancelled else { return }
                 mentionSuggestions = resp.actors
             } catch {}
         }
+    }
+
+    /// Dismiss the mention autocomplete overlay: cancel any debounced
+    /// typeahead query still in flight and empty the suggestion list. Called
+    /// when the in-progress mention token is completed — by picking a
+    /// suggestion or typing past the handle (#0198).
+    public func clearMentionSuggestions() {
+        suggestionTask?.cancel()
+        suggestionTask = nil
+        mentionSuggestions = []
     }
 
     public func clearError() {
