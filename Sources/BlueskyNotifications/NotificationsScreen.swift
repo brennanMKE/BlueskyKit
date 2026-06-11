@@ -6,7 +6,6 @@ import BlueskyUI
 /// Notification feed — likes, reposts, follows, mentions, quotes, replies.
 public struct NotificationsScreen: View {
 
-    private let network: any NetworkClient
     public var onUnreadCountChange: ((Int) -> Void)?
     /// Tap callback for any actor avatar / name in the row (#0080). Mirrors
     /// the `onAuthorTap` callback already used by `FeedView`/`ThreadView` —
@@ -43,6 +42,33 @@ public struct NotificationsScreen: View {
     /// and is intentionally not persisted across launches (issue #0078).
     @State private var activeFilter: NotificationFilter = .all
 
+    /// Designated initializer taking an externally-owned view model (#0196).
+    ///
+    /// The app shell owns a single `NotificationsViewModel` whose store
+    /// backs the app-wide unread-count poll; passing it here means the
+    /// screen's `markSeen()` zeroes the *same* `unreadCount` the tab badge
+    /// renders, so opening the tab clears the badge (RN parity:
+    /// `markAllRead()` in `state/queries/notifications/unread.tsx`).
+    public init(
+        viewModel: NotificationsViewModel,
+        onUnreadCountChange: ((Int) -> Void)? = nil,
+        onAuthorTap: ((ProfileBasic) -> Void)? = nil,
+        onPostTap: ((ATURI) -> Void)? = nil,
+        onFeedTap: ((ATURI) -> Void)? = nil,
+        onStarterPackTap: ((ATURI) -> Void)? = nil
+    ) {
+        self.onUnreadCountChange = onUnreadCountChange
+        self.onAuthorTap = onAuthorTap
+        self.onPostTap = onPostTap
+        self.onFeedTap = onFeedTap
+        self.onStarterPackTap = onStarterPackTap
+        _viewModel = State(wrappedValue: viewModel)
+    }
+
+    /// Convenience initializer that creates a private view model from the
+    /// network client. Used by previews and callsites that don't share
+    /// unread-count state with an app shell — the badge-clearing path only
+    /// works app-wide through the `viewModel:` initializer above.
     public init(
         network: any NetworkClient,
         onUnreadCountChange: ((Int) -> Void)? = nil,
@@ -51,13 +77,14 @@ public struct NotificationsScreen: View {
         onFeedTap: ((ATURI) -> Void)? = nil,
         onStarterPackTap: ((ATURI) -> Void)? = nil
     ) {
-        self.network = network
-        self.onUnreadCountChange = onUnreadCountChange
-        self.onAuthorTap = onAuthorTap
-        self.onPostTap = onPostTap
-        self.onFeedTap = onFeedTap
-        self.onStarterPackTap = onStarterPackTap
-        _viewModel = State(wrappedValue: NotificationsViewModel(network: network))
+        self.init(
+            viewModel: NotificationsViewModel(network: network),
+            onUnreadCountChange: onUnreadCountChange,
+            onAuthorTap: onAuthorTap,
+            onPostTap: onPostTap,
+            onFeedTap: onFeedTap,
+            onStarterPackTap: onStarterPackTap
+        )
     }
 
     public var body: some View {

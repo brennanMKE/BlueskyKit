@@ -162,7 +162,24 @@ public final class NotificationsStore: NotificationsStoring {
         }
     }
 
+    /// UI-test override (#0196): when `BLUESKY_FAKE_UNREAD_COUNT` is present
+    /// in the launch environment, `fetchUnreadCount()` short-circuits to this
+    /// value instead of calling the server. This exists because the badge
+    /// can't be exercised live without a second account generating real
+    /// notifications — the hook lets a UI-test (or manual `simctl launch`)
+    /// run verify the badge renders and that opening the Notifications tab
+    /// clears it via `markSeen()`. `nil` (production) leaves the network
+    /// path untouched. Same precedent as `BLUESKY_UI_TEST_SCRIPT` in the
+    /// app target.
+    private static let fakeUnreadCount: Int? = ProcessInfo.processInfo
+        .environment["BLUESKY_FAKE_UNREAD_COUNT"].flatMap(Int.init)
+
     public func fetchUnreadCount() async {
+        if let fake = Self.fakeUnreadCount {
+            unreadCount = fake
+            logger.info("notifications fetchUnreadCount: faked \(fake, privacy: .public) via BLUESKY_FAKE_UNREAD_COUNT")
+            return
+        }
         do {
             // No filter — the unread badge always reflects total unread,
             // even when the user is currently viewing the Mentions tab.
