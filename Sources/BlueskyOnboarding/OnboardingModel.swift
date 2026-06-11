@@ -239,9 +239,9 @@ public final class OnboardingModel {
         // 1. Write interests preference (server-side; seeds Discover).
         if !selectedInterests.isEmpty {
             do {
-                let _: EmptyResponse = try await network.post(
-                    lexicon: "app.bsky.actor.putPreferences",
-                    body: PutPreferencesRequest(interests: Array(selectedInterests))
+                // Read-modify-write (#0201): merge into the full preferences array.
+                try await PreferencesWriter.shared.update(
+                    network: network, .interests(tags: Array(selectedInterests))
                 )
             } catch {
                 logger.error("interests pref write failed: \(error.localizedDescription, privacy: .public)")

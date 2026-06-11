@@ -395,10 +395,8 @@ final class AccountSettingsViewModel {
         let previous = birthDate
         birthDate = newValue
         do {
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences",
-                body: PutPreferencesRequest(birthDate: newValue)
-            )
+            // Read-modify-write (#0201): merge into the full preferences array.
+            try await PreferencesWriter.shared.update(network: network, .birthDate(newValue))
         } catch {
             logger.error("putPreferences(birthDate) failed: \(error.localizedDescription, privacy: .public)")
             birthDate = previous

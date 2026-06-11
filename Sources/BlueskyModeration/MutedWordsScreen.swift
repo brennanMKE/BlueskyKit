@@ -373,10 +373,8 @@ public final class MutedWordsViewModel {
         isSaving = true
         defer { isSaving = false }
         do {
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences",
-                body: PutPreferencesRequest(mutedWords: entries)
-            )
+            // Read-modify-write (#0201): merge into the full preferences array.
+            try await PreferencesWriter.shared.update(network: network, .mutedWords(entries))
         } catch {
             logger.error("putPreferences(mutedWords) failed: \(error.localizedDescription, privacy: .public)")
             entries = previous

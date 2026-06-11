@@ -145,20 +145,25 @@ public final class SessionManager: SessionManaging {
     }
 
     private func callPutPreferences(accessJwt: String, serviceEndpoint: URL, birthDate: Date) async throws {
+        // Read-modify-write (#0201): `putPreferences` replaces the entire
+        // preference namespace, so even this fresh-account write fetches the
+        // current full array first and merges the birth date into it. This
+        // path runs before the authenticated `NetworkClient` exists, so it
+        // performs the GET + PUT legs directly via URLSession.
+        var getReq = URLRequest(url: serviceEndpoint.appending(path: "xrpc/app.bsky.actor.getPreferences"))
+        getReq.setValue("Bearer \(accessJwt)", forHTTPHeaderField: "Authorization")
+        let (getData, getResponse) = try await URLSession.shared.data(for: getReq)
+        try validateHTTP(response: getResponse, data: getData)
+        let current = try JSONDecoder().decode(GetPreferencesResponse.self, from: getData)
+
         let url = serviceEndpoint.appending(path: "xrpc/app.bsky.actor.putPreferences")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(accessJwt)", forHTTPHeaderField: "Authorization")
-
-        let formatter = ISO8601DateFormatter()
-        let body: [String: Any] = [
-            "preferences": [[
-                "$type": "app.bsky.actor.defs#personalDetailsPref",
-                "birthDate": formatter.string(from: birthDate)
-            ]]
-        ]
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.httpBody = try JSONEncoder().encode(
+            PutPreferencesRequest(merging: current.rawPreferences, applying: .birthDate(birthDate))
+        )
         let (data, response) = try await URLSession.shared.data(for: req)
         try validateHTTP(response: response, data: data)
     }

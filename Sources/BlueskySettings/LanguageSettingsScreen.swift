@@ -245,10 +245,8 @@ final class LanguageSettingsViewModel {
         primaryPostLanguage = code
         saveLocal(code, key: Self.primaryPostLanguageKey)
         do {
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences",
-                body: PutPreferencesRequest(postLanguages: [code])
-            )
+            // Read-modify-write (#0201): merge into the full preferences array.
+            try await PreferencesWriter.shared.update(network: network, .postLanguages([code]))
         } catch {
             logger.error("putPreferences(postLanguages) failed: \(error.localizedDescription, privacy: .public)")
             primaryPostLanguage = previous
@@ -268,10 +266,8 @@ final class LanguageSettingsViewModel {
         }
         let next = contentLanguages
         do {
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences",
-                body: PutPreferencesRequest(contentLanguages: next)
-            )
+            // Read-modify-write (#0201): merge into the full preferences array.
+            try await PreferencesWriter.shared.update(network: network, .contentLanguages(next))
         } catch {
             logger.error("putPreferences(contentLanguages) failed: \(error.localizedDescription, privacy: .public)")
             contentLanguages = previous

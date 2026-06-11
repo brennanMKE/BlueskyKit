@@ -392,10 +392,8 @@ public final class ModerationStore: ModerationStoring {
         guard !unavailableLabelerDIDs.isEmpty else { return }
         let surviving = subscribedLabelerDIDs.filter { !unavailableLabelerDIDs.contains($0) }
         do {
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences",
-                body: PutPreferencesRequest(subscribedLabelerDIDs: surviving)
-            )
+            // Read-modify-write (#0201): merge into the full preferences array.
+            try await PreferencesWriter.shared.update(network: network, .labelers(dids: surviving))
             subscribedLabelerDIDs = surviving
             unavailableLabelerDIDs = []
         } catch {
@@ -520,9 +518,11 @@ public final class ModerationStore: ModerationStoring {
 
     private func savePreferences() async {
         do {
-            let req = PutPreferencesRequest(adultContentEnabled: adultContentEnabled, contentLabels: contentLabels)
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences", body: req
+            // Read-modify-write (#0201): replaces only the adultContentPref +
+            // contentLabelPref entries inside the full preferences array.
+            try await PreferencesWriter.shared.update(
+                network: network,
+                .adultContentAndLabels(enabled: adultContentEnabled, contentLabels: contentLabels)
             )
         } catch {
             errorMessage = error.localizedDescription

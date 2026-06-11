@@ -367,10 +367,8 @@ final class PostInteractionSettingsViewModel {
     private func write(snapshot: Snapshot) async {
         let pref = buildPref()
         do {
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences",
-                body: PutPreferencesRequest(postInteractionSettings: pref)
-            )
+            // Read-modify-write (#0201): merge into the full preferences array.
+            try await PreferencesWriter.shared.update(network: network, .postInteractionSettings(pref))
         } catch {
             logger.error("putPreferences(postInteractionSettings) failed: \(error.localizedDescription, privacy: .public)")
             rollback(snapshot)

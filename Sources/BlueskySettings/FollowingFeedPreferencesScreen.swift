@@ -185,10 +185,10 @@ final class FollowingFeedPreferencesViewModel {
             hideQuotePosts: hideQuotePosts
         )
         do {
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences",
-                body: PutPreferencesRequest(feedView: pref)
-            )
+            // Read-modify-write (#0201): merge into the full preferences
+            // array; the feedView mutation is keyed by `feed`, so other
+            // feeds' entries also survive.
+            try await PreferencesWriter.shared.update(network: network, .feedView(pref))
         } catch {
             logger.error("putPreferences(feedView) failed: \(error.localizedDescription, privacy: .public)")
             rollback()

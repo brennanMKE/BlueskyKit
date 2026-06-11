@@ -205,10 +205,8 @@ final class ThreadPreferencesViewModel {
     private func write(rollback: @escaping @MainActor () -> Void) async {
         let pref = ThreadViewPref(sort: sort, prioritizeFollowedUsers: prioritizeFollowedUsers)
         do {
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences",
-                body: PutPreferencesRequest(threadView: pref)
-            )
+            // Read-modify-write (#0201): merge into the full preferences array.
+            try await PreferencesWriter.shared.update(network: network, .threadView(pref))
         } catch {
             logger.error("putPreferences(threadView) failed: \(error.localizedDescription, privacy: .public)")
             rollback()

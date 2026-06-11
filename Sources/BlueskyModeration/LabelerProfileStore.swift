@@ -63,20 +63,20 @@ public final class LabelerProfileStore: LabelerProfileStoring {
         isUpdating = true
         defer { isUpdating = false }
         do {
-            let prefs: GetPreferencesResponse = try await network.get(
-                lexicon: "app.bsky.actor.getPreferences",
-                params: [:]
-            )
-            var feeds = prefs.savedFeeds
-            guard !feeds.contains(where: { $0.type == "labeler" && $0.value == labelerDID }) else {
-                isSubscribed = true
-                return
+            // Read-modify-write (#0201): the mutation is computed from the
+            // fresh server state inside the writer's serialized update, and
+            // the put body carries the full merged preferences array.
+            // NOTE (#0202): subscription state intentionally still rides in
+            // `savedFeedsPrefV2` with `type: "labeler"` here — moving it to
+            // `labelersPref` is tracked separately by #0202.
+            try await PreferencesWriter.shared.update(network: network) { prefs in
+                var feeds = prefs.savedFeeds
+                guard !feeds.contains(where: { $0.type == "labeler" && $0.value == labelerDID }) else {
+                    return nil // already subscribed — skip the write
+                }
+                feeds.append(SavedFeed(id: UUID().uuidString, type: "labeler", value: labelerDID, pinned: false))
+                return .savedFeeds(feeds)
             }
-            feeds.append(SavedFeed(id: UUID().uuidString, type: "labeler", value: labelerDID, pinned: false))
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences",
-                body: PutPreferencesRequest(savedFeeds: feeds)
-            )
             isSubscribed = true
         } catch {
             self.error = error.localizedDescription
@@ -87,15 +87,10 @@ public final class LabelerProfileStore: LabelerProfileStoring {
         isUpdating = true
         defer { isUpdating = false }
         do {
-            let prefs: GetPreferencesResponse = try await network.get(
-                lexicon: "app.bsky.actor.getPreferences",
-                params: [:]
-            )
-            let feeds = prefs.savedFeeds.filter { !($0.type == "labeler" && $0.value == labelerDID) }
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences",
-                body: PutPreferencesRequest(savedFeeds: feeds)
-            )
+            // Read-modify-write (#0201); see the note in `subscribe` re #0202.
+            try await PreferencesWriter.shared.update(network: network) { prefs in
+                .savedFeeds(prefs.savedFeeds.filter { !($0.type == "labeler" && $0.value == labelerDID) })
+            }
             isSubscribed = false
         } catch {
             self.error = error.localizedDescription

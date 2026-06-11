@@ -69,10 +69,9 @@ public final class SavedFeedsStore: SavedFeedsStoring {
         isSaving = true
         defer { isSaving = false }
         do {
-            let _: EmptyResponse = try await network.post(
-                lexicon: "app.bsky.actor.putPreferences",
-                body: PutPreferencesRequest(savedFeeds: feeds)
-            )
+            // Read-modify-write (#0201): merge into the full server-side
+            // preferences array so the put doesn't wipe other preferences.
+            try await PreferencesWriter.shared.update(network: network, .savedFeeds(feeds))
             do {
                 try await cache.store(feeds, for: "savedFeeds", ttl: cacheTTL)
             } catch {

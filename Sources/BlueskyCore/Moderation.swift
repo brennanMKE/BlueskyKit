@@ -354,6 +354,14 @@ public struct GetPreferencesResponse: Decodable, Sendable {
     /// account has never written the pref; the Post Interaction Settings
     /// screen treats `nil` and `defaultPref` interchangeably.
     public let postInteractionSettings: PostInteractionSettingsPref?
+    /// Every entry of the server's `preferences` array, verbatim (#0201).
+    /// `app.bsky.actor.putPreferences` is a **full replacement** of the
+    /// namespace, so any write must carry the complete array — including
+    /// preference `$type`s this client does not model (other clients' prefs,
+    /// future lexicon additions). `PutPreferencesRequest(merging:applying:)`
+    /// consumes this array to build merge-safe bodies; unknown entries ride
+    /// through byte-meaningfully (key set + values preserved).
+    public let rawPreferences: [JSONValue]
 
     private enum OuterKeys: String, CodingKey { case preferences }
 
@@ -474,6 +482,9 @@ public struct GetPreferencesResponse: Decodable, Sendable {
 
         let outer = try decoder.container(keyedBy: OuterKeys.self)
         let items = try outer.decode([Item].self, forKey: .preferences)
+        // Decode the same array a second time as raw JSON so unmodeled
+        // preference types survive a read-modify-write (#0201).
+        self.rawPreferences = try outer.decode([JSONValue].self, forKey: .preferences)
 
         self.adultContentEnabled = items
             .first { $0.type == "app.bsky.actor.defs#adultContentPref" }
@@ -584,13 +595,99 @@ public struct GetPreferencesResponse: Decodable, Sendable {
     }
 }
 
+/// `app.bsky.actor.putPreferences` body.
+///
+/// **`putPreferences` is a full replacement** of the account's `app.bsky`
+/// preference namespace — the PDS deletes every existing preference and
+/// stores exactly what the body carries. The only way to build a body is
+/// therefore to merge a `PreferencesMutation` into the *complete* current
+/// array (`GetPreferencesResponse.rawPreferences`), mirroring RN: `BskyAgent`
+/// funnels every preference write through `updatePreferences(cb)` — fetch
+/// the full array, mutate it, put the **whole array** back, under a lock.
+/// The single-preference initializers this struct used to carry wiped every
+/// other server preference and were removed (#0201); `PreferencesWriter` in
+/// `BlueskyKit` is the shared read-modify-write executor all mutation paths
+/// go through.
 public struct PutPreferencesRequest: Encodable, Sendable {
     public let preferences: [AnyEncodable]
 
-    public init(adultContentEnabled: Bool, contentLabels: [ContentLabelPref]) {
-        var prefs: [AnyEncodable] = [AnyEncodable(_AdultPref(enabled: adultContentEnabled))]
-        prefs += contentLabels.map { AnyEncodable(_LabelPref($0)) }
-        self.preferences = prefs
+    /// Builds the full-array body: keeps every entry of `current` that the
+    /// mutation does not target (unknown / unmodeled `$type`s ride through
+    /// verbatim) and appends the mutation's replacement entries.
+    public init(merging current: [JSONValue], applying mutation: PreferencesMutation) {
+        var merged = current
+            .filter { !mutation.replacesEntry($0) }
+            .map { AnyEncodable($0) }
+        merged.append(contentsOf: mutation.newEntries)
+        self.preferences = merged
+    }
+}
+
+// MARK: - Preference $type identifiers
+
+/// Canonical `$type` strings for the `app.bsky.actor.defs` preference union
+/// members this client models. `PreferencesMutation` uses them to decide
+/// which existing entries a write replaces.
+public enum ActorPreferenceType {
+    public static let adultContent = "app.bsky.actor.defs#adultContentPref"
+    public static let contentLabel = "app.bsky.actor.defs#contentLabelPref"
+    public static let savedFeedsV2 = "app.bsky.actor.defs#savedFeedsPrefV2"
+    public static let interests = "app.bsky.actor.defs#interestsPref"
+    public static let personalDetails = "app.bsky.actor.defs#personalDetailsPref"
+    public static let threadView = "app.bsky.actor.defs#threadViewPref"
+    public static let feedView = "app.bsky.actor.defs#feedViewPref"
+    public static let contentLanguages = "app.bsky.actor.defs#contentLanguagesPref"
+    public static let postLanguages = "app.bsky.actor.defs#postLanguagesPref"
+    public static let mutedWords = "app.bsky.actor.defs#mutedWordsPref"
+    public static let labelers = "app.bsky.actor.defs#labelersPref"
+    public static let postInteractionSettings = "app.bsky.actor.defs#postInteractionSettingsPref"
+}
+
+// MARK: - PreferencesMutation
+
+/// One preference write, expressed as "remove the entries I'm replacing,
+/// append these new entries". Applied to the full current preferences array
+/// by `PutPreferencesRequest(merging:applying:)`, so every entry the mutation
+/// doesn't target — including `$type`s this client doesn't model — survives
+/// the write. The static factories below mirror RN's `BskyAgent` setters
+/// one-for-one.
+public struct PreferencesMutation: Sendable {
+    /// `true` for current-array entries this mutation supersedes.
+    public let replacesEntry: @Sendable (JSONValue) -> Bool
+    /// The replacement entries appended to the merged array.
+    public let newEntries: [AnyEncodable]
+
+    public init(replacingTypes types: Set<String>, with newEntries: [AnyEncodable]) {
+        self.replacesEntry = { entry in
+            guard let type = entry.typeDiscriminator else { return false }
+            return types.contains(type)
+        }
+        self.newEntries = newEntries
+    }
+
+    public init(
+        removingWhere replacesEntry: @escaping @Sendable (JSONValue) -> Bool,
+        appending newEntries: [AnyEncodable]
+    ) {
+        self.replacesEntry = replacesEntry
+        self.newEntries = newEntries
+    }
+}
+
+extension PreferencesMutation {
+    /// Replaces the adult-content toggle and the **entire** set of
+    /// content-label visibility entries. `ModerationStore` loads the full
+    /// label list from `getPreferences` before mutating it, so writing the
+    /// complete set back is the same read-modify-write RN performs.
+    public static func adultContentAndLabels(
+        enabled: Bool, contentLabels: [ContentLabelPref]
+    ) -> PreferencesMutation {
+        var entries: [AnyEncodable] = [AnyEncodable(_AdultPref(enabled: enabled))]
+        entries += contentLabels.map { AnyEncodable(_LabelPref($0)) }
+        return PreferencesMutation(
+            replacingTypes: [ActorPreferenceType.adultContent, ActorPreferenceType.contentLabel],
+            with: entries
+        )
     }
 
     private struct _AdultPref: Encodable, Sendable {
@@ -616,8 +713,14 @@ public struct PutPreferencesRequest: Encodable, Sendable {
         }
     }
 
-    public init(savedFeeds: [SavedFeed]) {
-        self.preferences = [AnyEncodable(_SavedFeedsPrefV2(items: savedFeeds))]
+    /// Replaces `savedFeedsPrefV2` with the supplied full item list. Callers
+    /// mutate the list loaded from `getPreferences` (RN's
+    /// `overwriteSavedFeeds` / `updateSavedFeeds` equivalents).
+    public static func savedFeeds(_ feeds: [SavedFeed]) -> PreferencesMutation {
+        PreferencesMutation(
+            replacingTypes: [ActorPreferenceType.savedFeedsV2],
+            with: [AnyEncodable(_SavedFeedsPrefV2(items: feeds))]
+        )
     }
 
     private struct _SavedFeedsPrefV2: Encodable, Sendable {
@@ -634,8 +737,11 @@ public struct PutPreferencesRequest: Encodable, Sendable {
     /// `app.bsky.actor.defs#interestsPref`. The lexicon carries a single
     /// `tags: string[]` field (max length 100). Mirrors RN's
     /// `agent.setInterestsPref({tags})` from `StepFinished/index.tsx`.
-    public init(interests: [String]) {
-        self.preferences = [AnyEncodable(_InterestsPref(tags: interests))]
+    public static func interests(tags: [String]) -> PreferencesMutation {
+        PreferencesMutation(
+            replacingTypes: [ActorPreferenceType.interests],
+            with: [AnyEncodable(_InterestsPref(tags: tags))]
+        )
     }
 
     private struct _InterestsPref: Encodable, Sendable {
@@ -653,8 +759,11 @@ public struct PutPreferencesRequest: Encodable, Sendable {
     /// `agent.setPersonalDetails({birthDate})`. Note that the AT Proto spec
     /// stores birth date inside `personalDetailsPref`, not as a top-level
     /// preference; this initializer picks that single field.
-    public init(birthDate: Date) {
-        self.preferences = [AnyEncodable(_PersonalDetailsPref(birthDate: birthDate))]
+    public static func birthDate(_ birthDate: Date) -> PreferencesMutation {
+        PreferencesMutation(
+            replacingTypes: [ActorPreferenceType.personalDetails],
+            with: [AnyEncodable(_PersonalDetailsPref(birthDate: birthDate))]
+        )
     }
 
     private struct _PersonalDetailsPref: Encodable, Sendable {
@@ -671,8 +780,11 @@ public struct PutPreferencesRequest: Encodable, Sendable {
     /// Writes a `threadViewPref` carrying `sort` and `prioritizeFollowedUsers`.
     /// Mirrors RN's `agent.setThreadViewPrefs({sort, prioritizeFollowedUsers})`
     /// path used by `useSetThreadViewPreferencesMutation`.
-    public init(threadView: ThreadViewPref) {
-        self.preferences = [AnyEncodable(_ThreadViewPref(threadView))]
+    public static func threadView(_ pref: ThreadViewPref) -> PreferencesMutation {
+        PreferencesMutation(
+            replacingTypes: [ActorPreferenceType.threadView],
+            with: [AnyEncodable(_ThreadViewPref(pref))]
+        )
     }
 
     private struct _ThreadViewPref: Encodable, Sendable {
@@ -690,10 +802,18 @@ public struct PutPreferencesRequest: Encodable, Sendable {
     /// Writes a single `feedViewPref` carrying the supplied flags. Mirrors
     /// RN's `agent.setFeedViewPrefs('home', prefs)` path used by
     /// `useSetFeedViewPreferencesMutation`. The lexicon keys these prefs by
-    /// `feed`, so multiple per-feed entries can coexist on the server; this
-    /// initializer puts only the one being edited.
-    public init(feedView: FeedViewPref) {
-        self.preferences = [AnyEncodable(_FeedViewPref(feedView))]
+    /// `feed`, so multiple per-feed entries can coexist on the server; the
+    /// removal predicate matches on (`$type`, `feed`) so editing one feed's
+    /// prefs leaves every other feed's entry untouched.
+    public static func feedView(_ pref: FeedViewPref) -> PreferencesMutation {
+        let feed = pref.feed
+        return PreferencesMutation(
+            removingWhere: { entry in
+                entry.typeDiscriminator == ActorPreferenceType.feedView
+                    && entry.objectValue?["feed"]?.stringValue == feed
+            },
+            appending: [AnyEncodable(_FeedViewPref(pref))]
+        )
     }
 
     private struct _FeedViewPref: Encodable, Sendable {
@@ -723,11 +843,14 @@ public struct PutPreferencesRequest: Encodable, Sendable {
     /// Writes a `contentLanguagesPref` carrying the user's selected feed
     /// languages (BCP-47 codes). Empty array means "show all languages",
     /// matching RN's `useLanguagePrefsApi.setContentLanguages` semantics.
-    public init(contentLanguages: [String]) {
-        self.preferences = [AnyEncodable(_LanguagesPref(
-            type: "app.bsky.actor.defs#contentLanguagesPref",
-            languages: contentLanguages
-        ))]
+    public static func contentLanguages(_ languages: [String]) -> PreferencesMutation {
+        PreferencesMutation(
+            replacingTypes: [ActorPreferenceType.contentLanguages],
+            with: [AnyEncodable(_LanguagesPref(
+                type: ActorPreferenceType.contentLanguages,
+                languages: languages
+            ))]
+        )
     }
 
     /// Writes a `postLanguagesPref` carrying the user's preferred composer
@@ -735,11 +858,14 @@ public struct PutPreferencesRequest: Encodable, Sendable {
     /// picker passes a single code as a one-element array; this matches RN's
     /// `useLanguagePrefsApi.setPrimaryLanguage` which writes a one-element
     /// array via `agent.setPostLanguagesPref`.
-    public init(postLanguages: [String]) {
-        self.preferences = [AnyEncodable(_LanguagesPref(
-            type: "app.bsky.actor.defs#postLanguagesPref",
-            languages: postLanguages
-        ))]
+    public static func postLanguages(_ languages: [String]) -> PreferencesMutation {
+        PreferencesMutation(
+            replacingTypes: [ActorPreferenceType.postLanguages],
+            with: [AnyEncodable(_LanguagesPref(
+                type: ActorPreferenceType.postLanguages,
+                languages: languages
+            ))]
+        )
     }
 
     private struct _LanguagesPref: Encodable, Sendable {
@@ -758,8 +884,11 @@ public struct PutPreferencesRequest: Encodable, Sendable {
     /// pattern: those helpers ultimately re-write the entire `items` array,
     /// so the SwiftUI client does the same thing — load, mutate locally,
     /// write the whole list back.
-    public init(mutedWords: [MutedWord]) {
-        self.preferences = [AnyEncodable(_MutedWordsPref(items: mutedWords))]
+    public static func mutedWords(_ items: [MutedWord]) -> PreferencesMutation {
+        PreferencesMutation(
+            replacingTypes: [ActorPreferenceType.mutedWords],
+            with: [AnyEncodable(_MutedWordsPref(items: items))]
+        )
     }
 
     /// Writes a `labelersPref` carrying the supplied list of subscribed
@@ -767,8 +896,11 @@ public struct PutPreferencesRequest: Encodable, Sendable {
     /// `agent.removeLabeler` cleanup path: those helpers re-write the
     /// entire `labelers` array, so the SwiftUI client does the same — load,
     /// drop the unavailable entries, write the trimmed list back.
-    public init(subscribedLabelerDIDs: [DID]) {
-        self.preferences = [AnyEncodable(_LabelersPref(dids: subscribedLabelerDIDs))]
+    public static func labelers(dids: [DID]) -> PreferencesMutation {
+        PreferencesMutation(
+            replacingTypes: [ActorPreferenceType.labelers],
+            with: [AnyEncodable(_LabelersPref(dids: dids))]
+        )
     }
 
     private struct _LabelersPref: Encodable, Sendable {
@@ -792,8 +924,11 @@ public struct PutPreferencesRequest: Encodable, Sendable {
     ///
     /// `threadgateAllowRules == nil` is encoded by *omitting* the key (anyone
     /// can reply); `[]` is encoded as an empty array (nobody can reply).
-    public init(postInteractionSettings: PostInteractionSettingsPref) {
-        self.preferences = [AnyEncodable(_PostInteractionSettingsPref(postInteractionSettings))]
+    public static func postInteractionSettings(_ pref: PostInteractionSettingsPref) -> PreferencesMutation {
+        PreferencesMutation(
+            replacingTypes: [ActorPreferenceType.postInteractionSettings],
+            with: [AnyEncodable(_PostInteractionSettingsPref(pref))]
+        )
     }
 
     private struct _PostInteractionSettingsPref: Encodable, Sendable {
