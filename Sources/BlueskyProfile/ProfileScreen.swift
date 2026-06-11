@@ -96,6 +96,12 @@ public struct ProfileScreen: View {
             await viewModel.loadProfile()
             await loadCurrentTab(selectedTab)
         }
+        // #0199: theme background on the screen container — the region below
+        // the feed content otherwise shows the system background, which is
+        // visibly black (not #151D28) under the Dim variant. A plain
+        // `.background(ShapeStyle)` only paints, it does not change layout,
+        // so the #0155 safe-area constraints above are unaffected.
+        .background(theme.colors.background)
         #if os(iOS)
         // #0083: drop the giant "brennan.sstools.co" headline. RN renders
         // nothing above the banner, so hide the navigation bar entirely on

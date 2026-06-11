@@ -19,6 +19,8 @@ public struct HashtagView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
 
+    @Environment(\.blueskyTheme) private var theme
+
     public init(hashtag: String, network: any NetworkClient) {
         self.hashtag = hashtag
         self.network = network
@@ -53,6 +55,10 @@ public struct HashtagView: View {
                 .refreshable { await load(reset: true) }
             }
         }
+        // #0199: theme background on the screen container — the list's hidden
+        // scroll-content background otherwise exposes the system background,
+        // which is visibly black (not #151D28) under the Dim variant.
+        .background(theme.colors.background)
         .navigationTitle("#\(hashtag)")
         .task { await load(reset: true) }
     }

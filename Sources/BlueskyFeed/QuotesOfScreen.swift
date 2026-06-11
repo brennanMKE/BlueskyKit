@@ -19,6 +19,8 @@ public struct QuotesOfScreen: View {
 
     @State private var viewModel: QuotesViewModel
 
+    @Environment(\.blueskyTheme) private var theme
+
     public init(
         postURI: ATURI,
         network: any NetworkClient,
@@ -60,6 +62,10 @@ public struct QuotesOfScreen: View {
                 .refreshable { await viewModel.load() }
             }
         }
+        // #0199: theme background on the screen container so the area below
+        // the quotes list renders the active palette (dim) instead of the
+        // system background.
+        .background(theme.colors.background)
         .navigationTitle("Quotes")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)

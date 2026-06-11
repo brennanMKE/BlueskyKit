@@ -71,6 +71,7 @@ public struct FeedView: View {
     /// store for .timeline instead of creating a new one, so the initial load is never
     /// tied to a SwiftUI .task that can be cancelled by view recreation.
     @Environment(FeedStore.self) private var bootTimelineStore: FeedStore
+    @Environment(\.blueskyTheme) private var theme
 
     public init(
         network: any NetworkClient,
@@ -180,6 +181,12 @@ public struct FeedView: View {
             // ellipsis / overflow menu rather than the global header.
             pager
         }
+        // #0199: paint the screen container with the theme background. The
+        // shell injects the variant-aware theme (light / dark / dim); without
+        // this, any region the content doesn't cover shows the *system*
+        // background, which only coincidentally matches the light and dark
+        // palettes and is visibly wrong (#000000) under Dim.
+        .background(theme.colors.background)
         #if os(macOS)
         .navigationTitle("Home")
         #else

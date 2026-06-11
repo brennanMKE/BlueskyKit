@@ -56,6 +56,8 @@ public struct ThreadView: View {
     /// reader, since the OP has explicitly chosen to suppress them.
     @State private var showHiddenReplies: Bool = false
 
+    @Environment(\.blueskyTheme) private var theme
+
     public init(
         uri: ATURI,
         network: any NetworkClient,
@@ -93,6 +95,10 @@ public struct ThreadView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        // #0199: theme background on the screen container — the region below
+        // the last reply otherwise shows the system background, which is
+        // visibly black (not #151D28) under the Dim variant.
+        .background(theme.colors.background)
         .navigationTitle("Thread")
         .toolbar { sortToolbar }
         .task { await viewModel.load() }
