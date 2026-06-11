@@ -18,7 +18,13 @@ public struct AspectRatio: Codable, Hashable, Sendable {
 
 /// An IPLD blob reference as stored in a post record.
 ///
-/// AT Protocol encodes the CID as `{ "ref": { "$link": "<cid>" }, "mimeType": "...", "size": N }`.
+/// AT Protocol encodes a blob as
+/// `{ "$type": "blob", "ref": { "$link": "<cid>" }, "mimeType": "...", "size": N }`.
+/// The `$type: "blob"` discriminator is required by lexicon validation on
+/// record writes (#0197), so `encode(to:)` always emits it. Decoding stays
+/// lenient: `$type` is not required on reads, and the deprecated legacy shape
+/// `{ "cid": "<cid>", "mimeType": "..." }` (no `ref`, no `size`) found in old
+/// records is also accepted.
 public struct BlobRef: Codable, Hashable, Sendable {
     public let cid: CID
     public let mimeType: String
@@ -35,18 +41,29 @@ public struct BlobRef: Codable, Hashable, Sendable {
         enum CodingKeys: String, CodingKey { case link = "$link" }
     }
 
-    private enum CodingKeys: String, CodingKey { case ref, mimeType, size }
+    private enum CodingKeys: String, CodingKey {
+        case type = "$type"
+        case ref, mimeType, size
+        /// Legacy (deprecated) blob shape only — never encoded.
+        case cid
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        let ref = try c.decode(IPLDLink.self, forKey: .ref)
-        self.cid = ref.link
+        if let ref = try c.decodeIfPresent(IPLDLink.self, forKey: .ref) {
+            self.cid = ref.link
+            self.size = try c.decode(Int.self, forKey: .size)
+        } else {
+            // Deprecated legacy shape: { "cid": "<cid>", "mimeType": "..." }.
+            self.cid = try c.decode(CID.self, forKey: .cid)
+            self.size = try c.decodeIfPresent(Int.self, forKey: .size) ?? 0
+        }
         self.mimeType = try c.decode(String.self, forKey: .mimeType)
-        self.size = try c.decode(Int.self, forKey: .size)
     }
 
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode("blob", forKey: .type)
         try c.encode(IPLDLink(link: cid), forKey: .ref)
         try c.encode(mimeType, forKey: .mimeType)
         try c.encode(size, forKey: .size)

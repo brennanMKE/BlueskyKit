@@ -685,3 +685,116 @@ struct BookmarkCodableTests {
         #expect(response.bookmarks[1].subject.cid == "bafy3")
     }
 }
+
+// MARK: - BlobRef (#0197)
+
+@Suite("BlobRef lexicon (#0197)")
+struct BlobRefCodableTests {
+    /// Drill into a nested JSON dictionary via key path components.
+    private func dig(_ json: [String: Any], _ path: [Any]) -> Any? {
+        var current: Any? = json
+        for component in path {
+            if let key = component as? String {
+                current = (current as? [String: Any])?[key]
+            } else if let index = component as? Int {
+                current = (current as? [Any])?[index]
+            }
+        }
+        return current
+    }
+
+    @Test("BlobRef encodes the $type: blob discriminator")
+    func encodeEmitsTypeDiscriminator() throws {
+        let blob = BlobRef(cid: "bafkreigcid", mimeType: "image/png", size: 1234)
+        let data = try iso8601Encoder.encode(blob)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(json["$type"] as? String == "blob")
+        #expect(dig(json, ["ref", "$link"]) as? String == "bafkreigcid")
+        #expect(json["mimeType"] as? String == "image/png")
+        #expect(json["size"] as? Int == 1234)
+        #expect(json["cid"] == nil)
+    }
+
+    @Test("PostRecord with image embed carries $type: blob at embed.images[0].image")
+    func encodeImagePost() throws {
+        let blob = BlobRef(cid: "bafkreiimage", mimeType: "image/jpeg", size: 9876)
+        let record = PostRecord(
+            text: "image post",
+            embed: .images([EmbedImage(image: blob, alt: "alt text", aspectRatio: AspectRatio(width: 4, height: 3))]),
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let data = try iso8601Encoder.encode(record)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(dig(json, ["embed", "$type"]) as? String == "app.bsky.embed.images")
+        #expect(dig(json, ["embed", "images", 0, "image", "$type"]) as? String == "blob")
+        #expect(dig(json, ["embed", "images", 0, "image", "ref", "$link"]) as? String == "bafkreiimage")
+        #expect(dig(json, ["embed", "images", 0, "image", "mimeType"]) as? String == "image/jpeg")
+        #expect(dig(json, ["embed", "images", 0, "image", "size"]) as? Int == 9876)
+    }
+
+    @Test("PostRecord with external embed carries $type: blob at embed.external.thumb")
+    func encodeExternalThumbPost() throws {
+        let thumb = BlobRef(cid: "bafkreithumb", mimeType: "image/jpeg", size: 555)
+        let record = PostRecord(
+            text: "link card post",
+            embed: .external(EmbedExternal(uri: "https://example.com", title: "Example", description: "desc", thumb: thumb)),
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let data = try iso8601Encoder.encode(record)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(dig(json, ["embed", "$type"]) as? String == "app.bsky.embed.external")
+        #expect(dig(json, ["embed", "external", "thumb", "$type"]) as? String == "blob")
+        #expect(dig(json, ["embed", "external", "thumb", "ref", "$link"]) as? String == "bafkreithumb")
+    }
+
+    @Test("PostRecord with video embed carries $type: blob at embed.video")
+    func encodeVideoPost() throws {
+        let blob = BlobRef(cid: "bafkreivideo", mimeType: "video/mp4", size: 100_000)
+        let record = PostRecord(
+            text: "video post",
+            embed: .video(EmbedVideo(video: blob, captions: nil, alt: nil, aspectRatio: nil)),
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let data = try iso8601Encoder.encode(record)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(dig(json, ["embed", "$type"]) as? String == "app.bsky.embed.video")
+        #expect(dig(json, ["embed", "video", "$type"]) as? String == "blob")
+        #expect(dig(json, ["embed", "video", "ref", "$link"]) as? String == "bafkreivideo")
+    }
+
+    @Test("BlobRef round-trips through encode/decode")
+    func roundTripBlobRef() throws {
+        let blob = BlobRef(cid: "bafkreiroundtrip", mimeType: "image/png", size: 42)
+        let decoded = try roundTrip(blob)
+        #expect(decoded == blob)
+    }
+
+    @Test("BlobRef decodes the server shape carrying $type")
+    func decodeServerShape() throws {
+        let json = """
+        { "$type": "blob", "ref": { "$link": "bafkreiserver" }, "mimeType": "image/png", "size": 77 }
+        """.data(using: .utf8)!
+        let blob = try iso8601.decode(BlobRef.self, from: json)
+        #expect(blob == BlobRef(cid: "bafkreiserver", mimeType: "image/png", size: 77))
+    }
+
+    @Test("BlobRef decodes without $type (lenient reads)")
+    func decodeWithoutType() throws {
+        let json = """
+        { "ref": { "$link": "bafkreinotype" }, "mimeType": "image/png", "size": 7 }
+        """.data(using: .utf8)!
+        let blob = try iso8601.decode(BlobRef.self, from: json)
+        #expect(blob == BlobRef(cid: "bafkreinotype", mimeType: "image/png", size: 7))
+    }
+
+    @Test("BlobRef decodes the deprecated legacy {cid, mimeType} shape")
+    func decodeLegacyShape() throws {
+        let json = """
+        { "cid": "bafylegacy", "mimeType": "image/jpeg" }
+        """.data(using: .utf8)!
+        let blob = try iso8601.decode(BlobRef.self, from: json)
+        #expect(blob.cid == "bafylegacy")
+        #expect(blob.mimeType == "image/jpeg")
+        #expect(blob.size == 0)
+    }
+}
