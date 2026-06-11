@@ -222,14 +222,13 @@ public struct MessageThreadScreen: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: ScrollViewportHeightKey.self,
-                                value: geo.size.height
-                            )
-                        }
-                    )
+                    // NOTE: the content must NOT also publish ScrollViewportHeightKey.
+                    // It used to carry a `.background(GeometryReader …)` here that
+                    // reported the *content* height into the same preference key as
+                    // the ScrollView's *viewport* height below; with a `max` reducer
+                    // the viewport resolved to the (larger) content height, making
+                    // `isAtBottom` permanently true (#0212). Viewport height now
+                    // comes solely from the ScrollView's own background reader.
                 }
                 .coordinateSpace(name: Self.scrollCoordinateSpace)
                 .background(

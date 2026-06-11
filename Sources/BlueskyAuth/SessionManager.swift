@@ -377,8 +377,19 @@ public final class SessionManager: SessionManaging {
         guard let stored = try await accountStore.load(did: did) else {
             throw ATError.unknown("No stored account for DID \(did)")
         }
+        let previous = currentAccount
         try await resumeSession(stored)
-        try await accountStore.setCurrentDID(did)
+        do {
+            try await accountStore.setCurrentDID(did)
+        } catch {
+            // Persisting the active DID failed — roll back the in-memory
+            // current account so it can't diverge from the persisted
+            // currentDID that `restoreLastSession` reads on the next launch
+            // (#0217). Without this, the running app showed the new account
+            // active while a relaunch reverted to the old one.
+            currentAccount = previous
+            throw error
+        }
     }
 
     public func logout(did: DID) async throws {
@@ -407,6 +418,18 @@ public final class SessionManager: SessionManaging {
         accounts.removeAll { $0.did == did }
 
         if currentAccount?.did == did {
+            // Removing the active account: promote another signed-in account if
+            // one exists (RN parity) instead of dropping to the login screen
+            // while valid sessions remain (#0218).
+            if let next = accounts.first {
+                do {
+                    try await switchAccount(to: next.did)
+                    return
+                } catch {
+                    logger.error("removeAccount: failed to promote \(next.did.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    // Fall through to the signed-out state below.
+                }
+            }
             currentAccount = nil
             try await accountStore.setCurrentDID(nil)
         }

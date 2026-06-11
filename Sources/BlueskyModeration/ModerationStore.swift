@@ -467,12 +467,17 @@ public final class ModerationStore: ModerationStoring {
     }
 
     public func unmuteList(_ listURI: ATURI) async {
+        // Optimistically drop the row so the Moderation Lists screen reflects
+        // the unsubscribe immediately; restore it if the call fails (#0215).
+        let previous = subscribedModLists
+        subscribedModLists.removeAll { $0.uri == listURI }
         do {
             let _: EmptyResponse = try await network.post(
                 lexicon: "app.bsky.graph.unmuteActorList",
                 body: ListMuteRequest(list: listURI)
             )
         } catch {
+            subscribedModLists = previous
             errorMessage = error.localizedDescription
         }
     }
@@ -494,6 +499,9 @@ public final class ModerationStore: ModerationStoring {
             return
         }
         guard let viewerDID else { return }
+        // Optimistically drop the row; restore on failure (#0215).
+        let previous = subscribedModLists
+        subscribedModLists.removeAll { $0.uri == list.uri }
         do {
             let _: EmptyResponse = try await network.post(
                 lexicon: "com.atproto.repo.deleteRecord",
@@ -504,6 +512,7 @@ public final class ModerationStore: ModerationStoring {
                 )
             )
         } catch {
+            subscribedModLists = previous
             errorMessage = error.localizedDescription
         }
     }

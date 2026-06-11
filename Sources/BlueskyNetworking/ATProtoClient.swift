@@ -20,9 +20,59 @@ public actor ATProtoClient: NetworkClient {
     }()
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
+        // `.iso8601` uses ISO8601DateFormatter's default options, which reject
+        // fractional seconds — but the AT Proto appview routinely emits
+        // timestamps like `...:00.123Z`, so whole feed items failed to decode
+        // (#0214). Parse fractional first, fall back to whole-second, and
+        // tolerate >3 fractional digits by truncating to milliseconds.
+        d.dateDecodingStrategy = .custom { decoder in
+            let s = try decoder.singleValueContainer().decode(String.self)
+            if let date = ATProtoClient.parseISO8601(s) { return date }
+            throw DecodingError.dataCorruptedError(
+                in: try decoder.singleValueContainer(),
+                debugDescription: "Invalid ISO8601 date: \(s)"
+            )
+        }
         return d
     }()
+
+    // ISO8601 parsing is serialized through this actor's isolation (the decoder
+    // is only used from actor-isolated `decode`), so sharing these formatters is
+    // safe. `nonisolated(unsafe)` opts out of the Sendable check accordingly.
+    nonisolated(unsafe) private static let iso8601Fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    nonisolated(unsafe) private static let iso8601Plain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    /// Parses an AT Proto ISO8601 timestamp, tolerating fractional seconds
+    /// (including >3 digits, which `ISO8601DateFormatter` otherwise rejects).
+    nonisolated static func parseISO8601(_ s: String) -> Date? {
+        if let d = iso8601Fractional.date(from: s) { return d }
+        if let d = iso8601Plain.date(from: s) { return d }
+        if let normalized = normalizeFractionalSeconds(s),
+           let d = iso8601Fractional.date(from: normalized) {
+            return d
+        }
+        return nil
+    }
+
+    /// Truncates sub-second precision to milliseconds so a microsecond/
+    /// nanosecond timestamp (e.g. `...:00.123456Z`) parses.
+    nonisolated private static func normalizeFractionalSeconds(_ s: String) -> String? {
+        guard let dot = s.firstIndex(of: ".") else { return nil }
+        let afterDot = s.index(after: dot)
+        var end = afterDot
+        while end < s.endIndex, s[end].isNumber { end = s.index(after: end) }
+        let digits = s[afterDot..<end]
+        guard digits.count > 3 else { return nil }
+        return String(s[s.startIndex..<afterDot]) + digits.prefix(3) + String(s[end...])
+    }
 
     public init(
         accountStore: any AccountStore,
@@ -242,10 +292,33 @@ public actor ATProtoClient: NetworkClient {
         return stored
     }
 
+    /// In-flight refresh, so concurrent 401s coalesce onto a single
+    /// `refreshSession` call instead of stampeding it (#0208). AT Proto rotates
+    /// the refresh token, so parallel refreshes invalidate each other and a
+    /// late one would overwrite the freshly-rotated tokens, spuriously expiring
+    /// a valid session.
+    private var refreshTask: Task<StoredAccount, Error>?
+
+    /// Single-flight wrapper around `performRefresh`. If a refresh is already
+    /// running, awaits it; otherwise starts one, re-loading the latest stored
+    /// account first (another request may have already rotated the tokens).
+    private func refreshTokens(stored: StoredAccount) async throws -> StoredAccount {
+        if let task = refreshTask {
+            return try await task.value
+        }
+        let task = Task<StoredAccount, Error> { [self] in
+            let latest = (try? await currentStoredAccount()) ?? stored
+            return try await performRefresh(stored: latest)
+        }
+        refreshTask = task
+        defer { refreshTask = nil }
+        return try await task.value
+    }
+
     /// Calls `refreshSession` on the PDS, saves the new tokens, and returns the updated `StoredAccount`.
     ///
     /// Throws `ATError.sessionExpired` if the refresh token is rejected.
-    private func refreshTokens(stored: StoredAccount) async throws -> StoredAccount {
+    private func performRefresh(stored: StoredAccount) async throws -> StoredAccount {
         let url = stored.account.serviceEndpoint.appending(path: "xrpc/com.atproto.server.refreshSession")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"

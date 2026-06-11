@@ -74,6 +74,19 @@ public final class MessageThreadStore: MessageThreadStoring {
         isLoading = true
         defer { isLoading = false }
         errorMessage = nil
+        // Refresh the convo so group detection and member/sender lookups in the
+        // thread use server-fresh membership (the convo passed at screen init
+        // can be stale if members were added/removed since the inbox loaded —
+        // #0220). Best-effort: a failure here must not block loading messages.
+        do {
+            let convoResp: ConvoResponse = try await network.get(
+                lexicon: "chat.bsky.convo.getConvo",
+                params: ["convoId": convoId]
+            )
+            convo = convoResp.convo
+        } catch {
+            logger.debug("getConvo during thread load failed (non-fatal): \(error.localizedDescription, privacy: .public)")
+        }
         do {
             let resp: GetMessagesResponse = try await network.get(
                 lexicon: "chat.bsky.convo.getMessages",
