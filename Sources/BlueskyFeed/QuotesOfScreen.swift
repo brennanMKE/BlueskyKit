@@ -70,7 +70,6 @@ public struct QuotesOfScreen: View {
                 ProgressView()
             }
         }
-        .adaptiveBlueskyTheme()
     }
 
     private func actions() -> PostCard.Actions {
@@ -185,6 +184,7 @@ private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
             network: PreviewNoOpNetwork()
         )
     }
+    .blueskyTheme(.light)
     .preferredColorScheme(.light)
 }
 
@@ -195,5 +195,6 @@ private final class PreviewNoOpNetwork: NetworkClient, @unchecked Sendable {
             network: PreviewNoOpNetwork()
         )
     }
+    .blueskyTheme(.dark)
     .preferredColorScheme(.dark)
 }

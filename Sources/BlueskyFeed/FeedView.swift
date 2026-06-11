@@ -189,7 +189,6 @@ public struct FeedView: View {
         // display mode so we don't get the giant "Home" headline.
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .adaptiveBlueskyTheme()
         .task {
             // Lazy-create the saved-feeds store so we share `cache` from init
             // without forcing every preview to provide one.
@@ -579,6 +578,7 @@ private final class PreviewNoOpCache: CacheStore, @unchecked Sendable {
             cache: PreviewNoOpCache()
         )
     }
+    .blueskyTheme(.light)
     .preferredColorScheme(.light)
 }
 
@@ -590,5 +590,6 @@ private final class PreviewNoOpCache: CacheStore, @unchecked Sendable {
             cache: PreviewNoOpCache()
         )
     }
+    .blueskyTheme(.dark)
     .preferredColorScheme(.dark)
 }

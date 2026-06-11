@@ -121,24 +121,15 @@ extension EnvironmentValues {
 
 public extension View {
     /// Injects a `BlueskyTheme` into the SwiftUI environment.
+    ///
+    /// The app shell (`AppearanceShellModifier` in the app target) injects the
+    /// user's resolved theme — including the dark-variant choice between
+    /// `.dark` and `.dim` — at the root, so content screens must *not*
+    /// re-inject a theme themselves; doing so discards the variant preference
+    /// (#0199). Use this modifier only at the root of a hierarchy that has no
+    /// themed ancestor (the shell itself, previews, and component galleries).
     func blueskyTheme(_ theme: BlueskyTheme) -> some View {
         environment(\.blueskyTheme, theme)
-    }
-
-    /// Injects a `BlueskyTheme` that automatically tracks the system appearance.
-    /// Uses `.dark` when the OS is in dark mode and `.light` otherwise.
-    func adaptiveBlueskyTheme() -> some View {
-        modifier(AdaptiveBlueskyThemeModifier())
-    }
-}
-
-// MARK: - Adaptive modifier
-
-private struct AdaptiveBlueskyThemeModifier: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
-
-    func body(content: Content) -> some View {
-        content.environment(\.blueskyTheme, colorScheme == .dark ? .dark : .light)
     }
 }
 

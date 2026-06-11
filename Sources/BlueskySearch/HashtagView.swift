@@ -55,7 +55,6 @@ public struct HashtagView: View {
         }
         .navigationTitle("#\(hashtag)")
         .task { await load(reset: true) }
-        .adaptiveBlueskyTheme()
     }
 
     // MARK: - Data loading
@@ -96,6 +95,7 @@ public struct HashtagView: View {
     NavigationStack {
         HashtagView(hashtag: "bluesky", network: PreviewNoOpNetwork())
     }
+    .blueskyTheme(.light)
     .preferredColorScheme(.light)
 }
 
@@ -103,5 +103,6 @@ public struct HashtagView: View {
     NavigationStack {
         HashtagView(hashtag: "bluesky", network: PreviewNoOpNetwork())
     }
+    .blueskyTheme(.dark)
     .preferredColorScheme(.dark)
 }

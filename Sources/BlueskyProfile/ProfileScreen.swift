@@ -96,7 +96,6 @@ public struct ProfileScreen: View {
             await viewModel.loadProfile()
             await loadCurrentTab(selectedTab)
         }
-        .adaptiveBlueskyTheme()
         #if os(iOS)
         // #0083: drop the giant "brennan.sstools.co" headline. RN renders
         // nothing above the banner, so hide the navigation bar entirely on
@@ -422,6 +421,7 @@ private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
             accountStore: PreviewNoOpAccountStore()
         )
     }
+    .blueskyTheme(.light)
     .preferredColorScheme(.light)
 }
 
@@ -433,5 +433,6 @@ private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
             accountStore: PreviewNoOpAccountStore()
         )
     }
+    .blueskyTheme(.dark)
     .preferredColorScheme(.dark)
 }

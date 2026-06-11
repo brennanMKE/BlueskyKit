@@ -94,7 +94,6 @@ public struct ThreadView: View {
             }
         }
         .navigationTitle("Thread")
-        .adaptiveBlueskyTheme()
         .toolbar { sortToolbar }
         .task { await viewModel.load() }
         .sheet(isPresented: Binding(
@@ -563,6 +562,7 @@ private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
             accountStore: PreviewNoOpAccountStore()
         )
     }
+    .blueskyTheme(.light)
     .preferredColorScheme(.light)
 }
 
@@ -574,5 +574,6 @@ private final class PreviewNoOpAccountStore: AccountStore, @unchecked Sendable {
             accountStore: PreviewNoOpAccountStore()
         )
     }
+    .blueskyTheme(.dark)
     .preferredColorScheme(.dark)
 }
