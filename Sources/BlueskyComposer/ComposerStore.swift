@@ -23,6 +23,7 @@ public protocol ComposerStoring: AnyObject, Observable, Sendable {
         linkMetadata: LinkMetadata?,
         additionalPosts: [String],
         replyTo: PostRef?,
+        replyRoot: PostRef?,
         quotedPost: PostRef?,
         selectedLanguage: String,
         mentionDIDs: [String: DID],
@@ -180,6 +181,7 @@ public final class ComposerStore: ComposerStoring {
         linkMetadata: LinkMetadata?,
         additionalPosts: [String],
         replyTo: PostRef?,
+        replyRoot: PostRef?,
         quotedPost: PostRef?,
         selectedLanguage: String,
         mentionDIDs: [String: DID],
@@ -337,7 +339,12 @@ public final class ComposerStore: ComposerStoring {
             }
 
             let facets = FacetBuilder.build(from: text, mentionDIDs: mentionDIDs)
-            let reply = replyTo.map { ReplyRef(root: $0, parent: $0) }
+            // The thread root must be the *root* of the parent's thread, not the
+            // parent itself. When replying to a reply, inherit the parent's
+            // `reply.root`; only when the parent is a top-level post does
+            // root == parent (#0213). `replyRoot` is the parent's existing root
+            // (or nil for a top-level parent).
+            let reply = replyTo.map { ReplyRef(root: replyRoot ?? $0, parent: $0) }
             // Encode self-labels only when at least one is selected, so the
             // record's `labels` field is omitted entirely for an unlabeled
             // post (matching RN's `if (draft.labels.length)` guard).

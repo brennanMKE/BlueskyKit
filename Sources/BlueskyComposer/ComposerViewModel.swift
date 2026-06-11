@@ -306,6 +306,10 @@ public final class ComposerViewModel {
             linkMetadata: visibleLinkMetadata,
             additionalPosts: additionalPosts,
             replyTo: replyTo,
+            // Inherit the parent's thread root so a reply-to-a-reply isn't
+            // mis-threaded under the parent (#0213). nil when the parent is a
+            // top-level post (the store falls back to the parent ref).
+            replyRoot: replyToView?.record.reply?.root,
             quotedPost: quotedPost,
             selectedLanguage: selectedLanguage,
             mentionDIDs: mentionDIDs,

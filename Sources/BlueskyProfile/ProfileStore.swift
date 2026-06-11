@@ -632,11 +632,40 @@ public final class ProfileStore: ProfileStoring {
 
     public func updateProfile(displayName: String?, description: String?) async throws {
         guard let viewerDID = try await accountStore.loadCurrentDID() else { return }
+
+        // Read-modify-write the existing `app.bsky.actor.profile` record as raw
+        // JSON so avatar, banner, pinnedPost, self-labels, and any unmodeled
+        // fields survive. `putRecord` REPLACES the whole record, and the typed
+        // `ProfileRecord` only carries displayName/description/labels — writing
+        // a fresh one wiped everything else (#0210).
+        var fields: [String: JSONValue]
+        do {
+            let existing: GetRecordResponse<JSONValue> = try await network.get(
+                lexicon: "com.atproto.repo.getRecord",
+                params: [
+                    "repo": viewerDID.rawValue,
+                    "collection": "app.bsky.actor.profile",
+                    "rkey": "self"
+                ]
+            )
+            fields = existing.value.objectValue ?? [:]
+        } catch {
+            // No existing record yet (first profile edit) — start fresh.
+            logger.debug("updateProfile: getRecord failed, writing a fresh record: \(error.localizedDescription, privacy: .public)")
+            fields = [:]
+        }
+
+        fields["$type"] = .string("app.bsky.actor.profile")
+        // Assigning nil removes the key, so clearing a field omits it (matching
+        // the record's "absent when empty" convention) rather than writing "".
+        fields["displayName"] = displayName.map(JSONValue.string)
+        fields["description"] = description.map(JSONValue.string)
+
         let req = PutRecordRequest(
             repo: viewerDID.rawValue,
             collection: "app.bsky.actor.profile",
             rkey: "self",
-            record: ProfileRecord(displayName: displayName, description: description)
+            record: JSONValue.object(fields)
         )
         let _: EmptyResponse = try await network.post(
             lexicon: "com.atproto.repo.putRecord", body: req

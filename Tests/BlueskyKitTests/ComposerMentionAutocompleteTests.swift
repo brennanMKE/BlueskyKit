@@ -33,6 +33,7 @@ private final class MockComposerStore: ComposerStoring {
         linkMetadata: LinkMetadata?,
         additionalPosts: [String],
         replyTo: PostRef?,
+        replyRoot: PostRef?,
         quotedPost: PostRef?,
         selectedLanguage: String,
         mentionDIDs: [String: DID],
