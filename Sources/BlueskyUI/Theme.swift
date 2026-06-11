@@ -40,56 +40,73 @@ public struct BlueskyTheme: Sendable, Equatable {
 
 extension BlueskyTheme {
 
-    // Hex values sourced from the Bluesky ALF gray/blue scales used in the React Native app.
+    // Hex values transcribed from the Bluesky ALF design system (`@bsky.app/alf` 0.1.7,
+    // the version pinned by the RN client at the migration baseline commit 46b8a58).
+    //
+    // Token mapping (Swift role → ALF palette slot, per `createTheme` in alf/themes.ts):
+    //   background          → contrast_0     (atoms.bg)
+    //   backgroundSecondary → contrast_25    (atoms.bg_contrast_25)
+    //   textPrimary         → contrast_1000  (atoms.text)
+    //   textSecondary       → contrast_700   (atoms.text_contrast_medium)
+    //   textTertiary        → contrast_400   (atoms.text_contrast_low)
+    //   link                → primary_500
+    //   like                → pink (static across themes)
+    //   border              → contrast_100   (atoms.border_contrast_low)
+    //   borderSubtle        → contrast_50
+    //   error               → negative_500
+    //   success             → positive_500
+    //
+    // `.light` reads DEFAULT_PALETTE directly, `.dark` is invertPalette(DEFAULT_PALETTE),
+    // `.dim` is invertPalette(DEFAULT_SUBDUED_PALETTE) — exactly as ALF's createThemes does.
 
     public static let light = BlueskyTheme(
         variant: .light,
         colors: Colors(
             background:          Color(srgb: 0xFF_FF_FF),
-            backgroundSecondary: Color(srgb: 0xF1_F3_F5),
-            textPrimary:         Color(srgb: 0x0F_14_19),
-            textSecondary:       Color(srgb: 0x53_64_71),
-            textTertiary:        Color(srgb: 0x8B_98_A5),
-            link:                Color(srgb: 0x00_85_FF),
+            backgroundSecondary: Color(srgb: 0xF9_FA_FB),
+            textPrimary:         Color(srgb: 0x00_00_00),
+            textSecondary:       Color(srgb: 0x40_51_68),
+            textTertiary:        Color(srgb: 0x87_98_B0),
+            link:                Color(srgb: 0x00_6A_FF),
             like:                Color(srgb: 0xEC_48_99),
-            border:              Color(srgb: 0xE7_EC_F0),
-            borderSubtle:        Color(srgb: 0xF1_F3_F5),
-            error:               Color(srgb: 0xE5_39_35),
-            success:             Color(srgb: 0x20_BC_07)
+            border:              Color(srgb: 0xDC_E2_EA),
+            borderSubtle:        Color(srgb: 0xEF_F2_F6),
+            error:               Color(srgb: 0xE9_16_46),
+            success:             Color(srgb: 0x09_B3_5E)
         )
     )
 
     public static let dark = BlueskyTheme(
         variant: .dark,
         colors: Colors(
-            background:          Color(srgb: 0x16_1E_27),
-            backgroundSecondary: Color(srgb: 0x1E_2D_3D),
-            textPrimary:         Color(srgb: 0xF1_F3_F5),
-            textSecondary:       Color(srgb: 0x8B_98_A5),
-            textTertiary:        Color(srgb: 0x59_70_8A),
-            link:                Color(srgb: 0x20_8B_FE),
+            background:          Color(srgb: 0x00_00_00),
+            backgroundSecondary: Color(srgb: 0x11_18_22),
+            textPrimary:         Color(srgb: 0xFF_FF_FF),
+            textSecondary:       Color(srgb: 0xA5_B2_C5),
+            textTertiary:        Color(srgb: 0x52_65_80),
+            link:                Color(srgb: 0x00_6A_FF),
             like:                Color(srgb: 0xEC_48_99),
-            border:              Color(srgb: 0x2A_3A_4A),
-            borderSubtle:        Color(srgb: 0x1E_2D_3D),
-            error:               Color(srgb: 0xEF_53_50),
-            success:             Color(srgb: 0x20_BC_07)
+            border:              Color(srgb: 0x23_2E_3E),
+            borderSubtle:        Color(srgb: 0x19_22_2E),
+            error:               Color(srgb: 0xE9_16_46),
+            success:             Color(srgb: 0x09_B3_5E)
         )
     )
 
     public static let dim = BlueskyTheme(
         variant: .dim,
         colors: Colors(
-            background:          Color(srgb: 0x15_20_2B),
-            backgroundSecondary: Color(srgb: 0x1E_2D_3D),
-            textPrimary:         Color(srgb: 0xF7_F9_F9),
-            textSecondary:       Color(srgb: 0x8B_98_A5),
-            textTertiary:        Color(srgb: 0x59_70_8A),
-            link:                Color(srgb: 0x1D_9B_F0),
-            like:                Color(srgb: 0xF9_18_80),
-            border:              Color(srgb: 0x2F_33_36),
-            borderSubtle:        Color(srgb: 0x1E_2D_3D),
-            error:               Color(srgb: 0xFF_60_60),
-            success:             Color(srgb: 0x00_BA_7C)
+            background:          Color(srgb: 0x15_1D_28),
+            backgroundSecondary: Color(srgb: 0x1C_27_36),
+            textPrimary:         Color(srgb: 0xFF_FF_FF),
+            textSecondary:       Color(srgb: 0xAB_B8_C9),
+            textTertiary:        Color(srgb: 0x58_6C_89),
+            link:                Color(srgb: 0x0F_73_FF),
+            like:                Color(srgb: 0xEC_48_99),
+            border:              Color(srgb: 0x2C_3A_4E),
+            borderSubtle:        Color(srgb: 0x22_2E_3F),
+            error:               Color(srgb: 0xEB_24_52),
+            success:             Color(srgb: 0x0A_C2_66)
         )
     )
 }
