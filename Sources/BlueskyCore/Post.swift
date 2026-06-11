@@ -302,6 +302,40 @@ public struct PostRecord: Codable, Sendable {
         self.labels = labels
         self.createdAt = createdAt
     }
+
+    // Custom Codable so the written record carries its lexicon `$type`
+    // discriminator (`app.bsky.feed.post`), matching every other record this
+    // client writes and `@atproto/api`. The PDS tolerates its absence
+    // (collection is authoritative) but strict lexicon validators / some relay
+    // and appview paths reject record-level-`$type`-less records (#0225).
+    // Decoding tolerates a missing `$type` (e.g. when reading the embedded
+    // value of a `getRecord`/`PostView.record`).
+    private enum CodingKeys: String, CodingKey {
+        case type = "$type", text, facets, embed, reply, langs, labels, createdAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = try c.decode(String.self, forKey: .text)
+        facets = try c.decodeIfPresent([RichTextFacet].self, forKey: .facets)
+        embed = try c.decodeIfPresent(Embed.self, forKey: .embed)
+        reply = try c.decodeIfPresent(ReplyRef.self, forKey: .reply)
+        langs = try c.decodeIfPresent([String].self, forKey: .langs)
+        labels = try c.decodeIfPresent(SelfLabels.self, forKey: .labels)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode("app.bsky.feed.post", forKey: .type)
+        try c.encode(text, forKey: .text)
+        try c.encodeIfPresent(facets, forKey: .facets)
+        try c.encodeIfPresent(embed, forKey: .embed)
+        try c.encodeIfPresent(reply, forKey: .reply)
+        try c.encodeIfPresent(langs, forKey: .langs)
+        try c.encodeIfPresent(labels, forKey: .labels)
+        try c.encode(createdAt, forKey: .createdAt)
+    }
 }
 
 // MARK: - Reply references

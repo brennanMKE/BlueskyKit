@@ -252,6 +252,12 @@ public struct SearchScreen: View {
                 ForEach(viewModel.suggestedFeeds, id: \.uri) { feed in
                     FeedCard(feed: feed)
                     Divider()
+                        .onAppear {
+                            // #0227: paginate feed search like People/Posts.
+                            if feed.uri == viewModel.suggestedFeeds.last?.uri {
+                                Task { await viewModel.loadMore() }
+                            }
+                        }
                 }
                 if viewModel.isLoading {
                     HStack { Spacer(); ProgressView(); Spacer() }.padding()

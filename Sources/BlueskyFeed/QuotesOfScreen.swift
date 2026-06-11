@@ -163,13 +163,32 @@ public final class QuotesViewModel {
     /// detached variant lands in that case.
     private func filterDetached(_ posts: [PostView]) -> [PostView] {
         posts.filter { post in
-            guard case .record(let recordEmbed) = post.embed else { return true }
-            if case .unknown(let type) = recordEmbed.record,
-               type == "app.bsky.embed.record#viewDetached" {
-                return false
+            // A detached quote can arrive either as a plain `record` embed or,
+            // when the quote post also has media, as a `recordWithMedia` embed
+            // whose inner record is the detached view. The earlier code only
+            // checked the plain `.record` case, so a quote-with-media whose
+            // quoted record had been detached still rendered an empty quote
+            // block (#0229).
+            switch post.embed {
+            case .record(let recordEmbed):
+                return !Self.isDetached(recordEmbed)
+            case .recordWithMedia(let recordEmbed, _):
+                return !Self.isDetached(recordEmbed)
+            default:
+                return true
             }
+        }
+    }
+
+    /// Whether a record embed view's inner record is the detached-quote view
+    /// (`app.bsky.embed.record#viewDetached`), which our `EmbedRecordContent`
+    /// decoder surfaces as `.unknown(typeString)`.
+    private static func isDetached(_ recordEmbed: EmbedRecordView) -> Bool {
+        if case .unknown(let type) = recordEmbed.record,
+           type == "app.bsky.embed.record#viewDetached" {
             return true
         }
+        return false
     }
 }
 

@@ -51,8 +51,16 @@ public final class SearchStore: SearchStoring {
     public private(set) var trendingTopics: [TrendingTopic] = []
     public private(set) var actorsCursor: String?
     public private(set) var postsCursor: String?
+    /// Pagination cursor for the Feeds tab (#0227 — feed search was page-1 only).
+    private var feedsCursor: String?
     public private(set) var isLoading = false
     public private(set) var errorMessage: String?
+
+    /// Bumped on every fresh search so a newer search supersedes an older
+    /// in-flight one instead of the older one being dropped by an `isLoading`
+    /// guard (e.g. switching result tabs mid-search, #0219). Results from a
+    /// superseded generation are discarded rather than written.
+    private var searchGeneration = 0
 
     private let network: any NetworkClient
 
@@ -64,16 +72,28 @@ public final class SearchStore: SearchStoring {
 
     public func search(query: String, tab: SearchTab, fresh: Bool) async {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty, !isLoading else { return }
+        guard !q.isEmpty else { return }
+        // A fresh search supersedes any in-flight request rather than being
+        // dropped (#0219); a `loadMore` (fresh:false) is still skipped while a
+        // load is active so we don't double-fetch a page.
+        if fresh {
+            searchGeneration += 1
+        } else if isLoading {
+            return
+        }
+        let gen = searchGeneration
         if fresh {
             actors = []
             posts = []
             suggestedFeeds = []
             actorsCursor = nil
             postsCursor = nil
+            feedsCursor = nil
         }
         isLoading = true
-        defer { isLoading = false }
+        // Only clear the spinner if we're still the active generation, so a
+        // superseded older task doesn't turn it off for the newer one.
+        defer { if gen == searchGeneration { isLoading = false } }
         errorMessage = nil
         do {
             switch tab {
@@ -83,6 +103,7 @@ public final class SearchStore: SearchStoring {
                 let resp: SearchActorsResponse = try await network.get(
                     lexicon: "app.bsky.actor.searchActors", params: params
                 )
+                guard gen == searchGeneration else { return }
                 if fresh { actors = resp.actors } else { actors.append(contentsOf: resp.actors) }
                 actorsCursor = resp.cursor
             case .posts:
@@ -91,14 +112,22 @@ public final class SearchStore: SearchStoring {
                 let resp: SearchPostsResponse = try await network.get(
                     lexicon: "app.bsky.feed.searchPosts", params: params
                 )
+                guard gen == searchGeneration else { return }
                 if fresh { posts = resp.posts } else { posts.append(contentsOf: resp.posts) }
                 postsCursor = resp.cursor
             case .feeds:
-                let params: [String: String] = ["q": q, "limit": "25"]
+                // Feed *search* is `getPopularFeedGenerators` with param key
+                // `query` — `getSuggestedFeeds` with `q` ignored the term and
+                // returned generic curated suggestions (#0211). It paginates,
+                // so carry the cursor and append (#0227).
+                var params: [String: String] = ["query": q, "limit": "25"]
+                if !fresh, let c = feedsCursor { params["cursor"] = c }
                 let resp: GetSuggestedFeedsResponse = try await network.get(
-                    lexicon: "app.bsky.feed.getSuggestedFeeds", params: params
+                    lexicon: "app.bsky.unspecced.getPopularFeedGenerators", params: params
                 )
-                suggestedFeeds = resp.feeds
+                guard gen == searchGeneration else { return }
+                if fresh { suggestedFeeds = resp.feeds } else { suggestedFeeds.append(contentsOf: resp.feeds) }
+                feedsCursor = resp.cursor
             }
         } catch {
             logger.error("search error: \(error, privacy: .public)")
@@ -112,6 +141,7 @@ public final class SearchStore: SearchStoring {
         suggestedFeeds = []
         actorsCursor = nil
         postsCursor = nil
+        feedsCursor = nil
     }
 
     // MARK: - Suggestions

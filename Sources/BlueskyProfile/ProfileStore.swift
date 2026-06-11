@@ -107,6 +107,12 @@ public final class ProfileStore: ProfileStoring {
     private var repostInFlight: Set<ATURI> = []
     /// Post URIs whose bookmark state is currently being mutated.
     private var bookmarkInFlight: Set<ATURI> = []
+    /// Guards the viewer-relationship mutations (follow/unfollow/block/unblock/
+    /// mute/unmute) against re-entrant taps. Unlike the per-post sets above
+    /// these target a single subject (the profile), so one flag suffices.
+    /// Without it, overlapping taps fired duplicate create/delete records and a
+    /// failed call could revert to a half-applied `original` snapshot (#0228).
+    private var relationshipInFlight = false
 
     private let network: any NetworkClient
     private let accountStore: any AccountStore
@@ -258,6 +264,9 @@ public final class ProfileStore: ProfileStoring {
     // MARK: - Follow / Unfollow
 
     public func follow() async {
+        guard !relationshipInFlight else { return }
+        relationshipInFlight = true
+        defer { relationshipInFlight = false }
         guard let profile else { return }
         let viewerDID: DID?
         do {
@@ -298,6 +307,9 @@ public final class ProfileStore: ProfileStoring {
     }
 
     public func unfollow() async {
+        guard !relationshipInFlight else { return }
+        relationshipInFlight = true
+        defer { relationshipInFlight = false }
         guard let profile,
               let followURI = profile.viewer?.following,
               let rkey = followURI.rkey else { return }
@@ -331,6 +343,9 @@ public final class ProfileStore: ProfileStoring {
     // MARK: - Block / Unblock
 
     public func block() async {
+        guard !relationshipInFlight else { return }
+        relationshipInFlight = true
+        defer { relationshipInFlight = false }
         guard let profile else { return }
         let viewerDID: DID?
         do {
@@ -369,6 +384,9 @@ public final class ProfileStore: ProfileStoring {
     }
 
     public func unblock() async {
+        guard !relationshipInFlight else { return }
+        relationshipInFlight = true
+        defer { relationshipInFlight = false }
         guard let profile,
               let blockURI = profile.viewer?.blocking,
               let rkey = blockURI.rkey else { return }
@@ -400,6 +418,9 @@ public final class ProfileStore: ProfileStoring {
     // MARK: - Mute / Unmute
 
     public func mute() async {
+        guard !relationshipInFlight else { return }
+        relationshipInFlight = true
+        defer { relationshipInFlight = false }
         guard let profile else { return }
         let original = self.profile
         self.profile = profile.withViewer { v in ProfileViewerState(
@@ -417,6 +438,9 @@ public final class ProfileStore: ProfileStoring {
     }
 
     public func unmute() async {
+        guard !relationshipInFlight else { return }
+        relationshipInFlight = true
+        defer { relationshipInFlight = false }
         guard let profile else { return }
         let original = self.profile
         self.profile = profile.withViewer { v in ProfileViewerState(

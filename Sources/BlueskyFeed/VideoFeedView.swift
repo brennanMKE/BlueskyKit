@@ -172,6 +172,13 @@ private struct VideoPostPage: View {
     /// observer (and the closure capturing self) past the view's lifetime.
     @State private var timeObserverToken: Any?
 
+    /// Token returned by the block-based `addObserver(forName:…)` for the
+    /// loop (`AVPlayerItemDidPlayToEndTime`) observer. The block API registers
+    /// an internal opaque object, NOT `self`, so it must be removed via this
+    /// token — the previous `removeObserver(self as Any, …)` was a no-op and
+    /// leaked one observer (and its closure) per page swiped (#0223).
+    @State private var endObserverToken: (any NSObjectProtocol)?
+
     /// Live snapshot of the post from the view model — drives like/repost
     /// counts so the optimistic update from `toggleLike(_:)` shows up here
     /// without re-routing the whole feed.
@@ -401,7 +408,7 @@ private struct VideoPostPage: View {
         // Loop playback — RN's expo-video sets `player.loop = true`; on AVPlayer
         // we re-seek to zero on the AVPlayerItem `didPlayToEndTime` notification.
         if let item = p.currentItem {
-            NotificationCenter.default.addObserver(
+            endObserverToken = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime,
                 object: item,
                 queue: .main
@@ -435,12 +442,9 @@ private struct VideoPostPage: View {
             player?.removeTimeObserver(token)
             timeObserverToken = nil
         }
-        if let item = player?.currentItem {
-            NotificationCenter.default.removeObserver(
-                self as Any,
-                name: .AVPlayerItemDidPlayToEndTime,
-                object: item
-            )
+        if let token = endObserverToken {
+            NotificationCenter.default.removeObserver(token)
+            endObserverToken = nil
         }
         player?.pause()
         player = nil

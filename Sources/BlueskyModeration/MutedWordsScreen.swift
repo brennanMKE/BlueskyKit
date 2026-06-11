@@ -363,8 +363,17 @@ public final class MutedWordsViewModel {
         let previous = entries
         if let id = entry.id {
             entries.removeAll { $0.id == id }
-        } else {
-            entries.removeAll { $0.value == entry.value && $0.targets == entry.targets }
+        } else if let idx = entries.firstIndex(where: {
+            // Match on full identity (not just value+targets) and drop a single
+            // entry: two entries can share value+targets but differ in
+            // expiration / actor scope, and `removeAll { value && targets }`
+            // deleted both (#0232).
+            $0.value == entry.value
+                && $0.targets == entry.targets
+                && $0.expiresAt == entry.expiresAt
+                && $0.actorTarget == entry.actorTarget
+        }) {
+            entries.remove(at: idx)
         }
         await write(rollback: previous)
     }

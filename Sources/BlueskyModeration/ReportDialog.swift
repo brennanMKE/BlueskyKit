@@ -605,6 +605,10 @@ public struct ReportDialog: View {
 
     private var canSubmit: Bool {
         guard selectedOption != nil else { return false }
+        // Enforce the 300-character limit the UI advertises (the counter turns
+        // red past 300). Without this the over-length string was submitted and
+        // rejected server-side with a generic error (#0231).
+        if details.count > 300 { return false }
         if !candidateLabelers.isEmpty && candidateLabelers.count > 1 {
             return selectedLabeler != nil
         }

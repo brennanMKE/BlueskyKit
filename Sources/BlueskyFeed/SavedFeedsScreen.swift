@@ -77,7 +77,14 @@ public struct SavedFeedsScreen: View {
             }
             #endif
         }
-        .task { await viewModel.load() }
+        // Don't reload from the server while the user has unsaved pin/reorder/
+        // delete edits — `load()` overwrites the same `feeds` array those edits
+        // live in, silently discarding them (and Save would then persist the
+        // un-edited server list). Only (re)load when there are no pending
+        // changes (#0230).
+        .task {
+            if !hasChanges { await viewModel.load() }
+        }
     }
 
     private func feedRow(_ feed: SavedFeed) -> some View {

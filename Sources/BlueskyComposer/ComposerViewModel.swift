@@ -127,7 +127,12 @@ public final class ComposerViewModel {
 
     // MARK: - Derived
 
-    public var characterCount: Int { text.unicodeScalars.count }
+    /// Grapheme-cluster count (RN parity: `graphemeLength` vs
+    /// `MAX_GRAPHEME_LENGTH = 300`). `text.count` counts user-perceived
+    /// characters, so a multi-scalar emoji / ZWJ family / flag / combining
+    /// sequence counts as one. `unicodeScalars.count` over-counted these and
+    /// wrongly flagged sub-300-grapheme posts as over-limit (#0224).
+    public var characterCount: Int { text.count }
     public var isOverLimit: Bool { characterCount > 300 }
     public var canPost: Bool {
         !text.trimmingCharacters(in: .whitespaces).isEmpty
