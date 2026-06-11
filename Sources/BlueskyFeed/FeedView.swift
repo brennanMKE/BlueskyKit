@@ -33,6 +33,15 @@ public extension Foundation.Notification.Name {
 /// value-type dictionary would reset to `[:]` on every re-init, causing
 /// duplicate `FeedViewModel` creation and two concurrent network fetches
 /// (issue #0049).
+///
+/// `@Observable` (#0205): `feedListContainer` reads `vmCache[selection]`
+/// during body evaluation, and the per-tab `.task` *writes* the slot after
+/// creating the view model. Without observation the write never invalidates
+/// the view, so a freshly-selected tab (Discover, Mentions, a pinned feed)
+/// stayed on its placeholder spinner until some unrelated state change
+/// re-rendered `FeedView` — up to 30 s (the badge poll) of a stuck spinner
+/// even though the feed had already loaded.
+@Observable
 final class FeedViewModelCache {
     private var storage: [FeedSelection: FeedViewModel] = [:]
 
@@ -66,6 +75,15 @@ public struct FeedView: View {
     private let showsInlineComposerPrompt: Bool
     var onPostTap: ((PostView) -> Void)?
     var onAuthorTap: ((ProfileBasic) -> Void)?
+    /// Tap on a card in the Discover tab's "Trending Videos" interstitial
+    /// (#0205). The parent owns navigation, so it pushes the immersive
+    /// `VideoFeedView` seeded at the tapped post. When `nil` the interstitial
+    /// is not rendered at all — RN gates the section on
+    /// `areVideoFeedsEnabled` the same way.
+    var onTrendingVideoTap: ((PostView) -> Void)?
+    /// Tap on the interstitial's trailing "View more" card; RN navigates to
+    /// the video feed generator's timeline.
+    var onTrendingVideosViewMore: (() -> Void)?
 
     /// Injected from boot() via SwiftUI environment. When present, FeedView uses this
     /// store for .timeline instead of creating a new one, so the initial load is never
@@ -80,7 +98,9 @@ public struct FeedView: View {
         bookmarks: (any BookmarkStoring)? = nil,
         showsInlineComposerPrompt: Bool = true,
         onPostTap: ((PostView) -> Void)? = nil,
-        onAuthorTap: ((ProfileBasic) -> Void)? = nil
+        onAuthorTap: ((ProfileBasic) -> Void)? = nil,
+        onTrendingVideoTap: ((PostView) -> Void)? = nil,
+        onTrendingVideosViewMore: (() -> Void)? = nil
     ) {
         self.network = network
         self.accountStore = accountStore
@@ -89,6 +109,8 @@ public struct FeedView: View {
         self.showsInlineComposerPrompt = showsInlineComposerPrompt
         self.onPostTap = onPostTap
         self.onAuthorTap = onAuthorTap
+        self.onTrendingVideoTap = onTrendingVideoTap
+        self.onTrendingVideosViewMore = onTrendingVideosViewMore
     }
 
     /// ID of the active tab in `tabs`. Driving the pager off an `id` rather
@@ -431,7 +453,7 @@ public struct FeedView: View {
                         Divider()
                     }
                     #endif
-                    ForEach(displayed, id: \.post.uri) { item in
+                    ForEach(Array(displayed.enumerated()), id: \.element.post.uri) { index, item in
                         PostCard(item: item, actions: actions(for: item, vm: vm))
                             .onAppear {
                                 if item.post.uri == vm.posts.last?.post.uri {
@@ -439,6 +461,24 @@ public struct FeedView: View {
                                 }
                             }
                         Divider()
+                        // #0205 — "Trending Videos" interstitial. RN parity:
+                        // `PostFeed.tsx` pushes `interstitialTrendingVideos`
+                        // before the 16th slice (`sliceIndex === 15`) of the
+                        // Discover feed on native. Rendered after the 15th
+                        // post row, only on the Discover tab and only when
+                        // the parent wired a video-tap destination.
+                        if index == 14,
+                           onTrendingVideoTap != nil,
+                           vm.selection == .feed(uri: HomeFeedTab.discoverURI) {
+                            TrendingVideosInterstitial(
+                                network: network,
+                                accountStore: accountStore,
+                                cache: cache,
+                                onVideoTap: { post in onTrendingVideoTap?(post) },
+                                onViewMoreTap: onTrendingVideosViewMore
+                            )
+                            Divider()
+                        }
                     }
                     if vm.isLoading {
                         HStack { Spacer(); ProgressView(); Spacer() }.padding()

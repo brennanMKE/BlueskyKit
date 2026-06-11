@@ -28,6 +28,13 @@ private final class PreviewNoOpCache: CacheStore, @unchecked Sendable {
 
 /// Full-screen vertical-scroll video feed backed by a video algorithm feed generator.
 public struct VideoFeedView: View {
+    /// AT-URI of Bluesky's video algorithm feed generator (`thevids`).
+    /// RN parity: `VIDEO_FEED_URI` in `Bluesky-ReactNative/src/lib/constants.ts`
+    /// — the source feed for the immersive VideoFeed screen and the
+    /// Trending Videos interstitial (#0205).
+    public static let videoFeedURI =
+        "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/thevids"
+
     @State private var viewModel: FeedViewModel
     @State private var currentIndex = 0
     /// Per-session mute preference. Mirrors the RN immersive-video behaviour
@@ -41,12 +48,17 @@ public struct VideoFeedView: View {
     /// both navigate, and the parent owns the navigation stack.
     private let onProfileTap: ((DID) -> Void)?
     private let onPostTap: ((PostView) -> Void)?
+    /// AT-URI of the post the pager should open on. RN parity: the
+    /// `VideoFeed` route's `initialPostUri` param — entry points (video
+    /// cards in the Trending Videos rail) seed the feed at the tapped post.
+    private let initialPostURI: String?
 
     public init(
         network: any NetworkClient,
         accountStore: any AccountStore,
         cache: any CacheStore,
         feedURI: String,
+        initialPostURI: String? = nil,
         autoplay: Bool = true,
         onProfileTap: ((DID) -> Void)? = nil,
         onPostTap: ((PostView) -> Void)? = nil
@@ -59,6 +71,7 @@ public struct VideoFeedView: View {
                 selection: .feed(uri: feedURI)
             )
         )
+        self.initialPostURI = initialPostURI
         self.autoplay = autoplay
         self.onProfileTap = onProfileTap
         self.onPostTap = onPostTap
@@ -85,7 +98,18 @@ public struct VideoFeedView: View {
                 videoScrollView
             }
         }
-        .task { await viewModel.loadInitial() }
+        .task {
+            await viewModel.loadInitial()
+            // Seed the pager at the tapped post (RN: `initialPostUri`).
+            // Only video-embed posts get pages, so resolve the index against
+            // the filtered list; missing posts fall back to page 0.
+            if let initialPostURI,
+               let index = videoPosts.firstIndex(where: { $0.post.uri.rawValue == initialPostURI }) {
+                currentIndex = index
+            }
+        }
+        // #0205: UI-test anchor for the immersive video feed surface.
+        .accessibilityIdentifier("video-feed-screen")
         .navigationTitle("Video")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -469,7 +493,7 @@ private struct VideoPostPage: View {
 
 // MARK: - Previews
 
-private let previewVideoFeedURI = "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot"
+private let previewVideoFeedURI = VideoFeedView.videoFeedURI
 
 #Preview("VideoFeedView — Light") {
     NavigationStack {
