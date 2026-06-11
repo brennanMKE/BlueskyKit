@@ -80,6 +80,21 @@ private final class MockCacheStore: CacheStore, @unchecked Sendable {
     func evictAll() async throws { store.removeAll() }
 }
 
+// BookmarkStoring is declared in BlueskyKit, which compiles with
+// defaultIsolation(MainActor.self), so conformers are @MainActor.
+@MainActor
+private final class MockBookmarkStore: BookmarkStoring {
+    var bookmarks: [BookmarkedPostSnapshot] = []
+    func isBookmarked(uri: String) -> Bool { false }
+    func toggle(post: PostView) {}
+}
+
+private final class MockPathMonitor: NetworkPathMonitoring, @unchecked Sendable {
+    var isViable: Bool { true }
+    var status: NetworkPathStatus { .viable }
+    var statusStream: AsyncStream<NetworkPathStatus> { AsyncStream { $0.finish() } }
+}
+
 // MARK: - BlueskyEnvironment tests
 
 @MainActor
@@ -92,7 +107,9 @@ struct BlueskyEnvironmentTests {
             accounts: MockAccountStore(),
             preferences: MockPreferencesStore(),
             network: MockNetworkClient(),
-            cache: MockCacheStore()
+            cache: MockCacheStore(),
+            bookmarks: MockBookmarkStore(),
+            pathMonitor: MockPathMonitor()
         )
         #expect(env.session.currentAccount == nil)
         #expect(env.session.accounts.isEmpty)

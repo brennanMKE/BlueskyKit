@@ -62,7 +62,7 @@ let package = Package(
         .target(name: "BlueskyOnboarding", dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyAuth", "BlueskyDataStore", "BlueskyUI", "BlueskyNetworking"], swiftSettings: swiftSettings),
         .testTarget(
             name: "BlueskyKitTests",
-            dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyDataStore"]
+            dependencies: ["BlueskyKit", "BlueskyCore", "BlueskyDataStore", "BlueskyNotifications"]
         ),
     ],
     swiftLanguageModes: [.v6]

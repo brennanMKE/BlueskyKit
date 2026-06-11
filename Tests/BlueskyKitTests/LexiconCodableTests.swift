@@ -433,8 +433,12 @@ struct BookmarkCodableTests {
         #expect(response.cursor == "next-cursor")
     }
 
-    @Test("Top-level uri/cid (the broken pre-#0152 shape) fails to decode")
-    func rejectsLegacyFlatShape() {
+    @Test("Top-level uri/cid (the broken pre-#0152 shape) is skipped, not fatal")
+    func skipsLegacyFlatShape() throws {
+        // #0154 made GetBookmarksResponse tolerant: a malformed bookmark
+        // envelope is dropped instead of aborting the whole page (mirroring
+        // RN's per-item leniency). The legacy flat shape therefore decodes to
+        // an empty page rather than throwing.
         let badJSON = """
         {
             "bookmarks": [
@@ -442,9 +446,8 @@ struct BookmarkCodableTests {
             ]
         }
         """.data(using: .utf8)!
-        #expect(throws: DecodingError.self) {
-            _ = try iso8601.decode(GetBookmarksResponse.self, from: badJSON)
-        }
+        let response = try iso8601.decode(GetBookmarksResponse.self, from: badJSON)
+        #expect(response.bookmarks.isEmpty)
     }
 
     @Test("BookmarkView round-trips through Codable")
