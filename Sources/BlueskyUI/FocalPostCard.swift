@@ -51,6 +51,9 @@ public struct FocalPostCard: View {
 
     @Environment(\.blueskyTheme) private var theme
     @Environment(\.openURL) private var openURL
+    /// User's Font Size tier multiplier (#0200) — applied to every text
+    /// element on the focal card, mirroring RN's ALF `fontScale`.
+    @Environment(\.blueskyFontScale) private var fontScale
 
     /// Toggles the system Translation popover for the focal-post body
     /// (#0143). Same pattern as `PostCard.isTranslating`.
@@ -119,7 +122,7 @@ public struct FocalPostCard: View {
                 HStack(spacing: Spacing._2xs) {
                     if let displayName = item.post.author.displayName, !displayName.isEmpty {
                         Text(displayName)
-                            .font(Typography.font(Typography.lg, weight: .semibold))
+                            .font(Typography.font(Typography.lg * fontScale, weight: .semibold))
                             .foregroundStyle(theme.colors.textPrimary)
                             .lineLimit(1)
                     }
@@ -128,7 +131,7 @@ public struct FocalPostCard: View {
                     }
                 }
                 Text("@\(item.post.author.handle.rawValue)")
-                    .font(Typography.body)
+                    .font(Typography.body(scale: fontScale))
                     .foregroundStyle(theme.colors.textSecondary)
                     .lineLimit(1)
             }
@@ -144,13 +147,18 @@ public struct FocalPostCard: View {
     /// RN passes `a.text_lg` and renders the full body.
     private var contentBlock: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
+            // `baseSize: Typography.lg` renders the focal body at RN's
+            // `text_lg` (× the user's font-scale tier). The previous outer
+            // `.font(Typography.bodyLarge)` modifier was dead code —
+            // `RichTextView` sets its own font on the inner `Text`, which
+            // always won (#0200).
             PostBodyView(
                 text: item.post.record.text,
                 facets: item.post.record.facets,
                 isFocal: true,
+                baseSize: Typography.lg,
                 onHashtagTap: { tag in actions?.onHashtagTap?(tag) }
             )
-            .font(Typography.bodyLarge)
             if let embed = item.post.embed {
                 PostEmbedView(embed: embed)
             }
@@ -164,7 +172,7 @@ public struct FocalPostCard: View {
     private var timestampSubtitle: some View {
         HStack(spacing: Spacing.sm) {
             Text(formattedTimestamp(item.post.indexedAt))
-                .font(Typography.bodySmall)
+                .font(Typography.bodySmall(scale: fontScale))
                 .foregroundStyle(theme.colors.textSecondary)
                 .accessibilityLabel("Posted \(accessibleTimestamp(item.post.indexedAt))")
             if let label = whoCanReplyLabel {
@@ -219,11 +227,11 @@ public struct FocalPostCard: View {
     private func statLabel(count: Int, singular: String, plural: String) -> some View {
         HStack(spacing: Spacing._2xs) {
             Text(CompactNumberFormatter.string(from: count))
-                .font(Typography.body)
+                .font(Typography.body(scale: fontScale))
                 .fontWeight(.semibold)
                 .foregroundStyle(theme.colors.textPrimary)
             Text(count == 1 ? singular : plural)
-                .font(Typography.body)
+                .font(Typography.body(scale: fontScale))
                 .foregroundStyle(theme.colors.textSecondary)
         }
     }
@@ -456,7 +464,7 @@ public struct FocalPostCard: View {
             Image(systemName: "person.2")
                 .font(.system(size: 11, weight: .semibold))
             Text(text)
-                .font(Typography.bodySmall)
+                .font(Typography.bodySmall(scale: fontScale))
                 .fontWeight(.semibold)
                 .lineLimit(1)
         }

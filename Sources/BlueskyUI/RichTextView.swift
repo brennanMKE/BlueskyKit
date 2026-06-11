@@ -13,22 +13,31 @@ public struct RichTextView: View {
 
     let text: String
     let facets: [RichTextFacet]?
-    let font: Font
+    /// Unscaled point size; the rendered font is `baseSize` × the
+    /// `blueskyFontScale` environment multiplier (#0200). A size (rather
+    /// than a prebuilt `Font`) is taken so the user's Font Size tier can be
+    /// applied where the font is built.
+    let baseSize: CGFloat
+    let fontWeight: Font.Weight
     let foregroundColor: Color
     let linkColor: Color
     var onLinkTap: (URL) -> Void
 
+    @Environment(\.blueskyFontScale) private var fontScale
+
     public init(
         text: String,
         facets: [RichTextFacet]? = nil,
-        font: Font = Typography.body,
+        baseSize: CGFloat = Typography.md,
+        fontWeight: Font.Weight = .regular,
         foregroundColor: Color = .primary,
         linkColor: Color = Color(.sRGB, red: 0, green: 0.52, blue: 1),
         onLinkTap: @escaping (URL) -> Void = { _ in }
     ) {
         self.text = text
         self.facets = facets
-        self.font = font
+        self.baseSize = baseSize
+        self.fontWeight = fontWeight
         self.foregroundColor = foregroundColor
         self.linkColor = linkColor
         self.onLinkTap = onLinkTap
@@ -36,7 +45,7 @@ public struct RichTextView: View {
 
     public var body: some View {
         Text(attributed)
-            .font(font)
+            .font(Typography.font(baseSize * fontScale, weight: fontWeight))
             .environment(\.openURL, OpenURLAction { url in
                 onLinkTap(url)
                 return .handled

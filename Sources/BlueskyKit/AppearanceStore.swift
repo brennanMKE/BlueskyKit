@@ -72,6 +72,22 @@ public enum AppearanceFontSize: String, Codable, CaseIterable, Sendable {
         }
     }
 
+    /// App-wide typography multiplier for this tier, applied to every
+    /// `Typography` token via the `blueskyFontScale` environment value.
+    ///
+    /// RN parity: ALF's `computeFontScaleMultiplier` (`src/alf/fonts.ts` at
+    /// baseline `46b8a58`) steps `fontScale` in `factor = 0.0625` (1/16)
+    /// increments off the 16 pt body size — `'-1'` → 0.9375, `'0'` → 1,
+    /// `'1'` → 1.0625. RN scaffolds `'-2'`/`'2'` tiers but clamps them to the
+    /// ±1 multipliers (commented `// unused`); our shipped picker already
+    /// exposes five *distinct* body sizes (14–18 pt, #0065), so XS / XL
+    /// extend the same linear 1/16 step to 0.875 / 1.125 rather than
+    /// collapsing onto S / L.
+    ///
+    /// Derived from `bodyPointSize / 16` so the Appearance preview (which
+    /// renders at `bodyPointSize`) and the app-wide scale can never drift.
+    public var scaleMultiplier: Double { bodyPointSize / 16 }
+
     /// Short user-facing label (XS / S / M / L / XL).
     public var shortLabel: String {
         switch self {

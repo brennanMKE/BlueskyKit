@@ -44,11 +44,17 @@ public struct PostBodyView: View {
     public let facets: [RichTextFacet]?
     public let lineLimit: Int?
     public let isFocal: Bool
+    /// Unscaled body point size, multiplied by the `blueskyFontScale`
+    /// environment value inside `RichTextView` (#0200). Defaults to the
+    /// standard body size; the focal post passes `Typography.lg` (RN's
+    /// `text_lg` on `ThreadItemAnchor`).
+    public let baseSize: CGFloat
     public var onHashtagTap: ((String) -> Void)?
     public var onLinkTap: ((URL) -> Void)?
     public var onMentionTap: ((DID) -> Void)?
 
     @Environment(\.blueskyTheme) private var theme
+    @Environment(\.blueskyFontScale) private var fontScale
 
     /// Local expansion state — once the user taps "Show More" we render the
     /// full body. Resets when the view is recycled to a different post.
@@ -59,6 +65,7 @@ public struct PostBodyView: View {
         facets: [RichTextFacet]? = nil,
         lineLimit: Int? = nil,
         isFocal: Bool = false,
+        baseSize: CGFloat = Typography.md,
         onHashtagTap: ((String) -> Void)? = nil,
         onLinkTap: ((URL) -> Void)? = nil,
         onMentionTap: ((DID) -> Void)? = nil
@@ -67,6 +74,7 @@ public struct PostBodyView: View {
         self.facets = facets
         self.lineLimit = lineLimit
         self.isFocal = isFocal
+        self.baseSize = baseSize
         self.onHashtagTap = onHashtagTap
         self.onLinkTap = onLinkTap
         self.onMentionTap = onMentionTap
@@ -91,6 +99,7 @@ public struct PostBodyView: View {
             RichTextView(
                 text: text,
                 facets: facets,
+                baseSize: baseSize,
                 foregroundColor: theme.colors.textPrimary,
                 linkColor: theme.colors.link,
                 onLinkTap: { url in
@@ -114,7 +123,7 @@ public struct PostBodyView: View {
                     }
                 } label: {
                     Text("Show More")
-                        .font(Typography.body)
+                        .font(Typography.body(scale: fontScale))
                         .foregroundStyle(theme.colors.link)
                 }
                 .buttonStyle(.plain)

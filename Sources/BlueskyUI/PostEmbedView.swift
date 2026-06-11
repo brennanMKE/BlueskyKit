@@ -12,6 +12,9 @@ public struct PostEmbedView: View {
     var onRecordTap: (ATURI) -> Void
 
     @Environment(\.blueskyTheme) private var theme
+    /// User's Font Size tier multiplier (#0200) — scales link-card and
+    /// quote-post text alongside the post body.
+    @Environment(\.blueskyFontScale) private var fontScale
 
     public init(
         embed: BlueskyCore.EmbedView,
@@ -120,18 +123,18 @@ public struct PostEmbedView: View {
                 }
                 VStack(alignment: .leading, spacing: Spacing._2xs) {
                     Text(ext.title)
-                        .font(Typography.bodySmall)
+                        .font(Typography.bodySmall(scale: fontScale))
                         .fontWeight(.medium)
                         .foregroundStyle(theme.colors.textPrimary)
                         .lineLimit(2)
                     if !ext.description.isEmpty {
                         Text(ext.description)
-                            .font(Typography.footnote)
+                            .font(Typography.footnote(scale: fontScale))
                             .foregroundStyle(theme.colors.textSecondary)
                             .lineLimit(2)
                     }
                     Text(ext.uri)
-                        .font(Typography.footnote)
+                        .font(Typography.footnote(scale: fontScale))
                         .foregroundStyle(theme.colors.textTertiary)
                         .lineLimit(1)
                 }
@@ -163,16 +166,16 @@ public struct PostEmbedView: View {
                             size: 20
                         )
                         Text(record.author.displayName ?? record.author.handle.rawValue)
-                            .font(Typography.bodySmall)
+                            .font(Typography.bodySmall(scale: fontScale))
                             .fontWeight(.medium)
                             .foregroundStyle(theme.colors.textPrimary)
                         Text("@\(record.author.handle.rawValue)")
-                            .font(Typography.footnote)
+                            .font(Typography.footnote(scale: fontScale))
                             .foregroundStyle(theme.colors.textTertiary)
                             .lineLimit(1)
                     }
                     Text(record.value.text)
-                        .font(Typography.bodySmall)
+                        .font(Typography.bodySmall(scale: fontScale))
                         .foregroundStyle(theme.colors.textSecondary)
                         .lineLimit(4)
                 }
@@ -200,7 +203,7 @@ public struct PostEmbedView: View {
 
     private func notAvailablePlaceholder(_ message: String) -> some View {
         Text(message)
-            .font(Typography.footnote)
+            .font(Typography.footnote(scale: fontScale))
             .foregroundStyle(theme.colors.textTertiary)
             .padding(Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)

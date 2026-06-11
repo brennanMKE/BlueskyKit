@@ -44,4 +44,39 @@ public enum Typography {
     public static var title: Font      { font(xl, weight: .semibold) }
     public static var largeTitle: Font { font(_2xl, weight: .bold) }
     public static var footnote: Font   { font(xs) }
+
+    // MARK: Scaled font factories (#0200)
+
+    // Variants that honor the user's Font Size tier. Pass the
+    // `blueskyFontScale` environment value; mirrors RN ALF's
+    // `normalizeTextStyles`, which multiplies every text atom's `fontSize`
+    // by the device `fontScale` multiplier (`src/alf/typography.tsx`).
+
+    public static func bodySmall(scale: CGFloat) -> Font  { font(sm * scale) }
+    public static func body(scale: CGFloat) -> Font       { font(md * scale) }
+    public static func bodyLarge(scale: CGFloat) -> Font  { font(lg * scale) }
+    public static func headline(scale: CGFloat) -> Font   { font(md * scale, weight: .semibold) }
+    public static func footnote(scale: CGFloat) -> Font   { font(xs * scale) }
+}
+
+// MARK: - Font scale environment (#0200)
+
+extension EnvironmentValues {
+    /// App-wide typography multiplier driven by the user's Font Size tier
+    /// (Settings → Appearance). The app shell injects
+    /// `AppearanceFontSize.scaleMultiplier` here; content views multiply it
+    /// into the `Typography` sizes for the main reading surfaces (post body,
+    /// author header, embeds). RN parity: ALF's `fontScale` device preference
+    /// applied through `normalizeTextStyles`.
+    @Entry public var blueskyFontScale: CGFloat = 1
+}
+
+public extension View {
+    /// Injects the app-wide typography multiplier into the SwiftUI
+    /// environment. Applied once at the shell root (next to
+    /// `.blueskyTheme(_:)`) — content screens read it via
+    /// `@Environment(\.blueskyFontScale)` and must not re-inject it.
+    func blueskyFontScale(_ scale: CGFloat) -> some View {
+        environment(\.blueskyFontScale, scale)
+    }
 }

@@ -189,3 +189,39 @@ struct PreferencesStoreTests {
         #expect(try store.get(Int.self, for: "count") == nil)
     }
 }
+
+// MARK: - AppearanceFontSize scale-multiplier tests (#0200)
+
+@Suite("AppearanceFontSize")
+@MainActor
+struct AppearanceFontSizeTests {
+
+    @Test("tier multipliers step in RN's 1/16 (0.0625) increments off the 16pt body")
+    func scaleMultipliers() {
+        // RN ALF (`src/alf/fonts.ts`, baseline 46b8a58): factor = 0.0625,
+        // '-1' → 0.9375, '0' → 1, '1' → 1.0625. XS/XL extend the same step.
+        #expect(AppearanceFontSize.xs.scaleMultiplier == 0.875)
+        #expect(AppearanceFontSize.s.scaleMultiplier  == 0.9375)
+        #expect(AppearanceFontSize.m.scaleMultiplier  == 1.0)
+        #expect(AppearanceFontSize.l.scaleMultiplier  == 1.0625)
+        #expect(AppearanceFontSize.xl.scaleMultiplier == 1.125)
+    }
+
+    @Test("multiplier and preview body point size can never drift")
+    func multiplierMatchesBodyPointSize() {
+        for tier in AppearanceFontSize.allCases {
+            #expect(tier.scaleMultiplier == tier.bodyPointSize / 16)
+        }
+    }
+
+    @Test("default tier is M with identity scale")
+    func defaultTier() {
+        #expect(AppearanceFontSize.default == .m)
+        #expect(AppearanceFontSize.default.scaleMultiplier == 1.0)
+    }
+
+    @Test("persisted raw values are unchanged (stored prefs stay compatible)")
+    func rawValuesStable() {
+        #expect(AppearanceFontSize.allCases.map(\.rawValue) == ["xs", "s", "m", "l", "xl"])
+    }
+}

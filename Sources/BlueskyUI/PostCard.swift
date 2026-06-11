@@ -17,6 +17,10 @@ public struct PostCard: View {
 
     @Environment(\.blueskyTheme) private var theme
     @Environment(\.openURL) private var openURL
+    /// User's Font Size tier multiplier (#0200) — applied to every text
+    /// element on the card, mirroring RN's ALF `fontScale` which scales all
+    /// text atoms. Icon sizes stay fixed (RN icons are not text atoms).
+    @Environment(\.blueskyFontScale) private var fontScale
 
     /// Toggles the system Translation popover (`.translationPresentation`).
     /// Set by the inline "Translate" link and the ellipsis-menu "Translate
@@ -184,7 +188,7 @@ public struct PostCard: View {
             HStack(spacing: Spacing._2xs) {
                 if let displayName = item.post.author.displayName, !displayName.isEmpty {
                     Text(displayName)
-                        .font(Typography.headline)
+                        .font(Typography.headline(scale: fontScale))
                         .foregroundStyle(theme.colors.textPrimary)
                         .lineLimit(1)
                 }
@@ -192,7 +196,7 @@ public struct PostCard: View {
                     badge
                 }
                 Text("@\(item.post.author.handle.rawValue)")
-                    .font(Typography.bodySmall)
+                    .font(Typography.bodySmall(scale: fontScale))
                     .foregroundStyle(theme.colors.textTertiary)
                     .lineLimit(1)
             }
@@ -200,7 +204,7 @@ public struct PostCard: View {
             .onTapGesture { actions?.onAuthorTap?(item.post.author) }
             Spacer(minLength: 0)
             Text(RelativeTimeFormatter.string(from: item.post.indexedAt))
-                .font(Typography.footnote)
+                .font(Typography.footnote(scale: fontScale))
                 .foregroundStyle(theme.colors.textTertiary)
         }
     }
@@ -215,7 +219,7 @@ public struct PostCard: View {
             isTranslating = true
         } label: {
             Text("Translate")
-                .font(Typography.bodySmall)
+                .font(Typography.bodySmall(scale: fontScale))
                 .foregroundStyle(theme.colors.link)
         }
         .buttonStyle(.plain)
@@ -411,7 +415,7 @@ public struct PostCard: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(theme.colors.textTertiary)
             Text("Reposted by \(profile.displayName ?? profile.handle.rawValue)")
-                .font(Typography.footnote)
+                .font(Typography.footnote(scale: fontScale))
                 .foregroundStyle(theme.colors.textTertiary)
         }
         .padding(.horizontal, Spacing.md + 44 + Spacing.sm)
@@ -428,7 +432,7 @@ public struct PostCard: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(theme.colors.textTertiary)
             Text("Pinned")
-                .font(Typography.footnote)
+                .font(Typography.footnote(scale: fontScale))
                 .foregroundStyle(theme.colors.textTertiary)
         }
         .padding(.horizontal, Spacing.md + 44 + Spacing.sm)
@@ -450,7 +454,7 @@ public struct PostCard: View {
                     .font(.system(size: 16))
                 if let count, count > 0 {
                     Text(CompactNumberFormatter.string(from: count))
-                        .font(Typography.footnote)
+                        .font(Typography.footnote(scale: fontScale))
                 }
             }
             .foregroundStyle(color)
