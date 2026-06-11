@@ -63,28 +63,33 @@ public struct LabelerProfileScreen: View {
                 }
                 .padding(.vertical, 4)
 
-                Button {
-                    Task {
-                        if viewModel.isSubscribed {
-                            await viewModel.unsubscribe()
-                        } else {
-                            await viewModel.subscribe()
+                // RN hides the Subscribe/Unsubscribe button for app labelers
+                // (Bluesky Moderation Service) — they are always-on.
+                if !viewModel.isAppLabeler {
+                    Button {
+                        Task {
+                            if viewModel.isSubscribed {
+                                await viewModel.unsubscribe()
+                            } else {
+                                await viewModel.subscribe()
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if viewModel.isUpdating {
+                                ProgressView()
+                            } else {
+                                Text(viewModel.isSubscribed ? "Unsubscribe" : "Subscribe")
+                            }
+                            Spacer()
                         }
                     }
-                } label: {
-                    HStack {
-                        Spacer()
-                        if viewModel.isUpdating {
-                            ProgressView()
-                        } else {
-                            Text(viewModel.isSubscribed ? "Unsubscribe" : "Subscribe")
-                        }
-                        Spacer()
-                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(viewModel.isSubscribed ? .red : .accentColor)
+                    .disabled(viewModel.isUpdating)
+                    .accessibilityIdentifier("labeler-subscribe-button")
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(viewModel.isSubscribed ? .red : .accentColor)
-                .disabled(viewModel.isUpdating)
             }
 
             if !labeler.labels.isEmpty {

@@ -255,7 +255,7 @@ private let otherDetailReasons: Set<String> = [
 /// Bluesky's official moderation labeler DID. Reports for child-safety and
 /// extremist content always proxy here regardless of which labelers the user
 /// has subscribed. RN exposes the same constant as `BSKY_LABELER_DID`.
-private let blueskyLabelerDID = DID(rawValue: "did:plc:ar7c4by46qjdydhdevvrndac")
+private let blueskyLabelerDID = AppLabelers.blueskyModerationDID
 
 // MARK: - ReportDialog
 

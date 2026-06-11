@@ -45,7 +45,7 @@ public struct ContentFilterSettingsScreen: View {
     /// labels to the top of the screen and to look up the global porn /
     /// sexual / nudity / graphic-media rows. Mirrors RN's
     /// `BSKY_LABELER_DID` constant from `@atproto/api`.
-    private static let blueskyLabelerDID: DID = DID(rawValue: "did:plc:ar7c4by46qjdydhdevvrndac")
+    private static let blueskyLabelerDID: DID = AppLabelers.blueskyModerationDID
 
     public init(network: any NetworkClient, accountStore: any AccountStore) {
         _viewModel = State(initialValue: ModerationViewModel(network: network, accountStore: accountStore))

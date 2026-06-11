@@ -181,7 +181,11 @@ public struct ModerationScreen: View {
                     Text("Loading labelers…")
                         .foregroundStyle(.secondary)
                 }
-            } else if viewModel.subscribedLabelerDIDs.isEmpty {
+            } else if viewModel.subscribedLabelers.isEmpty && viewModel.unavailableLabelerDIDs.isEmpty {
+                // Normally unreachable: the resolved set always includes the
+                // implicit Bluesky Moderation Service (RN `useMyLabelersQuery`
+                // prepends `BskyAgent.appLabelers`). Shown only when
+                // `getServices` resolution failed outright.
                 Text("No subscribed labelers")
                     .foregroundStyle(.secondary)
             } else {

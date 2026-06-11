@@ -643,6 +643,30 @@ public enum ActorPreferenceType {
     public static let postInteractionSettings = "app.bsky.actor.defs#postInteractionSettingsPref"
 }
 
+// MARK: - App labelers
+
+/// Labeler services that are always active for every session, independent of
+/// the account's `labelersPref` — RN's `BskyAgent.appLabelers` (seeded with
+/// `BSKY_LABELER_DID` from `@atproto/api`).
+///
+/// The Bluesky Moderation Service is implicit: it is **never stored in
+/// `labelersPref`**, its profile hides the Subscribe/Unsubscribe button
+/// (RN's `isAppLabeler` check in `ProfileHeaderLabeler`), and RN's
+/// `isLabelerSubscribed` treats it as always subscribed. When resolving the
+/// viewer's labeler set (RN's `useMyLabelersQuery`), app-labeler DIDs are
+/// prepended to the `labelersPref` DIDs.
+public enum AppLabelers {
+    /// `BSKY_LABELER_DID` — the Bluesky Moderation Service.
+    public static let blueskyModerationDID = DID(rawValue: "did:plc:ar7c4by46qjdydhdevvrndac")
+    /// All always-on labelers, in the order RN prepends them.
+    public static let dids: [DID] = [blueskyModerationDID]
+    /// RN's `isAppLabeler` (`#/lib/moderation`).
+    public static func contains(_ did: DID) -> Bool { dids.contains(did) }
+    /// RN's `MAX_LABELERS` (`#/lib/constants`) — the cap on `labelersPref`
+    /// entries. App labelers don't count against it.
+    public static let maxLabelers = 20
+}
+
 // MARK: - PreferencesMutation
 
 /// One preference write, expressed as "remove the entries I'm replacing,

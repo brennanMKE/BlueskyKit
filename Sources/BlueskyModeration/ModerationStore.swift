@@ -343,11 +343,14 @@ public final class ModerationStore: ModerationStoring {
 
     // MARK: - Subscribed labelers
 
-    /// Resolves the user's `labelersPref` DIDs into full `LabelerView`s
+    /// Resolves the viewer's labeler set into full `LabelerView`s
     /// (display name, avatar, like count) via `app.bsky.labeler.getServices`.
-    /// Mirrors RN's `useMyLabelersQuery` flow: read DIDs from preferences,
-    /// hand them to `getServices?dids=...`, then diff the returned set
-    /// against the requested set to flag unavailable services.
+    /// Mirrors RN's `useMyLabelersQuery` flow: the resolved set is
+    /// `AppLabelers.dids` (the always-on Bluesky Moderation Service, which is
+    /// never stored in `labelersPref`) prepended to the user's `labelersPref`
+    /// DIDs — `BskyAgent.appLabelers.concat(moderationPrefs.labelers)` — then
+    /// the returned set is diffed against the requested `labelersPref` DIDs
+    /// to flag unavailable services.
     public func loadSubscribedLabelers() async {
         isLoadingLabelers = true
         defer { isLoadingLabelers = false }
@@ -358,26 +361,31 @@ public final class ModerationStore: ModerationStoring {
             )
             subscribedLabelerDIDs = prefs.subscribedLabelerDIDs
 
-            guard !subscribedLabelerDIDs.isEmpty else {
-                subscribedLabelers = []
-                unavailableLabelerDIDs = []
-                return
-            }
+            // App labelers first, deduped — RN's `Array.from(new Set(...))`.
+            var resolveDIDs = AppLabelers.dids
+            resolveDIDs.append(contentsOf: subscribedLabelerDIDs.filter { !AppLabelers.contains($0) })
 
-            // `dids` accepts repeated query params. Joined with comma is what
-            // RN's bsky-agent helper does too — the appview parses both forms.
-            let didsParam = subscribedLabelerDIDs.map { $0.rawValue }.joined(separator: ",")
+            // `dids` is an *array* query parameter: the appview only accepts
+            // the repeated-key form (`dids=a&dids=b`) — a comma-joined single
+            // value is rejected with `InvalidRequest: Invalid DID` (verified
+            // live, #0202). `NetworkClient.get` takes a flat
+            // `[String: String]`, so resolve one DID per request and
+            // aggregate; the result set is identical to RN's batched call.
             // `detailed=true` returns `subjectTypes`, `subjectCollections`,
             // and `reasonTypes` on each labeler — needed by the Report
             // dialog to filter candidate labelers per subject + reason
             // (matches RN's `useMyLabelersQuery` which always asks for the
             // detailed view).
-            let resp: GetLabelerServicesResponse = try await network.get(
-                lexicon: "app.bsky.labeler.getServices",
-                params: ["dids": didsParam, "detailed": "true"]
-            )
-            subscribedLabelers = resp.views
-            let returned = Set(resp.views.map { $0.creator.did })
+            var views: [LabelerView] = []
+            for did in resolveDIDs {
+                let resp: GetLabelerServicesResponse = try await network.get(
+                    lexicon: "app.bsky.labeler.getServices",
+                    params: ["dids": did.rawValue, "detailed": "true"]
+                )
+                views.append(contentsOf: resp.views)
+            }
+            subscribedLabelers = views
+            let returned = Set(views.map { $0.creator.did })
             unavailableLabelerDIDs = subscribedLabelerDIDs.filter { !returned.contains($0) }
         } catch {
             logger.error("loadSubscribedLabelers error: \(error, privacy: .public)")

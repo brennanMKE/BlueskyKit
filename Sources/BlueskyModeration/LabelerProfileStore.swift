@@ -46,12 +46,18 @@ public final class LabelerProfileStore: LabelerProfileStoring {
                 params: ["dids": labelerDID, "detailed": "false"]
             )
             labeler = response.views.first
-            let prefs: GetPreferencesResponse = try await network.get(
-                lexicon: "app.bsky.actor.getPreferences",
-                params: [:]
-            )
-            isSubscribed = prefs.savedFeeds.contains {
-                $0.type == "labeler" && $0.value == labelerDID
+            let did = DID(rawValue: labelerDID)
+            if AppLabelers.contains(did) {
+                // RN's `isLabelerSubscribed`: app labelers (the Bluesky
+                // Moderation Service) are always-on and never stored in
+                // `labelersPref`.
+                isSubscribed = true
+            } else {
+                let prefs: GetPreferencesResponse = try await network.get(
+                    lexicon: "app.bsky.actor.getPreferences",
+                    params: [:]
+                )
+                isSubscribed = prefs.subscribedLabelerDIDs.contains(did)
             }
         } catch {
             logger.error("labeler load error: \(error, privacy: .public)")
@@ -60,22 +66,33 @@ public final class LabelerProfileStore: LabelerProfileStoring {
     }
 
     public func subscribe(labelerDID: String) async {
+        let did = DID(rawValue: labelerDID)
+        // App labelers are implicitly subscribed and never written to
+        // `labelersPref` (RN hides the Subscribe button via `isAppLabeler`).
+        guard !AppLabelers.contains(did) else {
+            isSubscribed = true
+            return
+        }
         isUpdating = true
         defer { isUpdating = false }
         do {
             // Read-modify-write (#0201): the mutation is computed from the
             // fresh server state inside the writer's serialized update, and
             // the put body carries the full merged preferences array.
-            // NOTE (#0202): subscription state intentionally still rides in
-            // `savedFeedsPrefV2` with `type: "labeler"` here — moving it to
-            // `labelersPref` is tracked separately by #0202.
+            // Subscriptions live in `labelersPref.labelers` (#0202) — RN's
+            // `agent.addLabeler(did)`.
             try await PreferencesWriter.shared.update(network: network) { prefs in
-                var feeds = prefs.savedFeeds
-                guard !feeds.contains(where: { $0.type == "labeler" && $0.value == labelerDID }) else {
+                let current = prefs.subscribedLabelerDIDs
+                guard !current.contains(did) else {
                     return nil // already subscribed — skip the write
                 }
-                feeds.append(SavedFeed(id: UUID().uuidString, type: "labeler", value: labelerDID, pinned: false))
-                return .savedFeeds(feeds)
+                // RN's MAX_LABELERS guard in `useLabelerSubscriptionMutation`.
+                guard current.count < AppLabelers.maxLabelers else {
+                    throw ATError.unknown(
+                        "You can only subscribe to \(AppLabelers.maxLabelers) labelers, and you've reached your limit."
+                    )
+                }
+                return .labelers(dids: current + [did])
             }
             isSubscribed = true
         } catch {
@@ -84,12 +101,20 @@ public final class LabelerProfileStore: LabelerProfileStoring {
     }
 
     public func unsubscribe(labelerDID: String) async {
+        let did = DID(rawValue: labelerDID)
+        // App labelers are always-on; there is nothing to unsubscribe (RN
+        // never shows the Unsubscribe button for them).
+        guard !AppLabelers.contains(did) else { return }
         isUpdating = true
         defer { isUpdating = false }
         do {
-            // Read-modify-write (#0201); see the note in `subscribe` re #0202.
+            // Read-modify-write (#0201); RN's `agent.removeLabeler(did)`.
             try await PreferencesWriter.shared.update(network: network) { prefs in
-                .savedFeeds(prefs.savedFeeds.filter { !($0.type == "labeler" && $0.value == labelerDID) })
+                let current = prefs.subscribedLabelerDIDs
+                guard current.contains(did) else {
+                    return nil // not subscribed — skip the write
+                }
+                return .labelers(dids: current.filter { $0 != did })
             }
             isSubscribed = false
         } catch {

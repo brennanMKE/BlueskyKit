@@ -11,6 +11,10 @@ public final class LabelerProfileViewModel {
     public var isLoading: Bool { store.isLoading }
     public var isUpdating: Bool { store.isUpdating }
     public var error: String? { store.error }
+    /// `true` for always-on app labelers (the Bluesky Moderation Service).
+    /// RN hides the Subscribe/Unsubscribe button for them entirely
+    /// (`isAppLabeler` in `ProfileHeaderLabeler`).
+    public var isAppLabeler: Bool { AppLabelers.contains(DID(rawValue: labelerDID)) }
 
     private let labelerDID: String
     private let store: any LabelerProfileStoring
