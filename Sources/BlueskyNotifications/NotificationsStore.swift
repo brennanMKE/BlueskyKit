@@ -106,6 +106,8 @@ public final class NotificationsStore: NotificationsStoring {
             )
             allNotifications = resp.notifications
             cursor = resp.cursor
+            let unread = resp.notifications.filter { !$0.isRead }.count
+            logger.info("notifications loadInitial: fetched \(resp.notifications.count, privacy: .public) (unread \(unread, privacy: .public))")
         } catch {
             logger.error("notifications fetch error: \(error, privacy: .public)")
             errorMessage = error.localizedDescription
@@ -137,7 +139,10 @@ public final class NotificationsStore: NotificationsStoring {
             )
             allNotifications = resp.notifications
             cursor = resp.cursor
+            let unread = resp.notifications.filter { !$0.isRead }.count
+            logger.info("notifications refresh: fetched \(resp.notifications.count, privacy: .public) (unread \(unread, privacy: .public))")
         } catch {
+            logger.error("notifications refresh error: \(error, privacy: .public)")
             errorMessage = error.localizedDescription
         }
     }
@@ -151,7 +156,10 @@ public final class NotificationsStore: NotificationsStoring {
             // The badge is bound to the All-count regardless of active
             // filter — `markSeen` zeroes it server-side, mirror locally.
             unreadCount = 0
-        } catch {}
+            logger.info("notifications markSeen: updateSeen posted, badge zeroed")
+        } catch {
+            logger.error("notifications markSeen error: \(error, privacy: .public)")
+        }
     }
 
     public func fetchUnreadCount() async {
@@ -163,6 +171,9 @@ public final class NotificationsStore: NotificationsStoring {
                 params: [:]
             )
             unreadCount = resp.count
-        } catch {}
+            logger.info("notifications fetchUnreadCount: \(resp.count, privacy: .public)")
+        } catch {
+            logger.error("notifications fetchUnreadCount error: \(error, privacy: .public)")
+        }
     }
 }
