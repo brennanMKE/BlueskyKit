@@ -18,6 +18,7 @@ struct ListDetailScreen: View {
     @State private var showReportSheet = false
     @State private var showEditSheet = false
     @State private var showDeleteConfirm = false
+    @State private var showAddMemberSheet = false
     @Environment(\.dismiss) private var dismiss
     private let listURI: ATURI
     private let network: any NetworkClient
@@ -114,6 +115,9 @@ struct ListDetailScreen: View {
                     onDismiss: { showReportSheet = false }
                 )
             }
+        }
+        .sheet(isPresented: $showAddMemberSheet) {
+            ListAddMemberSheet(viewModel: viewModel)
         }
         .sheet(isPresented: $showEditSheet) {
             if let list = viewModel.list {
@@ -375,17 +379,54 @@ struct ListDetailScreen: View {
 
     // MARK: - Members Tab
 
+    /// Member management mirrors RN's `AboutSection`: owners get an
+    /// "Add people" header button plus a "Start adding people!" call to
+    /// action in the empty state (both open `ListAddRemoveUsersDialog` in
+    /// RN — `ListAddMemberSheet` here), and each member row carries a
+    /// remove affordance (RN: per-row Edit button into the same dialog;
+    /// SwiftUI: native swipe-to-remove). Non-owners see a read-only list.
     private var membersTab: some View {
         List {
+            if isOwner && !viewModel.members.isEmpty {
+                addPeopleButton
+                    .listRowSeparator(.hidden)
+            }
             if viewModel.members.isEmpty && !viewModel.isLoading {
-                ContentUnavailableView(
-                    "No Members",
-                    systemImage: "person.3",
-                    description: Text("This list has no members yet.")
-                )
+                VStack(spacing: Spacing.lg) {
+                    ContentUnavailableView(
+                        "No Members",
+                        systemImage: "person.3",
+                        description: Text("This list has no members yet.")
+                    )
+                    if isOwner {
+                        Button {
+                            showAddMemberSheet = true
+                        } label: {
+                            Label("Start adding people!", systemImage: "person.badge.plus")
+                                .font(Typography.bodySmall.weight(.semibold))
+                                .padding(.horizontal, Spacing.md)
+                                .padding(.vertical, Spacing.xs)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(theme.colors.link)
+                        .clipShape(Capsule())
+                        .accessibilityIdentifier("list-add-people-empty")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .listRowSeparator(.hidden)
             } else {
                 ForEach(viewModel.members, id: \.uri) { item in
                     MemberRow(item: item)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            if isOwner {
+                                Button(role: .destructive) {
+                                    Task { await viewModel.removeMember(itemURI: item.uri) }
+                                } label: {
+                                    Label("Remove", systemImage: "person.badge.minus")
+                                }
+                            }
+                        }
                         .onAppear {
                             if item.uri == viewModel.members.last?.uri {
                                 Task { await viewModel.loadMore() }
@@ -395,6 +436,22 @@ struct ListDetailScreen: View {
             }
         }
         .listStyle(.plain)
+    }
+
+    /// Header affordance for owned lists — RN's `AboutSection` renders the
+    /// same "Add people" button above the member rows for owners.
+    private var addPeopleButton: some View {
+        Button {
+            showAddMemberSheet = true
+        } label: {
+            Label("Add people", systemImage: "person.badge.plus")
+                .font(Typography.bodySmall.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Spacing.xs)
+        }
+        .buttonStyle(.bordered)
+        .tint(theme.colors.link)
+        .accessibilityIdentifier("list-add-people")
     }
 
     // MARK: - About Tab

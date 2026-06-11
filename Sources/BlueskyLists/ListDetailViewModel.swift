@@ -12,6 +12,9 @@ final class ListDetailViewModel {
     var isLoading: Bool { store.isLoading }
     var error: String? { store.error }
 
+    var searchResults: [ProfileBasic] { store.searchResults }
+    var isSearching: Bool { store.isSearching }
+
     private let store: any ListDetailStoring
 
     init(network: any NetworkClient, accountStore: (any AccountStore)? = nil) {
@@ -36,5 +39,27 @@ final class ListDetailViewModel {
     /// Delete the loaded list. Returns `true` on success.
     func deleteList() async -> Bool {
         await store.deleteList()
+    }
+
+    // MARK: - Member management (#0204)
+
+    /// Debounced actor typeahead backing the "Add people" sheet.
+    func searchMembers(query: String) { store.searchMembers(query: query) }
+
+    /// Adds `profile` to the loaded list. Returns `true` on success.
+    func addMember(_ profile: ProfileBasic) async -> Bool {
+        await store.addMember(profile)
+    }
+
+    /// Removes the membership record `itemURI`. Returns `true` on success.
+    func removeMember(itemURI: ATURI) async -> Bool {
+        await store.removeMember(itemURI: itemURI)
+    }
+
+    /// The `listitem` record URI for `did`'s membership in the loaded list,
+    /// or `nil` when `did` is not a member. Drives the Add/Remove toggle in
+    /// the "Add people" sheet (RN's `getMembership`).
+    func membershipItemURI(for did: DID) -> ATURI? {
+        members.first { $0.subject.did == did }?.uri
     }
 }

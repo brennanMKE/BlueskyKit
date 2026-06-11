@@ -60,12 +60,6 @@ public final class ListsViewModel {
         await store.createList(name: name, description: description, purpose: purpose)
     }
     public func deleteList(uri: ATURI) async { await store.deleteList(uri: uri) }
-    public func addMember(listURI: ATURI, subjectDID: DID, repo: String) async {
-        await store.addMember(listURI: listURI, subjectDID: subjectDID, repo: repo)
-    }
-    public func removeMember(itemURI: ATURI, repo: String) async {
-        await store.removeMember(itemURI: itemURI, repo: repo)
-    }
     public func createStarterPack(name: String, description: String?, listURI: ATURI) async {
         await store.createStarterPack(name: name, description: description, listURI: listURI)
     }

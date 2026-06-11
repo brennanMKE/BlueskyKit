@@ -18,8 +18,6 @@ public protocol ListsStoring: AnyObject, Observable, Sendable {
     func loadMore(actorDID: String) async
     func createList(name: String, description: String?, purpose: String) async
     func deleteList(uri: ATURI) async
-    func addMember(listURI: ATURI, subjectDID: DID, repo: String) async
-    func removeMember(itemURI: ATURI, repo: String) async
     func createStarterPack(name: String, description: String?, listURI: ATURI) async
     /// Creates a starter pack end-to-end: a backing reference list of curated
     /// profiles plus the starter-pack record (with optional feeds). Mirrors
@@ -239,32 +237,6 @@ public final class ListsStore: ListsStoring {
         }
     }
 
-    // MARK: - Members
-
-    public func addMember(listURI: ATURI, subjectDID: DID, repo: String) async {
-        do {
-            let record = ListItemRecord(list: listURI, subject: subjectDID)
-            let _: CreateRecordResponse = try await network.post(
-                lexicon: "com.atproto.repo.createRecord",
-                body: CreateRecordRequest(repo: repo, collection: "app.bsky.graph.listitem", record: record)
-            )
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    public func removeMember(itemURI: ATURI, repo: String) async {
-        guard let rkey = itemURI.rkey else { return }
-        do {
-            let _: EmptyResponse = try await network.post(
-                lexicon: "com.atproto.repo.deleteRecord",
-                body: DeleteRecordRequest(repo: repo, collection: "app.bsky.graph.listitem", rkey: rkey)
-            )
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
     // MARK: - Starter packs
 
     public func createStarterPack(name: String, description: String?, listURI: ATURI) async {
@@ -451,10 +423,36 @@ public protocol ListDetailStoring: AnyObject, Observable, Sendable {
     var isLoading: Bool { get }
     var error: String? { get }
 
+    /// Typeahead results backing the "Add people" sheet.
+    var searchResults: [ProfileBasic] { get }
+    var isSearching: Bool { get }
+
     func load(listURI: ATURI) async
     func loadMore() async
     func loadFeed() async
     func loadMoreFeed() async
+
+    /// Debounced `app.bsky.actor.searchActorsTypeahead` query for the
+    /// "Add people" sheet. Mirrors RN's `SearchablePeopleList` inside
+    /// `ListAddRemoveUsersDialog`. Empty query clears `searchResults`.
+    func searchMembers(query: String)
+
+    /// Adds `profile` to the loaded list by creating an
+    /// `app.bsky.graph.listitem` record in the viewer's repo (RN's
+    /// `useListMembershipAddMutation`). Optimistically appends the new
+    /// `ListItemView` to `members` using the `createRecord` response URI —
+    /// the AppView indexes the write asynchronously, so re-fetches
+    /// reconcile against this local state the same way #0203 handles list
+    /// creation. Owner-only: no-ops with an error when the viewer does not
+    /// own the list. Returns `true` on success.
+    func addMember(_ profile: ProfileBasic) async -> Bool
+
+    /// Removes the membership record `itemURI` (an
+    /// `app.bsky.graph.listitem` URI from `getList`) via `deleteRecord`
+    /// (RN's `useListMembershipRemoveMutation`). Optimistically removes the
+    /// row, reverting on failure; on success the URI is tombstoned so a
+    /// stale `getList` page cannot resurrect it. Returns `true` on success.
+    func removeMember(itemURI: ATURI) async -> Bool
 
     /// Subscribe to a moderation list as a mute. Mirrors RN's
     /// `useListMuteMutation({mute: true})` path on
@@ -486,9 +484,27 @@ public final class ListDetailStore: ListDetailStoring {
     public private(set) var isLoading = false
     public private(set) var error: String?
 
+    public private(set) var searchResults: [ProfileBasic] = []
+    public private(set) var isSearching = false
+
     private var listURI: ATURI?
     private var membersCursor: Cursor?
     private var feedCursor: Cursor?
+
+    /// Optimistically-added members whose `listitem` records the AppView has
+    /// not indexed into `getList` responses yet (same race as #0203's list
+    /// creation). Reconciliation keeps them alive across stale re-fetches
+    /// and drops the local copy once the indexed server copy arrives
+    /// (de-duped by record URI / subject DID — server copy wins).
+    private var pendingAddedItems: [ListItemView] = []
+
+    /// `listitem` URIs removed in this session. A stale `getList` response
+    /// can still contain the record after the PDS delete succeeded;
+    /// reconciliation filters these so removed members don't resurrect.
+    private var removedItemURIs: Set<ATURI> = []
+
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
+    @ObservationIgnored private var searchID: UInt64 = 0
 
     private let network: any NetworkClient
     /// Optional — required for owner-only mutations (edit / delete). The
@@ -514,7 +530,7 @@ public final class ListDetailStore: ListDetailStoring {
                 params: ["list": listURI.rawValue, "limit": "50"]
             )
             list = resp.list
-            members = resp.items
+            members = reconcileMembers(resp.items)
             membersCursor = resp.cursor
         } catch {
             self.error = error.localizedDescription
@@ -528,11 +544,36 @@ public final class ListDetailStore: ListDetailStoring {
                 lexicon: "app.bsky.graph.getList",
                 params: ["list": listURI.rawValue, "limit": "50", "cursor": cursor]
             )
-            members.append(contentsOf: resp.items)
+            // De-dupe against rows already shown (an optimistic add may
+            // surface on a later page) and drop tombstoned removals.
+            let existing = Set(members.map(\.uri))
+            let page = resp.items.filter {
+                !removedItemURIs.contains($0.uri) && !existing.contains($0.uri)
+            }
+            let pageURIs = Set(resp.items.map(\.uri))
+            pendingAddedItems.removeAll { pageURIs.contains($0.uri) }
+            members.append(contentsOf: page)
             membersCursor = resp.cursor
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    /// Merges a fresh first-page `getList` response with the session's
+    /// optimistic member state (#0203 pattern): tombstoned (locally removed)
+    /// items are filtered out, and optimistic adds the AppView hasn't indexed
+    /// yet are kept at the bottom (`getList` returns items in creation
+    /// order). Once the indexed server copy of an optimistic add arrives —
+    /// matched by record URI or subject DID — it wins and local tracking
+    /// stops.
+    private func reconcileMembers(_ serverItems: [ListItemView]) -> [ListItemView] {
+        let kept = serverItems.filter { !removedItemURIs.contains($0.uri) }
+        let serverURIs = Set(kept.map(\.uri))
+        let serverDIDs = Set(kept.map(\.subject.did))
+        pendingAddedItems.removeAll {
+            serverURIs.contains($0.uri) || serverDIDs.contains($0.subject.did)
+        }
+        return kept + pendingAddedItems
     }
 
     public func loadFeed() async {
@@ -561,6 +602,175 @@ public final class ListDetailStore: ListDetailStoring {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    // MARK: - Member management (#0204)
+
+    /// Debounced actor typeahead (200 ms) for the "Add people" sheet —
+    /// `app.bsky.actor.searchActorsTypeahead`, the same lexicon RN's
+    /// `SearchablePeopleList` queries. Empty query clears results.
+    public func searchMembers(query: String) {
+        searchTask?.cancel()
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            searchResults = []
+            isSearching = false
+            return
+        }
+        searchID &+= 1
+        let id = searchID
+        let net = network
+        searchTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.isSearching = true
+            defer {
+                if id == self.searchID { self.isSearching = false }
+            }
+            do {
+                let resp: SearchActorsTypeaheadResponse = try await net.get(
+                    lexicon: "app.bsky.actor.searchActorsTypeahead",
+                    params: ["q": trimmed, "limit": "12"]
+                )
+                guard id == self.searchID else { return }
+                self.searchResults = resp.actors
+            } catch {
+                logger.error("searchMembers failed: \(error.localizedDescription, privacy: .public)")
+                guard id == self.searchID else { return }
+                self.searchResults = []
+            }
+        }
+    }
+
+    /// Resolves the signed-in viewer DID for member mutations, surfacing
+    /// failures on `error`. `nil` means "cannot mutate" (logged out, no
+    /// account store, or keychain failure).
+    private func mutationViewerDID() async -> DID? {
+        guard let accountStore else {
+            self.error = "Not signed in"
+            return nil
+        }
+        do {
+            guard let did = try await accountStore.loadCurrentDID() else {
+                self.error = "Not signed in"
+                return nil
+            }
+            return did
+        } catch {
+            self.error = error.localizedDescription
+            return nil
+        }
+    }
+
+    public func addMember(_ profile: ProfileBasic) async -> Bool {
+        guard let listURI else { return false }
+        guard let viewerDID = await mutationViewerDID() else { return false }
+        // `listitem` records must live in the same repo as the list they
+        // reference — the AppView ignores them otherwise — so only the list
+        // owner can add members. RN gates the dialog on ownership; the store
+        // enforces it too so a non-owned list exposes no mutation.
+        guard listURI.repo == viewerDID.rawValue else {
+            self.error = "Only the list owner can add members"
+            return false
+        }
+        // Already a member — nothing to write (RN's dialog shows Remove).
+        guard !members.contains(where: { $0.subject.did == profile.did }) else {
+            return true
+        }
+        do {
+            let record = ListItemRecord(list: listURI, subject: profile.did)
+            let resp: CreateRecordResponse = try await network.post(
+                lexicon: "com.atproto.repo.createRecord",
+                body: CreateRecordRequest(
+                    repo: viewerDID.rawValue,
+                    collection: "app.bsky.graph.listitem",
+                    record: record
+                )
+            )
+            // Optimistic insert (#0203 pattern): the AppView indexes the new
+            // record asynchronously, so an immediate `getList` re-fetch would
+            // miss it. Surface a locally-built ListItemView right away and
+            // reconcile (de-dupe by URI) when the indexed copy arrives.
+            let item = ListItemView(
+                uri: resp.uri,
+                subject: ProfileView(
+                    did: profile.did,
+                    handle: profile.handle,
+                    displayName: profile.displayName,
+                    description: nil,
+                    avatar: profile.avatar,
+                    labels: profile.labels,
+                    indexedAt: nil,
+                    viewer: nil
+                )
+            )
+            removedItemURIs.remove(resp.uri)
+            pendingAddedItems.append(item)
+            members.append(item)
+            adjustItemCount(by: 1)
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
+    }
+
+    public func removeMember(itemURI: ATURI) async -> Bool {
+        guard let rkey = itemURI.rkey else { return false }
+        guard let viewerDID = await mutationViewerDID() else { return false }
+        // Membership records live in the owner's repo; refuse mutations on
+        // records the viewer does not own.
+        guard itemURI.repo == viewerDID.rawValue else {
+            self.error = "Only the list owner can remove members"
+            return false
+        }
+        guard let index = members.firstIndex(where: { $0.uri == itemURI }) else {
+            return false
+        }
+        // Optimistic removal, restored on failure (project pattern —
+        // mirrors ListsStore.deleteList).
+        let removed = members.remove(at: index)
+        adjustItemCount(by: -1)
+        do {
+            let _: EmptyResponse = try await network.post(
+                lexicon: "com.atproto.repo.deleteRecord",
+                body: DeleteRecordRequest(
+                    repo: viewerDID.rawValue,
+                    collection: "app.bsky.graph.listitem",
+                    rkey: rkey
+                )
+            )
+            // Tombstone so a stale `getList` page (AppView not yet caught up
+            // with the delete) can't resurrect the row.
+            removedItemURIs.insert(itemURI)
+            pendingAddedItems.removeAll { $0.uri == itemURI }
+            return true
+        } catch {
+            members.insert(removed, at: min(index, members.count))
+            adjustItemCount(by: 1)
+            self.error = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Rebuilds `list` with `listItemCount` shifted by `delta` so the header
+    /// member count tracks optimistic add/remove without a refetch (RN
+    /// adjusts its cached `listItemCount` the same way).
+    private func adjustItemCount(by delta: Int) {
+        guard let current = list else { return }
+        list = ListView(
+            uri: current.uri,
+            cid: current.cid,
+            creator: current.creator,
+            name: current.name,
+            purpose: current.purpose,
+            description: current.description,
+            avatar: current.avatar,
+            labels: current.labels,
+            indexedAt: current.indexedAt,
+            listItemCount: max(0, (current.listItemCount ?? 0) + delta),
+            viewer: current.viewer
+        )
     }
 
     // MARK: - Mute / unmute (moderation list subscribe)
