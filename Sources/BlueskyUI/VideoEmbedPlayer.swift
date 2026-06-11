@@ -88,10 +88,9 @@ public struct VideoEmbedPlayer: View {
     private var inlineSurface: some View {
         if autoplayVideos, let player {
             // Inline auto-play branch — mirrors RN's `VideoEmbedInnerNative`.
-            // `disabled(true)` suppresses the system playback controls so the
-            // tap gesture above can win and open the fullscreen sheet.
-            VideoPlayer(player: player)
-                .disabled(true)
+            // No controls: the surface doesn't hit-test, so the tap gesture
+            // above wins and opens the fullscreen sheet.
+            BlueskyVideoView(player: player)
                 .aspectRatio(aspectRatio, contentMode: .fit)
         } else {
             // Static-thumbnail branch — autoplay off. Matches the previous
@@ -182,7 +181,7 @@ public struct VideoEmbedPlayer: View {
 // MARK: - Fullscreen sheet
 
 /// Fullscreen video player presented from a feed/thread embed tap. Uses
-/// `VideoPlayer` *with* system controls (scrubber, time, mute, AirPlay,
+/// `BlueskyVideoView` *with* system controls (scrubber, time, mute, AirPlay,
 /// picture-in-picture). Each presentation creates a fresh `AVPlayer` so
 /// dismissing the sheet tears playback down cleanly.
 private struct FullscreenVideoSheet: View {
@@ -195,7 +194,7 @@ private struct FullscreenVideoSheet: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let player {
-                VideoPlayer(player: player)
+                BlueskyVideoView(player: player, showsControls: true)
                     .ignoresSafeArea()
             } else {
                 ProgressView().tint(.white)

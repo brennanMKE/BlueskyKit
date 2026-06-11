@@ -164,8 +164,9 @@ private struct VideoPostPage: View {
             Color.black.ignoresSafeArea()
 
             if let player {
-                VideoPlayer(player: player)
-                    .disabled(true) // suppress system controls so our overlay tap wins
+                // No controls: the surface doesn't hit-test, so the
+                // tap-to-pause layer below wins.
+                BlueskyVideoView(player: player)
                     .ignoresSafeArea()
             }
 
