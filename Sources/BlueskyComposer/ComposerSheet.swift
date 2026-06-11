@@ -955,9 +955,17 @@ public struct ComposerSheet: View {
                     .padding(.trailing, 12)
 
                 VStack(alignment: .leading, spacing: 4) {
+                    // The bindings must be total: the post-submit reset clears
+                    // `additionalPosts` while this editor is still mounted, and
+                    // SwiftUI re-evaluates the binding with the stale `ForEach`
+                    // index during the dismissal render pass (#0207). An
+                    // unguarded subscript traps with "Index out of range".
                     TextEditor(text: Binding(
-                        get: { viewModel.additionalPosts[index] },
-                        set: { viewModel.additionalPosts[index] = $0 }
+                        get: { threadPostText(at: index) },
+                        set: { newValue in
+                            guard viewModel.additionalPosts.indices.contains(index) else { return }
+                            viewModel.additionalPosts[index] = newValue
+                        }
                     ))
                     .font(.body)
                     .frame(minHeight: 80)
@@ -965,7 +973,7 @@ public struct ComposerSheet: View {
 
                     HStack {
                         CharProgressRing(
-                            count: viewModel.additionalPosts[index].unicodeScalars.count,
+                            count: threadPostText(at: index).unicodeScalars.count,
                             max: 300,
                             size: 20
                         )
@@ -984,6 +992,15 @@ public struct ComposerSheet: View {
 
             Divider().padding(.top, 4)
         }
+    }
+
+    /// Index-safe read of a thread-post row's text. Returns `""` when the
+    /// index is out of range — e.g. after the post-submit reset empties
+    /// `additionalPosts` while a row from the previous render is still
+    /// mounted (#0207).
+    private func threadPostText(at index: Int) -> String {
+        guard viewModel.additionalPosts.indices.contains(index) else { return "" }
+        return viewModel.additionalPosts[index]
     }
 
     // MARK: - Add thread post button
