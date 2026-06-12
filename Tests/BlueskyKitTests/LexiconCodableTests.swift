@@ -798,3 +798,90 @@ struct BlobRefCodableTests {
         #expect(blob.size == 0)
     }
 }
+
+// MARK: - DID document (session responses)
+
+@Suite("DIDDocument PDS endpoint")
+struct DIDDocumentTests {
+    @Test("GetSessionResponse decodes didDoc and extracts the PDS endpoint")
+    func decodeGetSessionDidDoc() throws {
+        let json = """
+        {
+            "did": "did:plc:abc",
+            "handle": "alice.bsky.social",
+            "active": true,
+            "didDoc": {
+                "@context": ["https://www.w3.org/ns/did/v1"],
+                "id": "did:plc:abc",
+                "service": [
+                    {
+                        "id": "#atproto_pds",
+                        "type": "AtprotoPersonalDataServer",
+                        "serviceEndpoint": "https://jellybaby.us-east.host.bsky.network"
+                    }
+                ]
+            }
+        }
+        """.data(using: .utf8)!
+        let session = try iso8601.decode(GetSessionResponse.self, from: json)
+        #expect(session.didDoc?.pdsEndpoint == URL(string: "https://jellybaby.us-east.host.bsky.network"))
+    }
+
+    @Test("pdsEndpoint matches a fully qualified service id")
+    func fullyQualifiedServiceID() {
+        let doc = DIDDocument(service: [
+            .init(
+                id: "did:plc:abc#atproto_pds",
+                type: "AtprotoPersonalDataServer",
+                serviceEndpoint: "https://pds.example.com"
+            )
+        ])
+        #expect(doc.pdsEndpoint == URL(string: "https://pds.example.com"))
+    }
+
+    @Test("pdsEndpoint ignores non-PDS services and rejects invalid URLs")
+    func rejectsNonPDSAndInvalid() {
+        let labelerOnly = DIDDocument(service: [
+            .init(id: "#atproto_labeler", type: "AtprotoLabeler", serviceEndpoint: "https://labeler.example.com")
+        ])
+        #expect(labelerOnly.pdsEndpoint == nil)
+
+        let badURL = DIDDocument(service: [
+            .init(id: "#atproto_pds", type: "AtprotoPersonalDataServer", serviceEndpoint: "not a url")
+        ])
+        #expect(badURL.pdsEndpoint == nil)
+
+        #expect(DIDDocument(service: nil).pdsEndpoint == nil)
+    }
+
+    @Test("malformed service entries decode leniently instead of failing the response")
+    func lenientServiceDecoding() throws {
+        let json = """
+        {
+            "did": "did:plc:abc",
+            "handle": "alice.bsky.social",
+            "didDoc": {
+                "service": [
+                    { "id": 42, "type": ["x"], "serviceEndpoint": { "uri": "https://weird.example" } },
+                    {
+                        "id": "#atproto_pds",
+                        "type": "AtprotoPersonalDataServer",
+                        "serviceEndpoint": "https://pds.example.com"
+                    }
+                ]
+            }
+        }
+        """.data(using: .utf8)!
+        let session = try iso8601.decode(GetSessionResponse.self, from: json)
+        #expect(session.didDoc?.pdsEndpoint == URL(string: "https://pds.example.com"))
+    }
+
+    @Test("session responses without a didDoc still decode")
+    func missingDidDoc() throws {
+        let json = """
+        { "did": "did:plc:abc", "handle": "alice.bsky.social" }
+        """.data(using: .utf8)!
+        let session = try iso8601.decode(GetSessionResponse.self, from: json)
+        #expect(session.didDoc == nil)
+    }
+}

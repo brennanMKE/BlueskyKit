@@ -109,7 +109,9 @@ public final class SessionManager: SessionManaging {
             handle: Handle(rawValue: response.handle),
             displayName: nil,
             avatarURL: nil,
-            serviceEndpoint: target,
+            // See login(): prefer the DID document's PDS host over the
+            // entryway URL (#0186).
+            serviceEndpoint: response.didDoc?.pdsEndpoint ?? target,
             email: email ?? request.email,
             emailConfirmed: false,
             status: nil
@@ -219,7 +221,12 @@ public final class SessionManager: SessionManaging {
             handle: Handle(rawValue: response.handle),
             displayName: nil,
             avatarURL: nil,
-            serviceEndpoint: serviceURL,
+            // Prefer the PDS host from the session's DID document over the
+            // entryway URL the user signed in with (#0186). The entryway does
+            // not forward `atproto-proxy` requests (e.g. `chat.bsky.*`), so
+            // authenticated XRPC must target the actual PDS — RN does the same
+            // via `agent.sessionManager.pdsUrl`.
+            serviceEndpoint: response.didDoc?.pdsEndpoint ?? serviceURL,
             email: response.email,
             emailConfirmed: response.emailConfirmed,
             status: SessionManager.normalizeStatus(active: response.active, status: response.status)
@@ -239,9 +246,12 @@ public final class SessionManager: SessionManaging {
 
         if jwtIsExpired(stored.accessJwt) {
             let refreshed = try await callRefreshSession(stored: stored)
-            let refreshedAccount = stored.account.with(
+            var refreshedAccount = stored.account.with(
                 status: Self.normalizeStatus(active: refreshed.active, status: refreshed.status)
             )
+            if let pds = refreshed.didDoc?.pdsEndpoint {
+                refreshedAccount = refreshedAccount.with(serviceEndpoint: pds)
+            }
             stored = StoredAccount(
                 account: refreshedAccount,
                 accessJwt: refreshed.accessJwt,
@@ -259,9 +269,15 @@ public final class SessionManager: SessionManaging {
         // user is signed in either way; we'll re-check on the next launch.
         do {
             let info = try await callGetSession(stored: stored)
-            let merged = stored.account.with(
+            var merged = stored.account.with(
                 status: Self.normalizeStatus(active: info.active, status: info.status)
             )
+            // Adopt the PDS host from the DID document (#0186). This also
+            // heals accounts persisted before the fix, whose stored endpoint
+            // is the entryway URL.
+            if let pds = info.didDoc?.pdsEndpoint {
+                merged = merged.with(serviceEndpoint: pds)
+            }
             let updatedStored = StoredAccount(
                 account: merged,
                 accessJwt: stored.accessJwt,
@@ -289,9 +305,12 @@ public final class SessionManager: SessionManaging {
             throw ATError.unknown("No active session to refresh")
         }
         let info = try await callGetSession(stored: stored)
-        let merged = stored.account.with(
+        var merged = stored.account.with(
             status: Self.normalizeStatus(active: info.active, status: info.status)
         )
+        if let pds = info.didDoc?.pdsEndpoint {
+            merged = merged.with(serviceEndpoint: pds)
+        }
         let updatedStored = StoredAccount(
             account: merged,
             accessJwt: stored.accessJwt,
@@ -567,6 +586,7 @@ private struct CreateSessionResponse: Decodable, Sendable {
     let refreshJwt: String
     let active: Bool?
     let status: AccountStatus?
+    let didDoc: DIDDocument?
 }
 
 private struct RefreshSessionResponse: Decodable, Sendable {
@@ -576,6 +596,7 @@ private struct RefreshSessionResponse: Decodable, Sendable {
     let refreshJwt: String
     let active: Bool?
     let status: AccountStatus?
+    let didDoc: DIDDocument?
 }
 
 private struct XRPCErrorEnvelope: Decodable, Sendable {

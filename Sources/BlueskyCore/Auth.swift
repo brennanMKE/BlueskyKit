@@ -82,6 +82,67 @@ public struct DescribeServerResponse: Decodable, Sendable {
     }
 }
 
+// MARK: - DID document (session responses)
+
+/// Minimal DID document as embedded in `createSession` / `refreshSession` /
+/// `getSession` / `createAccount` responses — just enough to locate the
+/// account's PDS service endpoint.
+///
+/// The entryway (`bsky.social`) does not reliably forward `atproto-proxy`
+/// requests to services like the chat proxy, so authenticated XRPC must be
+/// sent to the account's actual PDS host. Mirrors RN, where the agent calls
+/// `getPdsEndpoint(didDoc)` (`@atproto/common-web`) and routes all session
+/// requests to `sessionManager.pdsUrl`.
+///
+/// Decoding is deliberately lossy: unknown shapes inside `service` entries
+/// (e.g. an object-valued `serviceEndpoint`) decode to `nil` fields rather
+/// than failing the whole session response.
+public struct DIDDocument: Decodable, Sendable {
+    public let service: [Service]?
+
+    public struct Service: Decodable, Sendable {
+        public let id: String?
+        public let type: String?
+        public let serviceEndpoint: String?
+
+        private enum CodingKeys: String, CodingKey { case id, type, serviceEndpoint }
+
+        public init(id: String?, type: String?, serviceEndpoint: String?) {
+            self.id = id
+            self.type = type
+            self.serviceEndpoint = serviceEndpoint
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let c = try? decoder.container(keyedBy: CodingKeys.self)
+            id = try? c?.decode(String.self, forKey: .id)
+            type = try? c?.decode(String.self, forKey: .type)
+            serviceEndpoint = try? c?.decode(String.self, forKey: .serviceEndpoint)
+        }
+    }
+
+    public init(service: [Service]?) {
+        self.service = service
+    }
+
+    /// URL of the `#atproto_pds` service entry, or `nil` if absent/malformed.
+    /// Matches RN's `getPdsEndpoint` — the id may be relative (`#atproto_pds`)
+    /// or fully qualified (`did:plc:…#atproto_pds`), and the endpoint must be
+    /// a valid http(s) URL.
+    public var pdsEndpoint: URL? {
+        guard let entry = service?.first(where: {
+            ($0.id == "#atproto_pds" || $0.id?.hasSuffix("#atproto_pds") == true)
+                && $0.type == "AtprotoPersonalDataServer"
+        }),
+            let raw = entry.serviceEndpoint,
+            let url = URL(string: raw),
+            url.scheme == "https" || url.scheme == "http",
+            url.host() != nil
+        else { return nil }
+        return url
+    }
+}
+
 // MARK: - com.atproto.server.createAccount
 
 public struct CreateAccountRequest: Encodable, Sendable {
@@ -114,6 +175,7 @@ public struct CreateAccountResponse: Decodable, Sendable {
     public let handle: String
     public let accessJwt: String
     public let refreshJwt: String
+    public let didDoc: DIDDocument?
 }
 
 // MARK: - com.atproto.server.getSession
@@ -132,6 +194,7 @@ public struct GetSessionResponse: Decodable, Sendable {
     public let emailConfirmed: Bool?
     public let active: Bool?
     public let status: AccountStatus?
+    public let didDoc: DIDDocument?
 
     public init(
         did: String,
@@ -139,7 +202,8 @@ public struct GetSessionResponse: Decodable, Sendable {
         email: String?,
         emailConfirmed: Bool?,
         active: Bool?,
-        status: AccountStatus?
+        status: AccountStatus?,
+        didDoc: DIDDocument? = nil
     ) {
         self.did = did
         self.handle = handle
@@ -147,6 +211,7 @@ public struct GetSessionResponse: Decodable, Sendable {
         self.emailConfirmed = emailConfirmed
         self.active = active
         self.status = status
+        self.didDoc = didDoc
     }
 }
 

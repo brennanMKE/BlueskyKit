@@ -79,6 +79,22 @@ public struct Account: Codable, Hashable, Identifiable, Sendable {
             status: newStatus
         )
     }
+
+    /// Returns a copy with `serviceEndpoint` replaced. Used by `SessionManager`
+    /// when a session response's DID document reports the account's actual PDS
+    /// host (which can differ from the entryway URL used to sign in).
+    public func with(serviceEndpoint newEndpoint: URL) -> Account {
+        Account(
+            did: did,
+            handle: handle,
+            displayName: displayName,
+            avatarURL: avatarURL,
+            serviceEndpoint: newEndpoint,
+            email: email,
+            emailConfirmed: emailConfirmed,
+            status: status
+        )
+    }
 }
 
 /// An account bundled with its JWTs for Keychain persistence.
